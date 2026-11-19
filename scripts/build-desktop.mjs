@@ -22,7 +22,5 @@ execFileSync(
   {
     cwd: root,
     stdio: "inherit",
-    // The AppImage bundler must preserve the bytes audited by the OOFEM manifest.
-    env: { ...process.env, NO_STRIP: "1" },
   },
 );

@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-packages-${{ github.ref }}
+  group: desktop-packages-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -40,9 +40,13 @@ jobs:
         with:
           workspaces: src-tauri -> target
           key: desktop-packages
-      - uses: actions/cache@v4
+          cache-on-failure: true
+      - uses: actions/cache/restore@v4
+        id: oofem-cache
         with:
-          path: .oofem-dist/build
+          path: |
+            .oofem-dist/source
+            .oofem-dist/build
           key: oofem-${{ matrix.os }}-${{ hashFiles('crates/solver-runner/oofem.json', 'scripts/stage-oofem.mjs') }}
       - name: Linux package dependencies
         if: runner.os == 'Linux'
@@ -50,15 +54,24 @@ jobs:
           sudo timeout 180s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
           sudo timeout 240s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev build-essential libssl-dev ninja-build patchelf libfuse2
       - run: npm ci
-      - name: Build desktop packages with OOFEM
+      - name: Build pinned OOFEM
         env:
           KSTRUCT_OOFEM_WINDOWS_GENERATOR: "Visual Studio 18 2026"
-        run: npm run desktop:build
+        run: npm run oofem:stage
+      - uses: actions/cache/save@v4
+        if: steps.oofem-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .oofem-dist/source
+            .oofem-dist/build
+          key: ${{ steps.oofem-cache.outputs.cache-primary-key }}
+      - name: Build desktop packages with OOFEM
+        run: npm run tauri -- build --config src-tauri/tauri.distribution.conf.json -- --locked
       - name: Check numerical results with the packaged engine
         shell: pwsh
         run: |
           $name = if ($IsWindows) { 'oofem.exe' } else { 'oofem' }
-          $env:OOFEM_BIN = (Resolve-Path "src-tauri/resources/oofem/$name").Path
+          $env:OOFEM_BIN = (Resolve-Path ".oofem-dist/build/bin/$name").Path
           npm test
       - name: Install and test Linux packages without network
         if: runner.os == 'Linux'

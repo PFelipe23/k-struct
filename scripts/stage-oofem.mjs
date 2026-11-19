@@ -14,6 +14,7 @@ import {
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const pin = JSON.parse(
@@ -126,10 +127,17 @@ function stage() {
   mkdirSync(resourceParent, { recursive: true });
   const staged = mkdtempSync(join(resourceParent, "oofem-stage-"));
   try {
-    const binary = join(staged, executable);
-    copyFileSync(join(bin, executable), binary);
+    const binary = join(bin, executable);
+    const payload = windows ? executable : "oofem.gz";
+    const engineResource = join(staged, payload);
+    if (windows) copyFileSync(binary, engineResource);
     if (!windows) {
-      chmodSync(binary, 0o755);
+      // linuxdeploy rewrites RPATH entries in ELF resources. Keep the solver
+      // executable inside a gzip payload so both Linux bundles preserve its SHA.
+      writeFileSync(
+        engineResource,
+        gzipSync(readFileSync(binary), { level: 9 }),
+      );
       chmodSync(staged, 0o755);
     }
     const sourceArchive = `oofem-${pin.version}-source.zip`;
@@ -157,6 +165,8 @@ function stage() {
       platform: process.platform,
       arch: process.arch,
       executable,
+      payload,
+      payloadSha256: sha256(engineResource),
       sha256: sha256(binary),
       sourceArchive,
       sourceSha256: sha256(archive),

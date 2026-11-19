@@ -30,7 +30,10 @@ pub struct EngineInfo {
 pub struct Engine {
     pub path: PathBuf,
     pub info: EngineInfo,
+    pub(crate) _temporary: Option<tempfile::TempDir>,
 }
+
+const MAX_BINARY: u64 = 64 * 1024 * 1024;
 
 #[derive(Deserialize)]
 struct Pin {
@@ -47,6 +50,8 @@ struct Manifest {
     arch: String,
     executable: String,
     sha256: String,
+    #[cfg(target_os = "linux")]
+    payload: String,
 }
 
 fn executable_name() -> &'static str {
@@ -76,6 +81,7 @@ fn absolute_engine(path: &Path, origin: EngineOrigin) -> Result<Engine, String> 
     }
     Ok(Engine {
         path: path.to_path_buf(),
+        _temporary: None,
         info: EngineInfo {
             origin,
             path: path.display().to_string(),
@@ -118,10 +124,13 @@ fn bundled_engine(dir: &Path) -> Result<Engine, String> {
     {
         return Err(repair("versão ou plataforma inesperada"));
     }
+    #[cfg(target_os = "linux")]
+    let mut engine = archived_engine(dir, &manifest.payload).map_err(|e| repair(&e))?;
+    #[cfg(not(target_os = "linux"))]
     let mut engine = absolute_engine(&dir.join(executable_name()), EngineOrigin::Bundled)
         .map_err(|_| repair("executável ausente"))?;
     let mut file = File::open(&engine.path).map_err(|_| repair("executável ilegível"))?;
-    if file.metadata().map_or(true, |m| m.len() > 64 * 1024 * 1024) {
+    if file.metadata().map_or(true, |m| m.len() > MAX_BINARY) {
         return Err(repair("tamanho inesperado do executável"));
     }
     let mut hash = Sha256::new();
@@ -134,6 +143,40 @@ fn bundled_engine(dir: &Path) -> Result<Engine, String> {
     engine.info.commit = Some(manifest.commit);
     engine.info.sha256 = Some(checksum);
     Ok(engine)
+}
+
+#[cfg(target_os = "linux")]
+fn archived_engine(dir: &Path, payload: &str) -> Result<Engine, String> {
+    use flate2::read::GzDecoder;
+    use std::os::unix::fs::PermissionsExt;
+
+    if payload != "oofem.gz" {
+        return Err("arquivo de motor inesperado".into());
+    }
+    let resource = dir.join(payload);
+    let extract = || -> io::Result<Engine> {
+        let archive = File::open(&resource)?;
+        let temporary = tempfile::Builder::new()
+            .prefix("kstruct-oofem-")
+            .tempdir()?;
+        let binary = temporary.path().join(executable_name());
+        let mut file = File::create(&binary)?;
+        let size = io::copy(&mut GzDecoder::new(archive).take(MAX_BINARY + 1), &mut file)?;
+        if size == 0 || size > MAX_BINARY {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tamanho do motor inválido",
+            ));
+        }
+        file.set_permissions(fs::Permissions::from_mode(0o700))?;
+        drop(file);
+        let mut engine =
+            absolute_engine(&binary, EngineOrigin::Bundled).map_err(io::Error::other)?;
+        engine.info.path = resource.display().to_string();
+        engine._temporary = Some(temporary);
+        Ok(engine)
+    };
+    extract().map_err(|e| format!("falha ao preparar o motor local: {e}"))
 }
 
 pub fn resolve_engine(

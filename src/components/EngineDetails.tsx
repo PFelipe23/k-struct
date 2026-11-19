@@ -11,7 +11,7 @@ export default function EngineDetails({ engine }: { engine: EngineInfo }) {
           <dd>OOFEM {engine.version}</dd>
         </>
       )}
-      <dt>Executável</dt>
+      <dt>Arquivo do motor</dt>
       <dd>
         <code>{engine.path}</code>
       </dd>

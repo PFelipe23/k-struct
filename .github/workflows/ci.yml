@@ -69,7 +69,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: .oofem-dist/build
+          path: |
+            .oofem-dist/source
+            .oofem-dist/build
           key: oofem-ubuntu-24.04-${{ hashFiles('crates/solver-runner/oofem.json', 'scripts/stage-oofem.mjs') }}
       - uses: actions/setup-node@v4
         with:
@@ -78,7 +80,10 @@ jobs:
       - run: npm ci
       - run: npm run oofem:stage
       - name: Analytic benchmarks with real OOFEM
-        run: OOFEM_BIN="$GITHUB_WORKSPACE/src-tauri/resources/oofem/oofem" npm test
+        run: OOFEM_BIN="$GITHUB_WORKSPACE/.oofem-dist/build/bin/oofem" npm test
       - uses: dtolnay/rust-toolchain@stable
       - name: Native process integration with real OOFEM
-        run: OOFEM_BIN="$GITHUB_WORKSPACE/src-tauri/resources/oofem/oofem" cargo test --locked --manifest-path crates/solver-runner/Cargo.toml -- --ignored
+        env:
+          OOFEM_BIN: ${{ github.workspace }}/.oofem-dist/build/bin/oofem
+          KSTRUCT_RESOURCE_DIR: ${{ github.workspace }}/src-tauri/resources
+        run: cargo test --locked --manifest-path crates/solver-runner/Cargo.toml -- --ignored

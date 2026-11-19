@@ -16,6 +16,16 @@ fn diagnoses_real_reference_model() {
 }
 
 #[test]
+#[ignore = "requires KSTRUCT_RESOURCE_DIR pointing to staged resources"]
+fn diagnoses_integrated_engine() {
+    let resource =
+        std::env::var_os("KSTRUCT_RESOURCE_DIR").expect("KSTRUCT_RESOURCE_DIR must be set");
+    let report = diagnose(Path::new(&resource), None, true);
+    assert!(report.ok, "{report:?}");
+    assert_eq!(report.engine.unwrap().origin, EngineOrigin::Bundled);
+}
+
+#[test]
 fn rejects_invalid_path_and_incomplete_bundle() {
     let dir = tempfile::tempdir().unwrap();
     assert!(validate_deck("/tmp/overwrite\nKStruct -").is_err());
@@ -33,6 +43,7 @@ fn cancelled_before_start_has_no_output() {
         BEAM,
         &Engine {
             path: "not-an-executable".into(),
+            _temporary: None,
             info: EngineInfo {
                 origin: EngineOrigin::Custom,
                 path: String::new(),

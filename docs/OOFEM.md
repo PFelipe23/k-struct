@@ -29,7 +29,7 @@ Em um checkout do KStruct com as ferramentas de compilação instaladas, use `np
 
 O pin está em `crates/solver-runner/oofem.json`. O script `scripts/stage-oofem.mjs` registra o gerador, a versão do CMake, as opções de compilação e os hashes em `oofem/manifest.json`. O arquivo `oofem/BUILD.txt` descreve como compilar a partir das fontes incluídas.
 
-A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python. O executável Linux usa o runtime padrão C/C++ do sistema. O executável Windows é compilado com o runtime C/C++ do MSVC incorporado. A biblioteca do OOFEM é compilada dentro do seu executável, invocado em um processo independente por KStruct.
+A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python. No Linux, o pacote preserva o executável original em um arquivo gzip para impedir que o gerador do AppImage o modifique. O KStruct o extrai em um diretório temporário privado, verifica o SHA-256 e usa o runtime padrão C/C++ do sistema. O executável Windows é compilado com o runtime C/C++ do MSVC incorporado. A biblioteca do OOFEM é compilada dentro do seu executável, invocado em um processo independente por KStruct.
 
 ## Contrato de análise
 
