@@ -16,9 +16,13 @@ O destino é uma ferramenta abrangente de análise estrutural. O ponto de partid
 
 Modelo próprio, histórico, persistência, editor por clique no XZ, seleção compartilhada, seções retangulares, vínculos e cargas, entrada OOFEM, parser, ponte Tauri, tabelas, CSV, deformada e diagramas amostrados. Casos analíticos automatizados incluem barras horizontais, verticais e inclinadas.
 
+## Escopo implementado na etapa 02
+
+Empacotamento do OOFEM 3.0 para Windows e Linux, manifesto com hashes, fontes e licença no pacote, diagnóstico com viga de referência, cancelamento e histórico local por execução. O workflow gera instaladores e verifica o autoteste na instalação. O pórtico plano de dois pavimentos foi incorporado aos benchmarks.
+
 ## Próximo incremento
 
-Fechar o ciclo desktop em Windows e Linux com a distribuição exata do OOFEM 3.0. Acrescentar ao conjunto de regressão um pórtico plano de dois pavimentos com referências independentes antes da migração a Beam3d. Documentar quais bibliotecas do solver acompanham cada instalação. Em seguida, avançar para eixos/pavimentos e lançamento espacial.
+Introduzir eixos e pavimentos no modelo, planos de trabalho e lançamento espacial. Usar o pórtico assimétrico de dois pavimentos como referência de aceitação para o fluxo com Beam3d e seis graus de liberdade.
 
 ## Decisões que devem continuar explícitas
 

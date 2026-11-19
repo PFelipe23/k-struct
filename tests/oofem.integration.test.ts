@@ -3,8 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { beamExample, type Project } from "../src/domain/model";
+import { beamExample, createProject, type Project } from "../src/domain/model";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
+import portal from "./fixtures/portal-planar.json";
+import portalExpected from "./fixtures/portal-expected.json";
 
 const executable = process.env.OOFEM_BIN;
 function solve(p: Project) {
@@ -27,6 +29,71 @@ function solve(p: Project) {
 }
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("pórtico plano de dois pavimentos concorda com a solução independente por rigidez direta", () => {
+    const p = createProject();
+    p.materials[0].E = portal.e;
+    p.sections = portal.sections.map(([width, height], i) => ({
+      id: `R${i}`,
+      name: `Seção R${i}`,
+      materialId: p.materials[0].id,
+      width,
+      height,
+    }));
+    p.nodes = portal.nodes.map(([x, z], i) => {
+      const fixed = portal.fixed.includes(i);
+      return {
+        id: `N${i}`,
+        name: `N${i}`,
+        x,
+        y: 0,
+        z,
+        restraints: { ux: fixed, uz: fixed, ry: fixed },
+      };
+    });
+    p.members = portal.members.map(([start, end, section], i) => ({
+      id: `B${i}`,
+      name: `B${i}`,
+      start: `N${start}`,
+      end: `N${end}`,
+      sectionId: `R${section}`,
+    }));
+    p.loadPatterns[0].uniform = portal.uniform.map(([member, qx, qz]) => ({
+      memberId: `B${member}`,
+      qx,
+      qz,
+    }));
+    p.loadPatterns[0].nodal = portal.nodal.map(([node, fx, fz, my]) => ({
+      nodeId: `N${node}`,
+      fx,
+      fz,
+      my,
+    }));
+    const result = solve(p);
+    const nearPrintedForce = (actual: number, expected: number) =>
+      expect(Math.abs(actual - expected)).toBeLessThan(
+        0.1 + Math.abs(expected) * 5e-5,
+      );
+    for (const [i, [fx, fz, my]] of portalExpected.reactions.entries()) {
+      const r = result.reactions.find(
+        (item) => item.nodeId === `N${portal.fixed[i]}`,
+      )!;
+      nearPrintedForce(r.fx, fx);
+      nearPrintedForce(r.fz, fz);
+      nearPrintedForce(r.my, my);
+    }
+    for (const [
+      i,
+      [ux, uz, ry],
+    ] of portalExpected.roofDisplacements.entries()) {
+      const d = result.displacements[`N${i + portal.nodes.length - 2}`];
+      expect(d.ux).toBeCloseTo(ux, 9);
+      expect(d.uz).toBeCloseTo(uz, 9);
+      expect(d.ry).toBeCloseTo(ry, 9);
+    }
+    const roof = result.members[`B${portal.members.length - 1}`];
+    nearPrintedForce(roof[0].m, portalExpected.roofBeamEndMoments[0]);
+    nearPrintedForce(roof.at(-1)!.m, portalExpected.roofBeamEndMoments[1]);
+  });
   it("viga 6 m: reações de 30 kN, momento de 45 kN.m e flecha de 8,4375 mm", () => {
     const r = solve(beamExample());
     expect(r.reactions.find((r) => r.nodeId === "A")!.fz).toBeCloseTo(30000, 1);

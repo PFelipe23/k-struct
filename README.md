@@ -6,7 +6,7 @@ KStruct faz referência à matriz de rigidez **[K]**. A direção do produto é 
 
 ![Interface inicial do KStruct](docs/images/editor.webp)
 
-## Etapa atual — 0.1.0 alpha
+## Etapa atual — 0.2.0 alpha
 
 Primeiro fluxo de trabalho de estática linear **no plano XZ**. A perspectiva 3D mostra o mesmo modelo e compartilha a seleção. A análise espacial será implementada em uma etapa própria.
 
@@ -14,15 +14,17 @@ Primeiro fluxo de trabalho de estática linear **no plano XZ**. A perspectiva 3D
 - Editar coordenadas, apoios UX/UZ/RY, seção retangular, módulo E, Poisson e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Salvar e reabrir `.kstruct.json`, com formato versionado e validação. Desfazer/refazer até 50 edições e recuperar o último rascunho local.
-- Gerar entrada OOFEM, executar o motor nativo pelo Tauri e interpretar a saída.
+- Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Consultar reações, deslocamentos, esforços N/V/M, deformada ampliada, diagramas amostrados, CSV e saída original.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
 
-Não há resultados demonstrativos no botão **Analisar**. Sem um OOFEM instalado, a aplicação explica como configurar o motor. No navegador, o editor e a exportação de entrada funcionam, mas a execução nativa requer o desktop.
+No navegador, use o editor e a exportação de entrada. O botão **Analisar** executa o solver nativo na aplicação desktop.
 
-## Executar
+## Instalar e executar
 
-Node.js 22.12 ou superior.
+Os pacotes de teste para Windows (NSIS) e Linux (.deb e AppImage) estão no workflow de empacotamento. Consulte [os downloads e o procedimento de instalação](docs/DISTRIBUTION.md).
+
+Para desenvolvimento, use Node.js 22.12 ou superior.
 
 ```sh
 npm ci
@@ -41,13 +43,13 @@ Para compilar a aplicação e os pacotes da plataforma atual:
 npm run desktop:build
 ```
 
-O instalador do KStruct ainda não inclui o OOFEM. Instale uma distribuição do [OOFEM 3.0](https://github.com/oofem/oofem/releases/tag/v3.0), preservando suas bibliotecas, e selecione o executável em **Configurar OOFEM**. Também é possível definir `OOFEM_BIN` com o caminho absoluto ou disponibilizar `oofem` no `PATH`. Consulte [Configuração do motor](docs/OOFEM.md).
+A compilação dos pacotes prepara o OOFEM a partir do commit fixado da versão 3.0. No modo de desenvolvimento, configure um executável com `OOFEM_BIN` ou pelo caminho em **Configurar OOFEM**. Consulte [seleção e diagnóstico do motor](docs/OOFEM.md).
 
 ## Primeiro uso
 
 1. Abra **Viga de referência**. Ela contém 6 m de vão, seção 15 × 20 cm, E = 200 GPa e carga de −10 kN/m em Z.
 2. Selecione a barra ou um nó em qualquer vista ou no explorador. As propriedades aparecem à direita.
-3. No desktop, configure o OOFEM e clique **Analisar**. Reações esperadas de 30 kN por apoio, momento de meio de vão 45 kN·m e flecha −8,4375 mm.
+3. No desktop instalado, clique **Analisar**. Reações esperadas de 30 kN por apoio, momento de meio de vão 45 kN·m e flecha −8,4375 mm.
 4. Altere a carga e analise novamente. A edição remove os resultados anteriores.
 5. Para começar do zero, use **Novo projeto**, ative **Barra** (`B`) e marque duas extremidades. Defina apoios e cargas antes de analisar.
 
@@ -62,7 +64,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Os benchmarks numéricos exigem `OOFEM_BIN`. Sem ele, aparecem explicitamente como **skipped**. A CI compila o OOFEM no commit da tag 3.0 e executa esses benchmarks, além de verificar Rust em Windows e Linux.
+Os benchmarks numéricos exigem `OOFEM_BIN`. Sem ele, aparecem explicitamente como **skipped**. A CI executa os benchmarks com o commit da tag 3.0 e verifica os pacotes instalados em Windows e Linux.
 
 ```sh
 OOFEM_BIN=/caminho/absoluto/oofem npm test
@@ -73,6 +75,6 @@ Veja [validação e limites](docs/VALIDATION.md), [arquitetura](docs/ARCHITECTUR
 
 ## Licenças
 
-Código original KStruct sob MIT. O OOFEM é uma dependência externa com licença LGPL-2.1-or-later. Seus fontes e binários não integram este repositório. [Avisos de terceiros](THIRD_PARTY_NOTICES.md).
+Código original KStruct sob MIT. Os pacotes desktop incluem o OOFEM como executável independente, com sua licença LGPL-2.1-or-later, fontes correspondentes e instruções de compilação. [Avisos de terceiros](THIRD_PARTY_NOTICES.md).
 
 Desenvolvimento inicial. Cada ampliação da capacidade de análise deve ser acompanhada por casos de referência e verificações numéricas específicas.

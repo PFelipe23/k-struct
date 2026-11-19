@@ -1,12 +1,12 @@
-# Configuração do OOFEM
+# Motor OOFEM
 
-Esta etapa executa um OOFEM já instalado. O motor não é baixado automaticamente e não acompanha os instaladores iniciais.
+Os pacotes desktop incluem o OOFEM 3.0 x86-64 no commit `214b161ed3acb471f2d0104b004c37fd73bafaa2`. Consulte [distribuição desktop](DISTRIBUTION.md) para instalar ou compilar os pacotes.
 
-1. Obtenha uma distribuição do [OOFEM](https://github.com/oofem/oofem/releases/tag/v3.0) para sua plataforma, ou compile a tag 3.0.
-2. Preserve as bibliotecas distribuídas com o executável. Confirme que `oofem -f analysis.in` funciona no terminal com uma entrada exportada do KStruct.
-3. Abra **Configurar OOFEM** e escolha o executável. O caminho fica nas preferências locais, separado do projeto estrutural.
+## Seleção do executável
 
-No Linux, algumas distribuições precisam do diretório `lib` no ambiente de carregamento. Exemplo para um pacote instalado em `/opt/oofem`:
+O caminho explícito em **Configurar OOFEM** tem prioridade. Se estiver vazio, uma instalação usa o motor integrado, com conferência do manifesto e do SHA-256. Um build de desenvolvimento sem o motor integrado procura o caminho absoluto de `OOFEM_BIN`, depois `oofem` no `PATH`. Projetos estruturais não definem o executável.
+
+No modo de desenvolvimento, use uma distribuição local do [OOFEM 3.0](https://github.com/oofem/oofem/releases/tag/v3.0), preservando as bibliotecas que acompanham o executável. Exemplo para um pacote Linux em `/opt/oofem`:
 
 ```sh
 export OOFEM_BIN=/opt/oofem/bin/oofem
@@ -21,22 +21,21 @@ $env:OOFEM_BIN = 'C:\OOFEM\bin\oofem.exe'
 npm run desktop:dev
 ```
 
-## Compilação de referência
+Em um checkout do KStruct com as ferramentas de compilação instaladas, use `npm run oofem:stage` e `npm run desktop:dev -- --config src-tauri/tauri.distribution.conf.json` para desenvolver com a distribuição integrada.
 
-A tag 3.0 corresponde ao commit `214b161ed3acb471f2d0104b004c37fd73bafaa2`. A CI usa esse commit fixo, com o módulo de mecânica estrutural e o executável habilitados.
+**Testar motor** resolve a viga de referência com o executável selecionado e confere as reações e a flecha. Uma instalação incompleta ou com SHA-256 divergente aponta o motivo no diagnóstico.
 
-```sh
-cmake -S caminho/oofem -B build-oofem -DCMAKE_BUILD_TYPE=Release -DUSE_SHARED_LIB=OFF -DUSE_FM=OFF -DUSE_TM=OFF -DUSE_MPM=OFF -DUSE_PYBIND_BINDINGS=OFF
-cmake --build build-oofem --parallel 4
-```
+## Proveniência
 
-## Limites do adaptador atual
+O pin está em `crates/solver-runner/oofem.json`. O script `scripts/stage-oofem.mjs` registra o gerador, a versão do CMake, as opções de compilação e os hashes em `oofem/manifest.json`. O arquivo `oofem/BUILD.txt` descreve como compilar a partir das fontes incluídas.
 
-- `StaticStructural`, um passo por execução, domínio `2dBeam`.
-- Barras retangulares, elásticas e com ligações rígidas. Sem liberações, offsets, peso próprio automático ou não linearidade.
-- `beamShearCoeff = 1e18` para o limite de Euler–Bernoulli. Não representa uma análise de Timoshenko com cisalhamento físico.
-- Cargas uniformes e nodais, com unidades e transformação explícitas.
-- Um diretório temporário isolado, 60 s de execução e 32 MB por arquivo de saída.
-- O solver deve concluir e satisfazer o contrato de saída. Não se aceitam análises incompletas ou valores não finitos.
+A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python. O executável Linux usa o runtime padrão C/C++ do sistema. O executável Windows é compilado com o runtime C/C++ do MSVC incorporado. A biblioteca do OOFEM é compilada dentro do seu executável, invocado em um processo independente por KStruct.
 
-Um botão de cancelamento e um histórico persistente de execuções fazem parte da etapa de distribuição. Hoje a chamada conclui, falha ou termina no prazo limite.
+## Contrato de análise
+
+- Um passo de `StaticStructural` no domínio `2dBeam`.
+- Barras retangulares elásticas com ligações rígidas e cargas uniformes e nodais. O peso próprio é atribuído como carga.
+- `beamShearCoeff = 1e18` aproxima a hipótese de Euler–Bernoulli.
+- Uma execução ativa por vez, com diretório temporário, prazo de 60 s e limite de 32 MB por arquivo de saída.
+- Cancelar termina o processo e preserva as mensagens disponíveis no histórico. O histórico inclui origem e versão do motor, data, duração, estado e a parte final de stdout e stderr quando o limite do log é atingido.
+- Resultados de uma execução cancelada, incompleta ou de um modelo já alterado ficam fora das vistas e tabelas de resultados.

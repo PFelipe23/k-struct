@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "active": true,
+    "resources": { "resources/oofem/": "oofem/", "../LICENSE": "LICENSE-KStruct.txt" },
+    "linux": {
+      "deb": { "depends": ["libstdc++6", "libgcc-s1"] }
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller", "silent": true },
+      "nsis": { "installMode": "currentUser", "languages": ["PortugueseBR", "English"] }
+    }
+  }
+}

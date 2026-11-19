@@ -39,7 +39,9 @@ As tabelas apresentam estações da malha. Deformadas e diagramas são linhas in
 - Edição gera uma nova versão imutável do projeto e invalida resultados.
 - A resposta de uma análise em andamento só é aceita se o conteúdo do projeto continuar igual.
 - Arquivos não podem configurar executáveis nem introduzir comandos. A seleção do OOFEM fica nas preferências locais.
-- O runner usa argumentos separados, sem shell, um diretório temporário por execução, limite de 60 s e limite de 32 MB por saída. Encerra e aguarda o processo em timeout.
+- O runner usa argumentos separados, sem shell, um diretório temporário por execução, prazo de 60 s e limite de 32 MB por saída. Encerra e aguarda o processo em cancelamentos e ao atingir o prazo.
+- O Tauri reserva a execução antes de habilitar o cancelamento e publica o resultado em um canal IPC. Os registros locais têm escrita atômica e retenção de 30 execuções.
+- Pacotes desktop usam o OOFEM integrado com manifesto e conferência de SHA-256. O caminho explícito nas preferências permite outro executável. A distribuição e seu autoteste estão descritos em [DISTRIBUTION.md](DISTRIBUTION.md).
 - O parser exige término, passo único, deslocamentos e esforços completos, reações dos vínculos e equilíbrio global. Erros não geram resultados parciais.
 - Cruzamentos entre interiores de barras não criam ligação automaticamente. Nós no interior de uma barra bloqueiam a análise e pedem subdivisão explícita. O editor deve evoluir para detecção e divisão guiada de interseções.
 

@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/oofem/oofem",
+  "tag": "v3.0",
+  "version": "3.0",
+  "commit": "214b161ed3acb471f2d0104b004c37fd73bafaa2",
+  "license": "LGPL-2.1-or-later"
+}

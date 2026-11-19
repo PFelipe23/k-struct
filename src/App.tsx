@@ -18,8 +18,8 @@ import {
   Layers3,
   BookOpen,
   GitBranch,
-  Check,
-  X,
+  History,
+  Square,
   PanelLeft,
   PanelRight,
   Columns2,
@@ -41,14 +41,22 @@ import Elevation, { type Display, type Tool } from "./components/Elevation";
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
 import Results from "./components/Results";
-import { exportOofem, type AnalysisResult } from "./solver/oofem";
+import SolverSettings from "./components/SolverSettings";
+import RunHistory from "./components/RunHistory";
+import { version } from "../package.json";
+import {
+  exportOofem,
+  parseOofemOutput,
+  type AnalysisResult,
+} from "./solver/oofem";
 import {
   analyze,
-  chooseSolver,
+  cancelAnalysis,
   desktop,
   exportFile,
   openProject,
   saveProject,
+  type RunLog,
 } from "./solver/desktop";
 
 const initial = () => {
@@ -71,8 +79,16 @@ export default function App() {
     [tool, setTool] = useState<Tool>("select");
   const [pending, setPending] = useState<{ x: number; z: number } | null>(null),
     [display, setDisplay] = useState<Display>("model");
-  const [result, setResult] = useState<AnalysisResult | null>(null),
-    [running, setRunning] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [activeRun, setActiveRun] = useState<{
+    id: string;
+    ready: boolean;
+    cancelling: boolean;
+  } | null>(null);
+  const activeRunId = useRef<string | null>(null);
+  const running = activeRun !== null;
+  const [lastLog, setLastLog] = useState<RunLog | null>(null);
+  const [showRunHistory, setShowRunHistory] = useState(false);
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque os pontos na vista XZ, ou abra a viga de referência.",
   );
@@ -192,7 +208,7 @@ export default function App() {
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (settings || confirmation) return;
+      if (settings || confirmation || showRunHistory) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         (e.target as HTMLElement).blur();
@@ -264,30 +280,67 @@ export default function App() {
     setPending(null);
   };
   const run = async () => {
-    if (running) return;
-    setRunning(true);
+    if (activeRunId.current) return;
+    const id = uid();
+    activeRunId.current = id;
+    setActiveRun({ id, ready: false, cancelling: false });
     setResult(null);
     setDisplay("model");
     const snapshot = serializeProject(p),
       requestedCase = caseId;
     try {
-      const response = await analyze(p, caseId, executable);
+      const { execution, input } = await analyze(
+        p,
+        caseId,
+        executable,
+        id,
+        () => {
+          setActiveRun((active) =>
+            active?.id === id ? { ...active, ready: true } : active,
+          );
+        },
+      );
+      setLastLog(execution.log);
+      const historyNotice = execution.historyError
+        ? `\n${execution.historyError}`
+        : "";
+      if (
+        execution.log.summary.status !== "completed" ||
+        execution.output === null
+      ) {
+        setMessage(`${execution.log.summary.message}${historyNotice}`);
+        return;
+      }
       if (serializeProject(current.current) !== snapshot) {
         setMessage(
-          "O modelo mudou durante a análise. Execute novamente para obter resultados atuais.",
+          `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
         );
         return;
       }
-      setResult(response.result);
+      setResult(parseOofemOutput(execution.output, input));
       setDisplay("m");
       setMessage(
-        `Análise concluída · ${requestedCase}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.\nResultados válidos para o modelo atual. A edição invalida esta análise.`,
+        `Análise concluída · ${requestedCase}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.${historyNotice}`,
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
     } finally {
-      setRunning(false);
+      activeRunId.current = null;
+      setActiveRun(null);
     }
+  };
+  const cancel = async () => {
+    if (!activeRun?.ready || activeRun.cancelling) return;
+    const { id } = activeRun;
+    setActiveRun({ ...activeRun, cancelling: true });
+    try {
+      if (await cancelAnalysis(id)) return;
+    } catch (e) {
+      if (activeRunId.current === id) setMessage(String(e));
+    }
+    setActiveRun((active) =>
+      active?.id === id ? { ...active, cancelling: false } : active,
+    );
   };
   const exportDeck = async () => {
     try {
@@ -363,7 +416,7 @@ export default function App() {
           <span>{dirty ? "Modificado" : "Rascunho local"}</span>
         </div>
         <div className="version">
-          0.1 <span>ALPHA</span>
+          {version} <span>ALPHA</span>
         </div>
         <button
           title="Configurar OOFEM"
@@ -472,6 +525,18 @@ export default function App() {
               </button>
               <small>SOLVER NATIVO</small>
             </div>
+            {desktop() && (
+              <div className="ribbon-group">
+                <button
+                  className="tool-button"
+                  aria-label="Histórico de análises"
+                  onClick={() => setShowRunHistory(true)}
+                >
+                  <History size={21} />
+                  <span>Histórico</span>
+                </button>
+              </div>
+            )}
             <div className="analysis-description">
               <b>Estática linear no plano XZ</b>
               <span>
@@ -539,6 +604,18 @@ export default function App() {
             <Play size={15} fill="currentColor" />
             {running ? "Analisando…" : "Analisar"}
           </button>
+          {activeRun?.ready && (
+            <button
+              className="cancel-analysis"
+              aria-label="Cancelar análise"
+              title="Cancelar análise"
+              disabled={activeRun.cancelling}
+              onClick={() => void cancel()}
+            >
+              <Square size={14} />
+              {activeRun.cancelling ? "Cancelando…" : "Cancelar"}
+            </button>
+          )}
         </div>
       </div>
       <div className="workspace">
@@ -698,6 +775,8 @@ export default function App() {
             result={result}
             message={message}
             running={running}
+            cancelling={activeRun?.cancelling ?? false}
+            openRunHistory={lastLog ? () => setShowRunHistory(true) : undefined}
           />
         </main>
         {right && (
@@ -752,80 +831,23 @@ export default function App() {
         }}
       />
       {settings && (
-        <div className="modal-backdrop">
-          <section
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="solver-title"
-          >
-            <button
-              className="modal-close"
-              aria-label="Fechar configurações"
-              onClick={() => setSettings(false)}
-            >
-              <X />
-            </button>
-            <span className="eyebrow">MOTOR DE ANÁLISE</span>
-            <h2 id="solver-title">Conectar ao OOFEM</h2>
-            <p>
-              O desktop executa o OOFEM instalado no computador. Selecione o
-              executável, ou deixe vazio para usar OOFEM_BIN / PATH.
-            </p>
-            <label className="stack-field">
-              Caminho do executável
-              <input
-                aria-label="Caminho do OOFEM"
-                value={executable}
-                placeholder="/opt/oofem/bin/oofem ou C:\\OOFEM\\oofem.exe"
-                onChange={(e) => setExecutable(e.target.value)}
-              />
-            </label>
-            <div className="modal-actions">
-              <button
-                disabled={!desktop()}
-                onClick={async () => {
-                  try {
-                    const path = await chooseSolver();
-                    if (path) setExecutable(path);
-                  } catch (e) {
-                    setMessage(String(e));
-                  }
-                }}
-              >
-                <FolderOpen size={15} />
-                Selecionar arquivo
-              </button>
-              <button
-                className="primary"
-                onClick={() => {
-                  try {
-                    localStorage.setItem("kstruct.oofem.path", executable);
-                  } catch {
-                    /* Session value remains usable. */
-                  }
-                  setSettings(false);
-                }}
-              >
-                <Check size={15} />
-                Concluir
-              </button>
-            </div>
-            <p className="help">
-              {desktop()
-                ? "A pasta do projeto não precisa conter arquivos do motor."
-                : "No navegador, a modelagem e a exportação ficam disponíveis. A análise nativa requer a aplicação desktop."}
-            </p>
-            <div className="scope-note">
-              <b>Compatibilidade inicial</b>
-              <p>
-                OOFEM 3.0 · plano XZ · barras de Euler–Bernoulli. A distribuição
-                automática do solver e a análise 3D estão previstas nas próximas
-                etapas.
-              </p>
-            </div>
-          </section>
-        </div>
+        <SolverSettings
+          executable={executable}
+          running={running}
+          onClose={() => setSettings(false)}
+          onSave={(path) => {
+            setExecutable(path);
+            try {
+              localStorage.setItem("kstruct.oofem.path", path);
+            } catch {
+              /* Keep the session preference. */
+            }
+            setSettings(false);
+          }}
+        />
+      )}
+      {showRunHistory && (
+        <RunHistory latest={lastLog} onClose={() => setShowRunHistory(false)} />
       )}
       {confirmation && (
         <div className="modal-backdrop">

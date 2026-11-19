@@ -12,3 +12,7 @@ playwright-report/
 crates/solver-runner/target/
 .oofem-src/
 .oofem-build/
+.oofem-dist/
+src-tauri/resources/oofem*/
+dist-installers/
+package-smoke/

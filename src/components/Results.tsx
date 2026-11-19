@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, FileDown, Terminal } from "lucide-react";
+import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import type { Project } from "../domain/model";
 import type { AnalysisResult } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
@@ -9,11 +9,15 @@ export default function Results({
   result,
   message,
   running,
+  cancelling,
+  openRunHistory,
 }: {
   project: Project;
   result: AnalysisResult | null;
   message: string;
   running: boolean;
+  cancelling: boolean;
+  openRunHistory?: () => void;
 }) {
   const [tab, setTab] = useState("log");
   const [exportError, setExportError] = useState("");
@@ -87,6 +91,12 @@ export default function Results({
           ))}
         </div>
         <div className="result-actions">
+          {openRunHistory && tab === "log" && (
+            <button onClick={openRunHistory}>
+              <History size={13} />
+              Registros do OOFEM
+            </button>
+          )}
           {result && (
             <>
               <span>
@@ -136,7 +146,13 @@ export default function Results({
         {tab === "log" ? (
           <div className="message-log">
             <span className={running ? "working" : "log-dot"} />
-            <pre role="status">{running ? "OOFEM em execução…" : message}</pre>
+            <pre role="status">
+              {cancelling
+                ? "Cancelando execução do OOFEM…"
+                : running
+                  ? "OOFEM em execução…"
+                  : message}
+            </pre>
           </div>
         ) : !result ? (
           <div className="no-results">

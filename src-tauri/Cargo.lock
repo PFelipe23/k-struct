@@ -1719,9 +1719,11 @@ dependencies = [
 
 [[package]]
 name = "k-struct"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kstruct-solver-runner",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1740,9 +1742,11 @@ dependencies = [
 
 [[package]]
 name = "kstruct-solver-runner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "tempfile",
 ]
 

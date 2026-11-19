@@ -1,0 +1,94 @@
+name: KStruct desktop packages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package and verify (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: windows-2025
+            platform: windows-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.100.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: desktop-packages
+      - uses: actions/cache@v4
+        with:
+          path: .oofem-dist/build
+          key: oofem-${{ matrix.os }}-${{ hashFiles('crates/solver-runner/oofem.json', 'scripts/stage-oofem.mjs') }}
+      - name: Linux package dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo timeout 180s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo timeout 240s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev build-essential libssl-dev ninja-build patchelf libfuse2
+      - run: npm ci
+      - name: Build desktop packages with OOFEM
+        run: npm run desktop:build
+      - name: Check numerical results with the packaged engine
+        shell: pwsh
+        run: |
+          $name = if ($IsWindows) { 'oofem.exe' } else { 'oofem' }
+          $env:OOFEM_BIN = (Resolve-Path "src-tauri/resources/oofem/$name").Path
+          npm test
+      - name: Install and test Linux packages without network
+        if: runner.os == 'Linux'
+        run: bash scripts/smoke-linux.sh
+      - name: Install and test Windows package with outbound blocking
+        if: runner.os == 'Windows'
+        run: ./scripts/smoke-windows.ps1
+      - name: Collect checksums and distribution files
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File | Where-Object {
+            $_.Extension -in '.deb', '.AppImage' -or $_.Name -like '*-setup.exe'
+          })
+          $expected = if ($IsWindows) { 1 } else { 2 }
+          if ($files.Count -ne $expected) { throw "Unexpected number of installers: $($files.Count)" }
+          $packageDir = New-Item -ItemType Directory -Force dist-installers
+          foreach ($file in $files) { Copy-Item $file $packageDir }
+          Copy-Item src-tauri/resources/oofem/manifest.json "$packageDir/OOFEM-manifest.json"
+          Copy-Item package-smoke/*.json $packageDir
+          Get-ChildItem $packageDir -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content -Encoding ascii "$packageDir/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KStruct-${{ matrix.platform }}
+          path: dist-installers/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: package-diagnostics-${{ matrix.platform }}
+          path: package-smoke/*.json
+          if-no-files-found: ignore
+          retention-days: 7

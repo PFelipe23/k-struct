@@ -2,7 +2,7 @@
 
 O código original do KStruct é MIT, conforme LICENSE.
 
-OOFEM é um projeto separado, mantido por seus autores, sob LGPL-2.1-or-later. O KStruct escreve arquivos de entrada e invoca um executável local escolhido pelo usuário. Nenhum fonte, biblioteca ou binário do OOFEM acompanha esta revisão. Uma futura distribuição integrada deve preservar as licenças, avisos, versões e fontes correspondentes exigidos pela distribuição adotada.
+OOFEM é um projeto separado, mantido por seus autores, sob LGPL-2.1-or-later. O KStruct escreve arquivos de entrada e invoca um executável local escolhido pelo usuário. Cada pacote desktop inclui o executável, o texto da licença, o README do OOFEM, o arquivo ZIP com as fontes exatas e a receita de compilação na pasta `oofem/`. O manifesto registra o commit, as opções de compilação e os hashes.
 
 - OOFEM — https://github.com/oofem/oofem
 - Licença OOFEM — https://github.com/oofem/oofem/blob/v3.0/COPYING.LGPLv2.1
