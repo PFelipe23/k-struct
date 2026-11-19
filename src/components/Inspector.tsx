@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, CircleDot, MoveRight, SlidersHorizontal } from "lucide-react";
 import type { Project, Selection } from "../domain/model";
 
@@ -19,11 +19,16 @@ export function NumberField({
 }) {
   const [draft, setDraft] = useState(String(value)),
     [invalid, setInvalid] = useState(false);
+  const cancelling = useRef(false);
   useEffect(() => {
     setDraft(String(Number(value.toPrecision(10))));
     setInvalid(false);
   }, [value]);
   const commit = () => {
+    if (cancelling.current) {
+      cancelling.current = false;
+      return;
+    }
     const n = Number(draft.trim().replace(",", "."));
     if (
       !draft.trim() ||
@@ -51,6 +56,7 @@ export function NumberField({
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
+              cancelling.current = true;
               setDraft(String(value));
               setInvalid(false);
               e.currentTarget.blur();

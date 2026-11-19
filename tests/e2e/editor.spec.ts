@@ -13,6 +13,9 @@ test("viga de referência: propriedades, undo, salvar e reabrir", async ({
     .getByRole("button", { name: "B1", exact: true })
     .click();
   const load = page.getByLabel("qZ global");
+  await load.fill("-999");
+  await load.press("Escape");
+  await expect(load).toHaveValue("-10");
   await load.fill("-20");
   await load.press("Tab");
   await expect(load).toHaveValue("-20");

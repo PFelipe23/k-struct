@@ -4,7 +4,7 @@
 
 KStruct faz referência à matriz de rigidez **[K]**. A direção do produto é um ambiente completo de lançamento, análise e interpretação de estruturas, com a fluidez de trabalho de ferramentas como SAP2000 e uma identidade própria.
 
-![Dédalo e a coluna grega — KStruct](public/assets/dedalo.webp)
+![Interface inicial do KStruct](docs/images/editor.webp)
 
 ## Etapa atual — 0.1.0 alpha
 
