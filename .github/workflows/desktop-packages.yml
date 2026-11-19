@@ -21,7 +21,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux-x64
-          - os: windows-2025
+          - os: windows-2025-vs2026
             platform: windows-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -51,6 +51,8 @@ jobs:
           sudo timeout 240s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev build-essential libssl-dev ninja-build patchelf libfuse2
       - run: npm ci
       - name: Build desktop packages with OOFEM
+        env:
+          KSTRUCT_OOFEM_WINDOWS_GENERATOR: "Visual Studio 18 2026"
         run: npm run desktop:build
       - name: Check numerical results with the packaged engine
         shell: pwsh

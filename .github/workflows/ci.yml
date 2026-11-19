@@ -67,28 +67,18 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: oofem/oofem
-          ref: 214b161ed3acb471f2d0104b004c37fd73bafaa2
-          path: .oofem-src
       - uses: actions/cache@v4
-        id: oofem-cache
         with:
-          path: .oofem-build
-          key: oofem-3.0-linux-214b161-sm-v1
-      - name: Build OOFEM 3.0
-        if: steps.oofem-cache.outputs.cache-hit != 'true'
-        run: |
-          cmake -S .oofem-src -B .oofem-build -DCMAKE_BUILD_TYPE=Release -DUSE_SHARED_LIB=OFF -DUSE_FM=OFF -DUSE_TM=OFF -DUSE_MPM=OFF -DUSE_PYBIND_BINDINGS=OFF
-          cmake --build .oofem-build --parallel 4
+          path: .oofem-dist/build
+          key: oofem-ubuntu-24.04-${{ hashFiles('crates/solver-runner/oofem.json', 'scripts/stage-oofem.mjs') }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run oofem:stage
       - name: Analytic benchmarks with real OOFEM
-        run: OOFEM_BIN="$GITHUB_WORKSPACE/.oofem-build/oofem" npm test
+        run: OOFEM_BIN="$GITHUB_WORKSPACE/src-tauri/resources/oofem/oofem" npm test
       - uses: dtolnay/rust-toolchain@stable
       - name: Native process integration with real OOFEM
-        run: OOFEM_BIN="$GITHUB_WORKSPACE/.oofem-build/oofem" cargo test --locked --manifest-path crates/solver-runner/Cargo.toml -- --ignored
+        run: OOFEM_BIN="$GITHUB_WORKSPACE/src-tauri/resources/oofem/oofem" cargo test --locked --manifest-path crates/solver-runner/Cargo.toml -- --ignored

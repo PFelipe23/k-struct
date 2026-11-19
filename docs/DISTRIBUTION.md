@@ -20,7 +20,7 @@ O autoteste também pode ser executado sem abrir a janela, com `k-struct --check
 
 ## Compilar
 
-Use Node.js, Git, Rust, CMake e os [pré-requisitos do Tauri 2](https://v2.tauri.app/start/prerequisites/). No Linux, instale Ninja. No Windows, instale Visual Studio 2022 Build Tools com C++ e Windows SDK. A CI de empacotamento usa Ubuntu 22.04, Windows Server 2025 e Rust 1.100.0.
+Use Node.js, Git, Rust, CMake e os [pré-requisitos do Tauri 2](https://v2.tauri.app/start/prerequisites/). No Linux, instale Ninja. No Windows, use Visual Studio Build Tools com C++ e Windows SDK. O script usa o gerador do Visual Studio 2022 por padrão. Para Visual Studio 2026, defina a variável `KSTRUCT_OOFEM_WINDOWS_GENERATOR` como `Visual Studio 18 2026` e use CMake 4.2 ou superior. A CI usa Ubuntu 22.04, Windows Server 2025 com Visual Studio 2026 e Rust 1.100.0.
 
 ```sh
 npm ci

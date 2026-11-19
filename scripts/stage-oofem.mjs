@@ -98,9 +98,10 @@ function stage() {
     "-DUSE_OPENMP_PARALLEL=OFF",
   ];
   if (windows) flags.push("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
-  const generator = windows
-    ? ["-G", "Visual Studio 17 2022", "-A", "x64"]
-    : ["-G", "Ninja"];
+  const generatorName = windows
+    ? process.env.KSTRUCT_OOFEM_WINDOWS_GENERATOR || "Visual Studio 17 2022"
+    : "Ninja";
+  const generator = ["-G", generatorName, ...(windows ? ["-A", "x64"] : [])];
   run("cmake", [
     "-S",
     source,
@@ -161,7 +162,7 @@ function stage() {
       sourceSha256: sha256(archive),
       cmakeVersion,
       buildFlags: flags,
-      generator: windows ? "Visual Studio 17 2022 x64" : "Ninja",
+      generator: generatorName,
     };
     writeFileSync(
       join(staged, "manifest.json"),
