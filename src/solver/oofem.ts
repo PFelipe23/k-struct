@@ -36,6 +36,7 @@ export interface Station {
   t: number;
   ux: number;
   uz: number;
+  ry: number;
   n: number;
   v: number;
   m: number;

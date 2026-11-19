@@ -20,13 +20,27 @@ export async function analyze(p: Project, caseId: string, executable: string) {
     log: response.log,
   };
 }
-export function download(name: string, content: string, type = "text/plain") {
+function download(name: string, content: string, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+export async function exportFile(
+  name: string,
+  content: string,
+  type = "text/plain",
+): Promise<boolean> {
+  if (!desktop()) {
+    download(name, content, type);
+    return true;
+  }
+  const path = await save({ title: "Exportar arquivo", defaultPath: name });
+  if (!path) return false;
+  await writeTextFile(path, content);
+  return true;
 }
 export async function saveProject(p: Project): Promise<boolean> {
   const name = p.name.replace(/[^\p{L}\p{N} _-]/gu, "").trim() || "projeto";

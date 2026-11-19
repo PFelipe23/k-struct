@@ -74,6 +74,14 @@ fn run_with_timeout(deck: String, executable: Option<String>, timeout: Duration)
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires OOFEM_BIN pointing to a real OOFEM executable"]
+    fn runs_real_reference_model() {
+        let executable = std::env::var("OOFEM_BIN").expect("OOFEM_BIN must be set");
+        let result = run(include_str!("../../../tests/fixtures/beam.in").into(), Some(executable)).unwrap();
+        assert!(result.output.contains("Finishing analysis"));
+        assert!(result.output.contains("REACTIONS") || result.output.contains("R E A C T I O N S"));
+    }
+    #[test]
     fn rejects_arbitrary_output_paths() {
         assert!(run("/tmp/overwrite\nKStruct -".into(),None).unwrap_err().contains("inválida"));
     }

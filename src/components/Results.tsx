@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CheckCircle2, FileDown, Terminal } from "lucide-react";
 import type { Project } from "../domain/model";
 import type { AnalysisResult } from "../solver/oofem";
-import { download } from "../solver/desktop";
+import { exportFile } from "../solver/desktop";
 
 export default function Results({
   project,
@@ -16,6 +16,13 @@ export default function Results({
   running: boolean;
 }) {
   const [tab, setTab] = useState("log");
+  const [exportError, setExportError] = useState("");
+  const download = (name: string, content: string, type = "text/plain") => {
+    setExportError("");
+    void exportFile(name, content, type).catch((e) =>
+      setExportError(String(e)),
+    );
+  };
   const fmt = (v: number) =>
     v.toLocaleString("pt-BR", { maximumFractionDigits: 5 });
   const rows: (string | number)[][] =
@@ -27,12 +34,24 @@ export default function Results({
           r.my / 1000,
         ])
       : tab === "displacements"
-        ? Object.entries(result?.displacements ?? {}).map(([id, d]) => [
-            project.nodes.find((n) => n.id === id)?.name ?? id,
-            d.ux * 1000,
-            d.uz * 1000,
-            d.ry * 1000,
-          ])
+        ? [
+            ...Object.entries(result?.displacements ?? {}).map(([id, d]) => [
+              project.nodes.find((n) => n.id === id)?.name ?? id,
+              d.ux * 1000,
+              d.uz * 1000,
+              d.ry * 1000,
+            ]),
+            ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
+              stations
+                .slice(1, -1)
+                .map((s) => [
+                  `${project.members.find((m) => m.id === id)?.name ?? id} · x/L ${s.t}`,
+                  s.ux * 1000,
+                  s.uz * 1000,
+                  s.ry * 1000,
+                ]),
+            ),
+          ]
         : Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
             stations.map((s) => [
               project.members.find((m) => m.id === id)?.name ?? id,
@@ -46,7 +65,7 @@ export default function Results({
     tab === "reactions"
       ? ["Nó", "RX (kN)", "RZ (kN)", "MY (kN·m)"]
       : tab === "displacements"
-        ? ["Nó", "UX (mm)", "UZ (mm)", "RY (mrad)"]
+        ? ["Nó / estação", "UX (mm)", "UZ (mm)", "RY (mrad)"]
         : ["Barra", "x/L", "N (kN)", "V (kN)", "M (kN·m)"];
   return (
     <section className="results">
@@ -109,6 +128,11 @@ export default function Results({
         </div>
       </div>
       <div className="results-body">
+        {exportError && (
+          <p className="help" role="alert">
+            {exportError}
+          </p>
+        )}
         {tab === "log" ? (
           <div className="message-log">
             <span className={running ? "working" : "log-dot"} />

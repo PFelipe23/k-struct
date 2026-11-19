@@ -78,7 +78,14 @@ export default function SpatialView({
         box.getCenter(center);
         box.getSize(extent);
       }
-      const distance = Math.max(4, extent.length()) * 1.6;
+      const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov / 2);
+      const halfHorizontalFov = Math.atan(
+        Math.tan(halfVerticalFov) * camera.aspect,
+      );
+      const distance =
+        (Math.max(2, extent.length() / 2) /
+          Math.sin(Math.min(halfVerticalFov, halfHorizontalFov))) *
+        1.15;
       camera.position
         .copy(center)
         .add(
@@ -89,12 +96,16 @@ export default function SpatialView({
       render();
     };
     controls.addEventListener("change", render);
+    let measured = false;
     const resize = new ResizeObserver(() => {
       const { width, height } = el.getBoundingClientRect();
       renderer.setSize(width, height);
       camera.aspect = width / Math.max(1, height);
       camera.updateProjectionMatrix();
-      render();
+      if (!measured) {
+        measured = true;
+        fit();
+      } else render();
     });
     resize.observe(el);
     const ray = new THREE.Raycaster();

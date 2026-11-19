@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   addPoint,
+  nextName,
   beamExample,
   createProject,
   parseProject,
@@ -45,7 +46,7 @@ import {
   analyze,
   chooseSolver,
   desktop,
-  download,
+  exportFile,
   openProject,
   saveProject,
 } from "./solver/desktop";
@@ -122,6 +123,10 @@ export default function App() {
   const edit = useCallback((fn: (p: Project) => void) => {
     const next = structuredClone(current.current);
     fn(next);
+    if (serializeProject(next) !== serializeProject(current.current)) {
+      setResult(null);
+      setDisplay("model");
+    }
     dispatch({ type: "change", project: next });
   }, []);
   const changeTool = (t: Tool) => {
@@ -130,6 +135,7 @@ export default function App() {
     setDisplay("model");
   };
   const replace = (project: Project) => {
+    setResult(null);
     dispatch({ type: "reset", project });
     setSelection(null);
     setPending(null);
@@ -171,11 +177,15 @@ export default function App() {
     setPending(null);
   };
   const undo = () => {
+    setResult(null);
+    setDisplay("model");
     dispatch({ type: "undo" });
     setSelection(null);
     setPending(null);
   };
   const redo = () => {
+    setResult(null);
+    setDisplay("model");
     dispatch({ type: "redo" });
     setSelection(null);
     setPending(null);
@@ -244,7 +254,7 @@ export default function App() {
       const id = uid();
       p.members.push({
         id,
-        name: `B${p.members.length + 1}`,
+        name: nextName("B", p.members),
         start: a.id,
         end: b.id,
         sectionId: p.sections[0].id,
@@ -279,10 +289,10 @@ export default function App() {
       setRunning(false);
     }
   };
-  const exportDeck = () => {
+  const exportDeck = async () => {
     try {
-      download("analysis.in", exportOofem(p, caseId).deck);
-      setMessage("Entrada OOFEM exportada em unidades SI (N, m, kg, s).");
+      if (await exportFile("analysis.in", exportOofem(p, caseId).deck))
+        setMessage("Entrada OOFEM exportada em unidades SI (N, m, kg, s).");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
     }

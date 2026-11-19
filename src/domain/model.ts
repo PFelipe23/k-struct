@@ -107,7 +107,7 @@ export function createProject(): Project {
     materials: [
       {
         id: "steel",
-        name: "Aço · E = 200 GPa",
+        name: "Material M1",
         E: 2e11,
         nu: 0.3,
         density: 7850,
@@ -116,7 +116,7 @@ export function createProject(): Project {
     sections: [
       {
         id: "rect",
-        name: "Retangular 15 × 20 cm",
+        name: "Retangular R1",
         materialId: "steel",
         width: 0.15,
         height: 0.2,
@@ -327,6 +327,13 @@ export function analysisErrors(p: Project): string[] {
   return [...new Set(errors)];
 }
 
+export function nextName(prefix: string, objects: { name: string }[]) {
+  let i = 1;
+  const names = new Set(objects.map((o) => o.name));
+  while (names.has(`${prefix}${i}`)) i++;
+  return `${prefix}${i}`;
+}
+
 export function addPoint(p: Project, x: number, z: number): StructuralNode {
   const existing = p.nodes.find(
     (n) => Math.hypot(n.x - x, n.z - z) < 1e-6 && n.y === 0,
@@ -334,7 +341,7 @@ export function addPoint(p: Project, x: number, z: number): StructuralNode {
   if (existing) return existing;
   const n: StructuralNode = {
     id: uid(),
-    name: `N${p.nodes.length + 1}`,
+    name: nextName("N", p.nodes),
     x,
     y: 0,
     z,
