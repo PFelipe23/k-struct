@@ -1,0 +1,14 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+test-results/
+playwright-report/
+*.out
+*.log
+.env
+.DS_Store
+
+crates/solver-runner/target/
+.oofem-src/
+.oofem-build/

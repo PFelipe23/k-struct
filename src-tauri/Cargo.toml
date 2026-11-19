@@ -1,0 +1,27 @@
+[package]
+name = "k-struct"
+version = "0.1.0"
+description = "KStruct · Análise estrutural · OpenStruct"
+authors = ["OpenStruct contributors"]
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+
+[lib]
+name = "kstruct_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+kstruct-solver-runner = { path = "../crates/solver-runner" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
+panic = "abort"
