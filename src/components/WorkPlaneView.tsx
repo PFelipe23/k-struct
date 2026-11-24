@@ -508,6 +508,7 @@ export default function WorkPlaneView({
           return (
             <g key={m.id}>
               <line
+                data-member-id={m.id}
                 x1={sx(u)}
                 y1={sy(v)}
                 x2={sx(u + du)}
