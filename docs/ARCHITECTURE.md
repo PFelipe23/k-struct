@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v7, migração v1 a v6, geometria, validação e histórico       | `src/domain`                 |
+| Domínio           | Formato v7, migração v1 a v6, geometria, validação e histórico      | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -31,7 +31,9 @@ O padrão de carga armazena ações. O caso de análise seleciona os padrões, o
 
 ## Unidades e sinais
 
-Persistência e entrada do solver em N, m, kg, s e rad. A interface converte cargas para kN/kN·m, seção para cm, E para GPa, deslocamentos para mm e rotações para mrad nas tabelas.
+Persistência e entrada do solver em N, m, kg, s e rad. As preferências locais de apresentação selecionam comprimentos (m/cm/mm), dimensões de seção (m/cm/mm), deslocamentos (m/cm/mm), forças (N/kN), momentos (N·m/kN·m), cargas distribuídas (N/m ou kN/m) e E (MPa/GPa). Os padrões continuam m, cm, mm, kN, kN·m, kN/m e GPa, respectivamente. Rotações nas tabelas permanecem em mrad, orientação da seção em graus e pressão da laje em kN/m², sempre identificadas.
+
+`src/units.ts` concentra as definições e conversões nas duas direções, validação das preferências e leitura decimal com ponto ou vírgula. O contexto em `src/components/Units.tsx` guarda a preferência em `kstruct.units`, separada do projeto e do histórico. Alterar unidades não avança a revisão estrutural, não executa o solver e não invalida resultados. Entradas sem alteração conservam o SI original, evitando uma edição causada somente por arredondamento binário na ida e volta da conversão. O arredondamento pertence à exibição; o CSV usa os valores convertidos sem esse arredondamento e identifica a unidade nos cabeçalhos. Com as preferências padrão, colunas, valores e metadados do CSV preservam o contrato anterior.
 
 Z global é vertical positivo para cima. Momentos globais obedecem à regra da mão direita. A barra vai do nó inicial ao final. No plano XZ, a base local tem `u = (c, s)` e `w = (-s, c)`. A transformação de carga uniforme é explícita, `qu = c qX + s qZ`, `qw = -s qX + c qZ`, enviada com `csType 1`.
 
@@ -43,7 +45,7 @@ Os esforços espaciais `N, Vy, Vz, Mx, My, Mz` são resultantes na face de corte
 
 As tabelas apresentam estações da malha. Deformadas e diagramas são linhas interpoladas entre estas estações, sem pretensão de avaliar extremos exatos entre elas.
 
-Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interface exibe pZ em kN/m², UZ em mm e os momentos Mx e My em kN·m/m. Os eixos locais do painel coincidem com X e Y globais. Mx positivo representa tração na face inferior na direção X, e My positivo representa tração na face inferior na direção Y. Os mapas usam a média por elemento. A consulta central usa os deslocamentos nodais e os momentos recuperados nos vértices.
+Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interface exibe pZ em kN/m², UZ na unidade de deslocamento selecionada (mm por padrão) e os momentos Mx e My na unidade de momento selecionada por metro de largura (kN·m/m por padrão). Os eixos locais do painel coincidem com X e Y globais. Mx positivo representa tração na face inferior na direção X, e My positivo representa tração na face inferior na direção Y. Os mapas usam a média por elemento. A consulta central usa os deslocamentos nodais e os momentos recuperados nos vértices.
 
 ## Consistência
 

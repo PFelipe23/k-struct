@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { coordinates, type Coordinate, type Point3 } from "../domain/geometry";
 import type { Project } from "../domain/model";
-import { parseNumberInput } from "./numberInput";
+import { formatUnitInput, parseUnitInput } from "../units";
+import { useUnits } from "./Units";
 
 export default function NodeTable({
   project,
@@ -12,6 +13,7 @@ export default function NodeTable({
   onApply: (changes: ReadonlyMap<string, Partial<Point3>>) => string | null;
   onClose: () => void;
 }) {
+  const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState(
     () => new Map<string, Partial<Record<Coordinate, string>>>(),
@@ -22,8 +24,10 @@ export default function NodeTable({
   const rows = project.nodes.map((node) => ({
     node,
     cells: axes.map((axis) => {
-      const text = draft.get(node.id)?.[axis] ?? String(node[axis]);
-      const value = parseNumberInput(text);
+      const text =
+        draft.get(node.id)?.[axis] ??
+        formatUnitInput(node[axis], "length", units);
+      const value = parseUnitInput(text, "length", units, node[axis]) ?? NaN;
       const reason = !text.trim()
         ? "Preencha a coordenada."
         : Number.isFinite(value)
@@ -86,7 +90,7 @@ export default function NodeTable({
                   <th scope="col">Nó</th>
                   {axes.map((axis) => (
                     <th scope="col" key={axis}>
-                      {axis.toUpperCase()} (m)
+                      {axis.toUpperCase()} ({units.length})
                     </th>
                   ))}
                 </tr>

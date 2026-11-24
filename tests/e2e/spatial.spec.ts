@@ -167,7 +167,7 @@ test("pórtico espacial assimétrico lançado do vazio, salvo e conferido com a 
   await expect(page.locator(".model-count")).toHaveText("9 nós · 11 barras");
   await expect(
     page.getByLabel("Pavimento ativo").locator("option").nth(1),
-  ).toContainText("2.8 m");
+  ).toContainText("2,8 m");
   await page.getByRole("button", { name: "Análise", exact: true }).click();
   const exported = page.waitForEvent("download");
   await page

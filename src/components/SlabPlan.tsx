@@ -2,8 +2,13 @@ import { memo, useMemo } from "react";
 import type { MouseEvent } from "react";
 import type { Slab, SlabEdge } from "../domain/model";
 import { meshSlab } from "../domain/slab";
-import { slabMapColor, type SlabMap } from "./SlabResults";
-import { formatResult } from "./resultFormatting";
+import {
+  getSlabQuantityDefinition,
+  slabMapColor,
+  type SlabMap,
+} from "./SlabResults";
+import { useUnits } from "./Units";
+import { formatResult, formatResultQuantity } from "./resultFormatting";
 
 export default memo(function SlabPlan({
   slab,
@@ -26,6 +31,10 @@ export default memo(function SlabPlan({
   pressure: number;
   onClick: (event: MouseEvent<SVGGElement>) => void;
 }) {
+  const { units } = useUnits();
+  const definition = map
+    ? getSlabQuantityDefinition(`slab-${map.definition.field}`, units)
+    : null;
   const resultMesh = map?.result.mesh;
   const mesh = useMemo(
     () => resultMesh ?? meshSlab(slab, z),
@@ -64,8 +73,12 @@ export default memo(function SlabPlan({
             >
               <title>
                 Elemento {mesh.elements[i].number} ·{" "}
-                {formatResult(map.values[i] * map.definition.factor)}{" "}
-                {map.definition.unit}
+                {formatResultQuantity(
+                  map.values[i],
+                  definition!.quantity,
+                  units,
+                )}{" "}
+                {definition!.unit}
               </title>
             </polygon>
           ))}

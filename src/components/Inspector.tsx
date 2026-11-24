@@ -19,11 +19,22 @@ import {
   type Slab,
 } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
+import {
+  formatQuantity,
+  formatUnitValue,
+  formatUnitInput,
+  fromSI,
+  parseUnitInput,
+  unitLabel,
+  type UnitQuantity,
+} from "../units";
+import { useUnits } from "./Units";
 
 export function NumberField({
   label,
   value,
   unit,
+  quantity,
   onChange,
   min,
   max,
@@ -32,24 +43,30 @@ export function NumberField({
   label: string;
   value: number;
   unit?: string;
+  quantity?: UnitQuantity;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
   integer?: boolean;
 }) {
-  const [draft, setDraft] = useState(String(value)),
+  const { units } = useUnits();
+  const displayValue = () =>
+    quantity ? formatUnitInput(value, quantity, units) : String(value);
+  const [draft, setDraft] = useState(displayValue),
     [invalid, setInvalid] = useState(false);
   const cancelling = useRef(false);
   useEffect(() => {
-    setDraft(String(Number(value.toPrecision(10))));
+    setDraft(displayValue());
     setInvalid(false);
-  }, [value]);
+  }, [value, quantity, units]);
   const commit = () => {
     if (cancelling.current) {
       cancelling.current = false;
       return;
     }
-    const n = parseNumberInput(draft);
+    const n = quantity
+      ? (parseUnitInput(draft, quantity, units, value) ?? NaN)
+      : parseNumberInput(draft);
     if (
       !Number.isFinite(n) ||
       (integer && !Number.isInteger(n)) ||
@@ -60,7 +77,7 @@ export function NumberField({
       return;
     }
     setInvalid(false);
-    onChange(n);
+    if (n !== value) onChange(n);
   };
   return (
     <label className="number-field">
@@ -77,18 +94,23 @@ export function NumberField({
             if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
               cancelling.current = true;
-              setDraft(String(value));
+              setDraft(displayValue());
               setInvalid(false);
               e.currentTarget.blur();
             }
           }}
         />
-        {unit && <small>{unit}</small>}
+        {(quantity || unit) && (
+          <small>{quantity ? unitLabel(quantity, units) : unit}</small>
+        )}
       </div>
       {invalid && (
         <em>
           {integer ? "Informe um número inteiro" : "Informe um valor válido"}
-          {min !== undefined ? ` (mín. ${min})` : ""}.
+          {min !== undefined
+            ? ` (mín. ${quantity ? formatQuantity(min, quantity, units) : min})`
+            : ""}
+          .
         </em>
       )}
     </label>
@@ -126,6 +148,7 @@ function SlabFields({
   pattern: Pattern;
   edit: (fn: (p: Project) => void) => void;
 }) {
+  const { units } = useUnits();
   const material = project.materials.find(({ id }) => id === slab.materialId)!;
   const updateSlab = (changes: Partial<Slab>) =>
     edit((draft) => {
@@ -153,7 +176,8 @@ function SlabFields({
         >
           {project.guides.z.map((level) => (
             <option key={level.id} value={level.id}>
-              {level.name} · {level.position} m
+              {level.name} · {formatQuantity(level.position, "length", units)}{" "}
+              {units.length}
             </option>
           ))}
         </select>
@@ -171,17 +195,17 @@ function SlabFields({
           key={key}
           label={label}
           value={slab[key]}
-          unit="m"
+          quantity="length"
           min={key === "lengthX" || key === "lengthY" ? tolerance : undefined}
           onChange={(value) => updateSlab({ [key]: value })}
         />
       ))}
       <NumberField
         label="Espessura"
-        unit="cm"
-        min={0.0001}
-        value={slab.thickness * 100}
-        onChange={(value) => updateSlab({ thickness: value / 100 })}
+        quantity="section"
+        min={0.000001}
+        value={slab.thickness}
+        onChange={(value) => updateSlab({ thickness: value })}
       />
       <h4>Material elástico isotrópico</h4>
       <label className="stack-field">
@@ -200,13 +224,12 @@ function SlabFields({
       <NumberField
         key={`${material.id}-E`}
         label="Módulo E"
-        unit="GPa"
-        min={0.001}
-        value={material.E / 1e9}
+        quantity="modulus"
+        min={1e6}
+        value={material.E}
         onChange={(value) =>
           edit((draft) => {
-            draft.materials.find(({ id }) => id === material.id)!.E =
-              value * 1e9;
+            draft.materials.find(({ id }) => id === material.id)!.E = value;
           })
         }
       />
@@ -320,6 +343,7 @@ export default function Inspector({
   patternId: string;
   edit: (fn: (p: Project) => void) => void;
 }) {
+  const { units } = useUnits();
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
   const dofs = spatial
@@ -349,8 +373,8 @@ export default function Inspector({
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
       const next = sumNodal(pat, node!.id);
-      if (next[key] / 1000 === value) return;
-      next[key] = value * 1000;
+      if (next[key] === value) return;
+      next[key] = value;
       pat.nodal = pat.nodal.filter((l) => l.nodeId !== node!.id);
       if (nodalComponents.some((k) => next[k])) pat.nodal.push(next);
     });
@@ -361,8 +385,8 @@ export default function Inspector({
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
       const next = sumUniform(pat, member!.id);
-      if (next[key] / 1000 === value) return;
-      next[key] = value * 1000;
+      if (next[key] === value) return;
+      next[key] = value;
       pat.uniform = pat.uniform.filter((l) => l.memberId !== member!.id);
       if (uniformComponents.some((k) => next[k])) pat.uniform.push(next);
     });
@@ -447,7 +471,7 @@ export default function Inspector({
                 key={k}
                 label={k.toUpperCase()}
                 value={node[k]}
-                unit="m"
+                quantity="length"
                 onChange={(v) =>
                   edit((p) => {
                     p.nodes.find((n) => n.id === node.id)![k] = v;
@@ -458,7 +482,7 @@ export default function Inspector({
             {!spatial && (
               <div className="property-line">
                 <span>Y</span>
-                <b>0,00 m</b>
+                <b>0,00 {units.length}</b>
               </div>
             )}
             <h4>Apoios e restrições</h4>
@@ -492,8 +516,8 @@ export default function Inspector({
                 <NumberField
                   key={`${patternId}-${k}`}
                   label={`${k[0] === "f" ? "Força" : "Momento"} ${k[1].toUpperCase()}`}
-                  value={nl[k] / 1000}
-                  unit={k[0] === "f" ? "kN" : "kN·m"}
+                  value={nl[k]}
+                  quantity={k[0] === "f" ? "force" : "moment"}
                   onChange={(v) => nodeLoad(k, v)}
                 />
               ),
@@ -540,9 +564,9 @@ export default function Inspector({
                 {(() => {
                   const a = p.nodes.find((n) => n.id === member.start)!,
                     b = p.nodes.find((n) => n.id === member.end)!;
-                  return distance(a, b).toFixed(3);
+                  return formatQuantity(distance(a, b), "length", units);
                 })()}{" "}
-                m
+                {units.length}
               </b>
             </div>
             <label className="stack-field">
@@ -585,8 +609,8 @@ export default function Inspector({
               <NumberField
                 key={`${patternId}-${k}`}
                 label={`q${k.toUpperCase()} global`}
-                unit="kN/m"
-                value={ul[`q${k}`] / 1000}
+                quantity="distributedLoad"
+                value={ul[`q${k}`]}
                 onChange={(v) => setUniformLoad(`q${k}`, v)}
               />
             ))}
@@ -610,25 +634,23 @@ export default function Inspector({
               </p>
               <NumberField
                 label="Largura b"
-                unit="cm"
-                value={section.width * 100}
-                min={0.1}
+                quantity="section"
+                value={section.width}
+                min={0.001}
                 onChange={(v) =>
                   edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.width =
-                      v / 100;
+                    p.sections.find((s) => s.id === section.id)!.width = v;
                   })
                 }
               />
               <NumberField
                 label="Altura h"
-                unit="cm"
-                value={section.height * 100}
-                min={0.1}
+                quantity="section"
+                value={section.height}
+                min={0.001}
                 onChange={(v) =>
                   edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.height =
-                      v / 100;
+                    p.sections.find((s) => s.id === section.id)!.height = v;
                   })
                 }
               />
@@ -643,24 +665,31 @@ export default function Inspector({
                   }}
                 />
                 <span>
-                  A = {(section.width * section.height * 1e4).toFixed(1)} cm²
+                  A ={" "}
+                  {formatUnitValue(
+                    section.width *
+                      section.height *
+                      fromSI(1, "section", units) ** 2,
+                  )}{" "}
+                  {units.section}²
                   <br />
                   IY ={" "}
-                  {(((section.width * section.height ** 3) / 12) * 1e8).toFixed(
-                    1,
+                  {formatUnitValue(
+                    ((section.width * section.height ** 3) / 12) *
+                      fromSI(1, "section", units) ** 4,
                   )}{" "}
-                  cm⁴
+                  {units.section}⁴
                 </span>
               </div>
               <h4>Material compartilhado</h4>
               <NumberField
                 label="Módulo E"
-                unit="GPa"
-                value={material.E / 1e9}
-                min={0.001}
+                quantity="modulus"
+                value={material.E}
+                min={1e6}
                 onChange={(v) =>
                   edit((p) => {
-                    p.materials.find((m) => m.id === material.id)!.E = v * 1e9;
+                    p.materials.find((m) => m.id === material.id)!.E = v;
                   })
                 }
               />

@@ -13,6 +13,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
+- Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - Salvar e reabrir `.kstruct.json` no esquema v7, com migração dos projetos v1 a v6 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
@@ -67,7 +68,9 @@ Em **Modelo → Editar barras**, selecione uma barra para **Dividir**, **Aparar*
 
 Em **Barra** (`B`), escolha o **Traçado**. **Dois pontos** lança uma barra por par de cliques. **Em cadeia** aproveita a última extremidade para o próximo trecho. **Vão entre eixos** destaca o intervalo entre duas guias consecutivas e o lança com um clique. Aponte para o interior do vão para indicar a direção. Escolha a seção ativa e, em XYZ, a rotação em graus. `Esc` encerra o lançamento e **Desfazer** remove um trecho por vez.
 
-Em **Modelo** → **Tabela de nós**, edite as coordenadas em metros de vários nós em um único passo. A tabela mostra X e Z no modelo plano e X, Y e Z no espacial. Use vírgula ou ponto para decimais e corrija as células destacadas antes de clicar em **Aplicar**. **Cancelar** descarta o rascunho. **Desfazer** e **Refazer** atuam sobre o lote inteiro. Após aplicar uma alteração, analise novamente para atualizar os resultados.
+Em **Modelo** → **Tabela de nós**, edite as coordenadas de vários nós na unidade de comprimento selecionada (metros por padrão). A tabela mostra X e Z no modelo plano e X, Y e Z no espacial. Use vírgula ou ponto para decimais e corrija as células destacadas antes de clicar em **Aplicar**. **Cancelar** descarta o rascunho. **Desfazer** e **Refazer** atuam sobre o lote inteiro. Após aplicar uma alteração, analise novamente para atualizar os resultados.
+
+Em **Exibição → Unidades**, selecione as unidades para cada grandeza e clique em **Aplicar unidades**. Por exemplo, o vão de 6 m aparece como 600 cm ou 6000 mm, e E = 200 GPa aparece como 200000 MPa. Os campos, eixos, pavimentos, réplicas, modelos paramétricos, vistas e tabelas acompanham a escolha. A troca preserva o modelo, o histórico e os resultados da revisão atual. O arquivo do projeto e a entrada OOFEM continuam em SI. O CSV identifica as unidades selecionadas e conserva o formato existente ao usar as preferências padrão. Rotações das tabelas continuam em mrad; pressão da laje em kN/m² e momentos da laje por metro de largura mantêm unidades explícitas.
 
 Em **Exibição → Arranjo de vistas**, escolha **Planta + elevação + perspectiva** para acompanhar um pórtico espacial nos três painéis. Clique ou dê foco ao painel em que quer trabalhar. A faixa acima do desenho identifica a vista ativa e sua cota. Os controles de plano e eixo atuam nessa vista. Zoom, enquadramento, nomes, grelha e cargas podem ser ajustados em cada painel. Trocar de vista cancela o trecho em andamento e preserva as peças já lançadas. No projeto plano, use a elevação XZ sozinha ou ao lado da perspectiva.
 
@@ -82,7 +85,7 @@ Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou *
 ### Laje retangular isolada
 
 1. Abra **Novo pórtico espacial**, deixe a **Planta XY** ativa e selecione o pavimento. Ative **Laje** (`L`) e clique em dois cantos opostos do painel.
-2. Nas propriedades, informe os lados em metros, a espessura em centímetros, o material, as bordas com apoio simples, as subdivisões em X/Y e a **Pressão pZ** em kN/m² para o padrão escolhido. O sinal negativo indica pressão para baixo. Em **Elemento de placa**, o quadrilateral **QDKT** usa apoio simples nas quatro bordas. O triangular **DKT** permite liberar bordas e requer pelo menos duas apoiadas.
+2. Nas propriedades, informe os lados e a espessura nas unidades selecionadas (m e cm por padrão), o material, as bordas com apoio simples, as subdivisões em X/Y e a **Pressão pZ** em kN/m² para o padrão escolhido. O sinal negativo indica pressão para baixo. Em **Elemento de placa**, o quadrilateral **QDKT** usa apoio simples nas quatro bordas. O triangular **DKT** permite liberar bordas e requer pelo menos duas apoiadas.
 3. Salve o projeto. No desktop, selecione o caso estático e clique em **Analisar**. O seletor de visualização oferece os mapas de **Flecha UZ**, **Momento local Mx** e **Momento local My**. O painel de resultados mostra os valores no centro e a soma de reações em Z.
 4. Para reproduzir a [placa de referência QDKT](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada), use 4 × 3 m, espessura de 10 cm, E = 30 GPa, ν = 0,20, as quatro bordas apoiadas e pZ = −5 kN/m². Repita com 8 × 6, 16 × 12 e 32 × 24 subdivisões.
 

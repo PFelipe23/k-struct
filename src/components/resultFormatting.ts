@@ -1,4 +1,11 @@
 import type { MemberForceComponent } from "../solver/combinations";
+import {
+  DEFAULT_UNITS,
+  fromSI,
+  unitLabel,
+  type UnitPreferences,
+  type UnitQuantity,
+} from "../units";
 
 export const forceColumns = {
   planar: ["n", "v", "m"],
@@ -19,8 +26,43 @@ export const forceLabels: Record<
   mz: { symbol: "Mz", unit: "kN·m" },
 };
 
-export const formatResult = (value: number) =>
-  value.toLocaleString("pt-BR", { maximumFractionDigits: 5 });
+export function forceQuantity(
+  component: MemberForceComponent,
+): "force" | "moment" {
+  return component.startsWith("m") ? "moment" : "force";
+}
+
+export function getForceLabel(
+  component: MemberForceComponent,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  return {
+    symbol: forceLabels[component].symbol,
+    unit: unitLabel(forceQuantity(component), units),
+  };
+}
+
+export const formatResult = (value: number, maximumFractionDigits = 5) =>
+  value.toLocaleString("pt-BR", { maximumFractionDigits });
+
+export function resultFractionDigits(
+  quantity: UnitQuantity,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  if (quantity !== "displacement") return 5;
+  return { m: 9, cm: 7, mm: 5 }[units.displacement];
+}
+
+export function formatResultQuantity(
+  valueSI: number,
+  quantity: UnitQuantity,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  return formatResult(
+    fromSI(valueSI, quantity, units),
+    resultFractionDigits(quantity, units),
+  );
+}
 
 export function encodeCsv(rows: (string | number)[][]): string {
   return (

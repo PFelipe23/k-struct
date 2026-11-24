@@ -32,6 +32,8 @@ import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
+import { formatQuantity, fromSI } from "../units";
+import { useUnits } from "./Units";
 
 export type PlaneCamera = {
   projectId: string;
@@ -99,6 +101,7 @@ export default function WorkPlaneView({
   onPoint,
   onSelect,
 }: Props & LayerControls) {
+  const { units } = useUnits();
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 700, height: 460 });
   const [camera, setCamera] = useState({ u: 3, v: 1.5, scale: 65 });
@@ -327,7 +330,11 @@ export default function WorkPlaneView({
   useEffect(() => {
     // A project or plane change schedules a new framing. Only cache it after it has been applied.
     if (camera !== cameraBeforeFit.current)
-      savedCamera.current = { projectId: project.id, kind: plane.kind, ...camera };
+      savedCamera.current = {
+        projectId: project.id,
+        kind: plane.kind,
+        ...camera,
+      };
   }, [camera, project.id, plane.kind, savedCamera]);
   const heading = plane.kind === "XY" ? "Planta XY" : `Elevação ${plane.kind}`;
 
@@ -345,7 +352,8 @@ export default function WorkPlaneView({
           <i className="view-dot" />
           {heading}{" "}
           <small>
-            {normal.toUpperCase()} = {plane.offset} m
+            {normal.toUpperCase()} ={" "}
+            {formatQuantity(plane.offset, "length", units)} {units.length}
           </small>
         </span>
         <div className="view-actions">
@@ -476,7 +484,7 @@ export default function WorkPlaneView({
                 className={u === 0 ? "axis" : ""}
               />
               <text x={sx(u) + 4} y={size.height - 10}>
-                {Number(u.toFixed(2))}
+                {Number(fromSI(u, "length", units).toFixed(2))}
               </text>
             </g>
           ))}
@@ -490,7 +498,7 @@ export default function WorkPlaneView({
                 className={v === 0 ? "axis" : ""}
               />
               <text x="8" y={sy(v) - 5}>
-                {Number(v.toFixed(2))}
+                {Number(fromSI(v, "length", units).toFixed(2))}
               </text>
             </g>
           ))}
@@ -681,11 +689,13 @@ export default function WorkPlaneView({
                       {components
                         .flatMap((q, i) =>
                           q
-                            ? [`q${coordinates[i].toUpperCase()} ${q / 1000}`]
+                            ? [
+                                `q${coordinates[i].toUpperCase()} ${formatQuantity(q, "distributedLoad", units)}`,
+                              ]
                             : [],
                         )
                         .join(" · ")}{" "}
-                      kN/m
+                      {units.distributedLoad}
                     </text>
                   </g>
                 )}
@@ -781,7 +791,9 @@ export default function WorkPlaneView({
           const norm = Math.hypot(fu, fv);
           const moments = coordinates.flatMap((k) => {
             const m = loads.reduce((sum, l) => sum + l[`m${k}`], 0);
-            return m ? [`M${k.toUpperCase()} ${m / 1000}`] : [];
+            return m
+              ? [`M${k.toUpperCase()} ${formatQuantity(m, "moment", units)}`]
+              : [];
           });
           return (
             <g
@@ -839,17 +851,19 @@ export default function WorkPlaneView({
                       {coordinates
                         .flatMap((k) =>
                           force(k)
-                            ? [`F${k.toUpperCase()} ${force(k) / 1000}`]
+                            ? [
+                                `F${k.toUpperCase()} ${formatQuantity(force(k), "force", units)}`,
+                              ]
                             : [],
                         )
                         .join(" · ")}{" "}
-                      kN
+                      {units.force}
                     </text>
                   </g>
                 )}
               {layers.loads && display === "model" && moments.length > 0 && (
                 <text x={x + 16} y={y + 35} className="moment-label">
-                  {moments.join(" · ")} kN·m
+                  {moments.join(" · ")} {units.moment}
                 </text>
               )}
             </g>
@@ -879,7 +893,8 @@ export default function WorkPlaneView({
               y={Math.min(sy(pending.y), sy(cursor.v))}
               width={Math.abs(sx(pending.x) - sx(cursor.u))}
               height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)" fillOpacity={0.16}
+              fill="var(--geometry-selected)"
+              fillOpacity={0.16}
               stroke="var(--geometry-selected)"
               strokeDasharray="6 4"
               pointerEvents="none"
@@ -909,11 +924,13 @@ export default function WorkPlaneView({
       )}
       <div className="view-foot">
         <span>
-          {normal.toUpperCase()} = {plane.offset} m <b>·</b> Snap 0,50 m
+          {normal.toUpperCase()} ={" "}
+          {formatQuantity(plane.offset, "length", units)} {units.length}{" "}
+          <b>·</b> Snap {formatQuantity(0.5, "length", units)} {units.length}
         </span>
         <span>
           {cursor
-            ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
+            ? `${axisU.toUpperCase()} ${fromSI(cursor.u, "length", units).toFixed(2)} · ${axisV.toUpperCase()} ${fromSI(cursor.v, "length", units).toFixed(2)} ${units.length}`
             : display === "deformed"
               ? `Deformada ×${deformationScale.toFixed(1)}`
               : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}

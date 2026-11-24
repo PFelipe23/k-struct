@@ -34,6 +34,7 @@ import {
   PanelLeft,
   PanelRight,
   Scissors,
+  Ruler,
 } from "lucide-react";
 import {
   addPoint,
@@ -62,6 +63,8 @@ import {
 } from "./domain/geometry";
 import { historyReducer } from "./domain/history";
 import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
+import { UnitsDialog, useUnits } from "./components/Units";
+import { formatQuantity } from "./units";
 import WorkPlaneView, {
   additiveSelection,
   type Display,
@@ -143,6 +146,8 @@ const initial = () => {
   return createProject();
 };
 export default function App() {
+  const { units } = useUnits();
+  const [showUnits, setShowUnits] = useState(false);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
     past: [],
     current: initial(),
@@ -274,9 +279,9 @@ export default function App() {
   const slabMap = useMemo(
     () =>
       slabResult && isSlabDisplay(display)
-        ? buildSlabMap(slabResult, display)
+        ? buildSlabMap(slabResult, display, units)
         : null,
-    [slabResult, display],
+    [slabResult, display, units],
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
@@ -1066,7 +1071,12 @@ export default function App() {
               >
                 <BookOpen size={18} />
                 <span>
-                  Viga de referência<small>6 m · 10 kN/m</small>
+                  Viga de referência
+                  <small>
+                    {formatQuantity(6, "length", units)} {units.length} ·{" "}
+                    {formatQuantity(10000, "distributedLoad", units)}{" "}
+                    {units.distributedLoad}
+                  </small>
                 </span>
               </button>
               <small>MODELO DE VALIDAÇÃO</small>
@@ -1197,6 +1207,16 @@ export default function App() {
                   <option value="light">Claro</option>
                 </select>
               </label>
+            </div>
+            <div className="ribbon-group">
+              <button
+                className="tool-button"
+                onClick={() => setShowUnits(true)}
+              >
+                <Ruler />
+                <span>Unidades</span>
+              </button>
+              <small>APRESENTAÇÃO</small>
             </div>
           </>
         )}
@@ -1355,8 +1375,8 @@ export default function App() {
                 </summary>
                 {p.sections.map((s) => (
                   <p key={s.id} className="tree-empty">
-                    {(s.width * 100).toFixed(1)} × {(s.height * 100).toFixed(1)}{" "}
-                    cm
+                    {formatQuantity(s.width, "section", units)} ×{" "}
+                    {formatQuantity(s.height, "section", units)} {units.section}
                   </p>
                 ))}
               </details>
@@ -1399,7 +1419,7 @@ export default function App() {
               <span aria-label="Vista ativa">
                 {activePanel === "perspective"
                   ? "Perspectiva 3D"
-                  : `${plane.kind === "XY" ? "Planta" : "Elevação"} ${plane.kind} · ${planeCoordinates[plane.kind][2].toUpperCase()} = ${plane.offset} m`}
+                  : `${plane.kind === "XY" ? "Planta" : "Elevação"} ${plane.kind} · ${planeCoordinates[plane.kind][2].toUpperCase()} = ${formatQuantity(plane.offset, "length", units)} ${units.length}`}
               </span>
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
@@ -1703,8 +1723,8 @@ export default function App() {
                     : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
-          kN · m · rad <i /> {desktop() ? "Desktop" : "Navegador · edição"}{" "}
-          <i /> OpenStruct
+          {units.force} · {units.length} · rad <i />{" "}
+          {desktop() ? "Desktop" : "Navegador · edição"} <i /> OpenStruct
         </span>
       </footer>
       <input
@@ -1726,6 +1746,7 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {showUnits && <UnitsDialog onClose={() => setShowUnits(false)} />}
       {settings && (
         <SolverSettings
           executable={executable}

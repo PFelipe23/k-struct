@@ -1,4 +1,5 @@
+import { parseUnitNumber } from "../units";
+
 export function parseNumberInput(text: string) {
-  const value = text.trim();
-  return value ? Number(value.replace(",", ".")) : NaN;
+  return parseUnitNumber(text) ?? NaN;
 }

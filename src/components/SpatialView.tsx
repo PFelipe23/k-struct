@@ -13,6 +13,13 @@ import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
 import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
+import { useUnits } from "./Units";
+import {
+  formatQuantity,
+  unitLabel,
+  type UnitPreferences,
+  type UnitQuantity,
+} from "../units";
 
 export type SpatialCamera = {
   modelKey: string;
@@ -88,12 +95,15 @@ function annotate(
 function loadComponents<T>(
   loads: T[],
   keys: (keyof T & string)[],
-  unit: string,
+  quantity: UnitQuantity,
+  units: UnitPreferences,
 ) {
   return keys.flatMap((key) => {
     const value = loads.reduce((sum, load) => sum + Number(load[key]), 0);
     return value
-      ? [`${key.toUpperCase()} ${formatResult(value / 1000)} ${unit}`]
+      ? [
+          `${key.toUpperCase()} ${formatQuantity(value, quantity, units)} ${unitLabel(quantity, units)}`,
+        ]
       : [];
   });
 }
@@ -121,6 +131,7 @@ export default function SpatialView({
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
 }) {
+  const { units } = useUnits();
   const container = useRef<HTMLDivElement>(null),
     state = useRef<SceneState | null>(null);
   const select = useRef(onSelect);
@@ -374,7 +385,12 @@ export default function SpatialView({
         scenePoint(interpolate(a, b, 0.5)),
         [
           ...(layers.labels ? [m.name] : []),
-          ...loadComponents(loads, ["qx", "qy", "qz"], "kN/m"),
+          ...loadComponents(
+            loads,
+            ["qx", "qy", "qz"],
+            "distributedLoad",
+            units,
+          ),
         ],
         selectedIds.has(`member:${m.id}`),
       );
@@ -413,8 +429,8 @@ export default function SpatialView({
         sphere.position,
         [
           ...(layers.labels ? [n.name] : []),
-          ...loadComponents(loads, ["fx", "fy", "fz"], "kN"),
-          ...loadComponents(loads, ["mx", "my", "mz"], "kN·m"),
+          ...loadComponents(loads, ["fx", "fy", "fz"], "force", units),
+          ...loadComponents(loads, ["mx", "my", "mz"], "moment", units),
         ],
         selected,
       );
@@ -436,6 +452,7 @@ export default function SpatialView({
     patternId,
     layers.labels,
     layers.loads,
+    units,
   ]);
   useEffect(() => {
     const s = state.current;
@@ -521,7 +538,7 @@ export default function SpatialView({
             ? `×${deformationScale.toFixed(1)}`
             : project.mode === "planar"
               ? "Y = 0"
-              : "XYZ · m"}
+              : `XYZ · ${units.length}`}
         </span>
       </div>
     </section>

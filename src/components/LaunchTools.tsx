@@ -6,6 +6,14 @@ import {
   type PlaneKind,
 } from "../domain/geometry";
 import { nextName, uid, type Project } from "../domain/model";
+import {
+  formatQuantity,
+  formatUnitInput,
+  parseUnitInput,
+  parseUnitNumber,
+  toSI,
+} from "../units";
+import { useUnits } from "./Units";
 
 type PlaneControlsProps = {
   inactive: boolean;
@@ -46,6 +54,7 @@ export function WorkPlaneControls({
   replicate,
   connect,
 }: PlaneControlsProps) {
+  const { units } = useUnits();
   const activeLabel = coordinateName[kind];
   return (
     <fieldset
@@ -77,7 +86,8 @@ export function WorkPlaneControls({
           .sort((a, b) => a.position - b.position)
           .map((g) => (
             <option value={g.id} key={g.id}>
-              {g.name} · {g.position} m
+              {g.name} · {formatQuantity(g.position, "length", units)}{" "}
+              {units.length}
             </option>
           ))}
       </select>
@@ -115,8 +125,7 @@ export function WorkPlaneControls({
 }
 
 const groups = { x: "Eixos X", y: "Eixos Y", z: "Pavimentos" };
-const numeric = (v: string) =>
-  v.trim() ? Number(v.trim().replace(",", ".")) : NaN;
+const numeric = (v: string) => parseUnitNumber(v) ?? NaN;
 
 export function GuideEditor({
   guides,
@@ -127,9 +136,13 @@ export function GuideEditor({
   onApply: (guides: Project["guides"]) => string | null;
   onClose: () => void;
 }) {
+  const { units } = useUnits();
   const [axis, setAxis] = useState<Coordinate>("x");
   const toDraft = (k: Coordinate) =>
-    guides[k].map((g) => ({ ...g, position: String(g.position) }));
+    guides[k].map((g) => ({
+      ...g,
+      position: formatUnitInput(g.position, "length", units),
+    }));
   const [draft, setDraft] = useState(() => ({
     x: toDraft("x"),
     y: toDraft("y"),
@@ -157,7 +170,13 @@ export function GuideEditor({
               draft[k].map((g) => ({
                 ...g,
                 name: g.name.trim(),
-                position: numeric(g.position),
+                position:
+                  parseUnitInput(
+                    g.position,
+                    "length",
+                    units,
+                    guides[k].find(({ id }) => id === g.id)?.position,
+                  ) ?? NaN,
               }));
             const next = { x: convert("x"), y: convert("y"), z: convert("z") };
             if (
@@ -209,7 +228,7 @@ export function GuideEditor({
                   />
                 </label>
                 <label>
-                  Posição (m)
+                  Posição ({units.length})
                   <input
                     aria-label={`Posição da referência ${i + 1}`}
                     inputMode="decimal"
@@ -248,7 +267,9 @@ export function GuideEditor({
             onClick={() => {
               const end = Math.max(
                 0,
-                ...rows.map((g) => numeric(g.position)).filter(Number.isFinite),
+                ...rows
+                  .map((g) => toSI(numeric(g.position), "length", units))
+                  .filter(Number.isFinite),
               );
               setDraft({
                 ...draft,
@@ -257,7 +278,11 @@ export function GuideEditor({
                   {
                     id: uid(),
                     name: nextName(axis === "z" ? "Pav. " : "Eixo ", rows),
-                    position: String(end + (axis === "z" ? 3 : 4)),
+                    position: formatUnitInput(
+                      end + (axis === "z" ? 3 : 4),
+                      "length",
+                      units,
+                    ),
                   },
                 ],
               });
