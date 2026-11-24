@@ -4,7 +4,7 @@ import {
   distance,
   dot,
   interpolate,
-  length,
+  beamAxes,
   origin,
   scale,
   subtract,
@@ -88,18 +88,6 @@ const spatialDofs = [
   ["rz", 6, "mz"],
 ] as const;
 const planarDofs = [spatialDofs[0], spatialDofs[2], spatialDofs[4]];
-
-function beamAxes(a: Point3, b: Point3, roll: number) {
-  const unit = (v: Point3) => scale(v, 1 / length(v));
-  const x = unit(subtract(b, a));
-  const up =
-    Math.abs(x.z) > 1 - 1e-8 ? { ...origin, x: 1 } : { ...origin, z: 1 };
-  const y0 = unit(cross(up, x));
-  const z0 = cross(x, y0);
-  const angle = (roll * Math.PI) / 180;
-  const z = add(scale(z0, Math.cos(angle)), scale(y0, -Math.sin(angle)));
-  return [x, cross(z, x), z] as const;
-}
 
 function rectangleTorsion(width: number, height: number) {
   const a = Math.max(width, height),

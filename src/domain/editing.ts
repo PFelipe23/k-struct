@@ -12,27 +12,13 @@ import {
 } from "./geometry";
 import {
   addPoint,
+  appendMember,
   nextName,
   uid,
   type Member,
   type Project,
-  type SelectedObject,
   type Slab,
 } from "./model";
-
-function hasMember(p: Project, a: string, b: string) {
-  return p.members.some(
-    (m) => (m.start === a && m.end === b) || (m.start === b && m.end === a),
-  );
-}
-
-function appendMember(p: Project, properties: Omit<Member, "id" | "name">) {
-  if (hasMember(p, properties.start, properties.end))
-    throw new Error("Já existe uma barra entre esses nós.");
-  const bar = { ...properties, id: uid(), name: nextName("B", p.members) };
-  p.members.push(bar);
-  return bar;
-}
 
 export function addMember(
   p: Project,
@@ -106,64 +92,7 @@ export function addSlab(
   return slab;
 }
 
-export function replicate(
-  p: Project,
-  selection: SelectedObject[],
-  offset: Point3,
-  copies: number,
-): SelectedObject[] {
-  if (selection.some((item) => item.kind === "slab"))
-    throw new Error("A replicação está disponível para nós e barras.");
-  if (
-    !selection.length ||
-    !Number.isInteger(copies) ||
-    copies < 1 ||
-    copies > 20
-  )
-    throw new Error("Selecione os objetos e informe de 1 a 20 cópias.");
-  if (distance(offset, { x: 0, y: 0, z: 0 }) < tolerance)
-    throw new Error("Informe um deslocamento para replicar.");
-  if (p.mode === "planar" && offset.y !== 0)
-    throw new Error(
-      "A replicação de um projeto plano precisa permanecer em XZ.",
-    );
-  const nodeIds = new Set(
-    selection.filter((s) => s.kind === "node").map((s) => s.id),
-  );
-  const selectedNodes = [...nodeIds];
-  const memberIds = new Set(
-    selection.filter((s) => s.kind === "member").map((s) => s.id),
-  );
-  const bars = p.members.filter((m) => memberIds.has(m.id));
-  if (p.members.length + bars.length * copies > 1000)
-    throw new Error("A replicação ultrapassa o limite de 1.000 barras.");
-  for (const bar of bars) {
-    nodeIds.add(bar.start);
-    nodeIds.add(bar.end);
-  }
-  const source = p.nodes.filter((n) => nodeIds.has(n.id));
-  const result: SelectedObject[] = [];
-  for (let i = 1; i <= copies; i++) {
-    const delta = scale(offset, i);
-    const ids = new Map(
-      source.map((n) => [n.id, addPoint(p, add(n, delta)).id]),
-    );
-    if (p.nodes.length > 1000)
-      throw new Error("A replicação ultrapassa o limite de 1.000 nós.");
-    for (const id of selectedNodes)
-      result.push({ kind: "node", id: ids.get(id)! });
-    for (const bar of bars) {
-      const m = appendMember(p, {
-        start: ids.get(bar.start)!,
-        end: ids.get(bar.end)!,
-        sectionId: bar.sectionId,
-        roll: bar.roll,
-      });
-      result.push({ kind: "member", id: m.id });
-    }
-  }
-  return [...new Map(result.map((s) => [`${s.kind}:${s.id}`, s])).values()];
-}
+export { replicate } from "./transform";
 
 function crossing(a: Point3, b: Point3, c: Point3, d: Point3) {
   const ab = subtract(b, a),

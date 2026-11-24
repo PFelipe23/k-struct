@@ -1606,6 +1606,33 @@ button.primary {
   gap: 4px;
   font-size: 11px;
 }
+.transform-dialog {
+  width: min(800px, calc(100vw - 24px));
+  color: var(--text);
+}
+.transform-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.transform-inputs, .transform-summary { display: grid; align-content: start; gap: 10px; }
+.transform-dialog label { display: grid; gap: 4px; font-size: 12px; }
+.transform-dialog fieldset { min-width: 0; display: grid; gap: 6px; border: 1px solid var(--line); }
+.transform-dialog fieldset label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 7px; }
+.transform-dialog input[type=checkbox] { width: auto; }
+.transform-preview svg { display: block; width: 100%; margin: 6px 0; border: 1px solid var(--line); background: var(--surface-view); }
+.transform-guide { color: var(--text); fill: none; stroke: currentColor; stroke-dasharray: 2 4; }
+.transform-source { color: var(--muted); stroke-dasharray: 5 3; }
+.transform-target { color: var(--accent); }
+.transform-preview line, .transform-preview circle { stroke: currentColor; stroke-width: 2; }
+.transform-preview circle { fill: var(--surface-view); stroke-dasharray: none; }
+.transform-target circle { fill: currentColor; }
+.transform-legend { display: flex; gap: 14px; font-size: 12px; margin-bottom: 8px; }
+.transform-legend span::before { content: ""; display: inline-block; width: 20px; border-top: 2px dashed var(--muted); vertical-align: middle; margin-right: 5px; }
+.transform-legend span + span::before { border-top: 2px solid var(--accent); }
+.transform-legend span:nth-child(3)::before { border-top: 2px dotted var(--text); }
+.transform-summary ul { padding-left: 18px; max-height: 100px; overflow: auto; }
+@media (max-width: 620px) { .transform-layout { grid-template-columns: 1fr; } }
 .modal .launch-error {
   color: var(--danger);
 }

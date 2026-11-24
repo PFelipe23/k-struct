@@ -4,7 +4,6 @@ import {
   coordinates,
   type Coordinate,
   type PlaneKind,
-  type Point3,
 } from "../domain/geometry";
 import { nextName, uid, type Project } from "../domain/model";
 
@@ -101,7 +100,7 @@ export function WorkPlaneControls({
       <button
         onClick={replicate}
         disabled={!selected}
-        title="Copiar e replicar objetos selecionados"
+        title="Mover, espelhar ou replicar a seleção"
       >
         <CopyPlus size={14} /> Replicar
       </button>
@@ -277,99 +276,6 @@ export function GuideEditor({
             </button>
             <button type="submit" className="primary">
               Aplicar referências
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
-export function ReplicateDialog({
-  initial,
-  count,
-  onApply,
-  onClose,
-}: {
-  initial: Point3;
-  count: number;
-  onApply: (offset: Point3, copies: number) => string | null;
-  onClose: () => void;
-}) {
-  const [offset, setOffset] = useState({
-    x: String(initial.x),
-    y: String(initial.y),
-    z: String(initial.z),
-  });
-  const [copies, setCopies] = useState("1");
-  const [error, setError] = useState("");
-  return (
-    <div className="modal-backdrop">
-      <section
-        className="modal launch-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="replicate-title"
-      >
-        <h2 id="replicate-title">Replicar seleção</h2>
-        <p>
-          {count} objetos selecionados. As cópias levam geometria, seção e
-          orientação. Novos nós são livres e sem carga.
-        </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const step = {
-              x: numeric(offset.x),
-              y: numeric(offset.y),
-              z: numeric(offset.z),
-            };
-            if (!Object.values(step).every(Number.isFinite)) {
-              setError("Informe deslocamentos numéricos em metros.");
-              return;
-            }
-            const problem = onApply(step, numeric(copies));
-            if (problem) setError(problem);
-            else onClose();
-          }}
-        >
-          <div className="replica-fields">
-            {coordinates.map((k) => (
-              <label key={k}>
-                Δ{k.toUpperCase()} (m)
-                <input
-                  inputMode="decimal"
-                  value={offset[k]}
-                  onChange={(e) =>
-                    setOffset({ ...offset, [k]: e.target.value })
-                  }
-                />
-              </label>
-            ))}
-            <label>
-              Cópias
-              <input
-                type="number"
-                min={1}
-                max={20}
-                step={1}
-                required
-                value={copies}
-                onChange={(e) => setCopies(e.target.value)}
-              />
-            </label>
-          </div>
-          {error && (
-            <p role="alert" className="launch-error">
-              {error}
-            </p>
-          )}
-          <div className="modal-actions">
-            <button type="button" onClick={onClose}>
-              Cancelar
-            </button>
-            <button type="submit" className="primary">
-              Criar cópias
             </button>
           </div>
         </form>
