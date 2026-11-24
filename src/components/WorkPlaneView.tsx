@@ -749,6 +749,22 @@ export default function WorkPlaneView({
             </g>
           );
         })}
+        <SelectionWindow
+          target={ref}
+          enabled={activeTool === "select" && !quick}
+          plane={plane}
+          projectId={project.id}
+          onApply={(a, b, additive) => {
+            const projectPoint = (pixel: { x: number; y: number }) => ({
+              u: (pixel.x - sx(0)) / camera.scale,
+              v: (sy(0) - pixel.y) / camera.scale,
+            });
+            onWindow(
+              objectsInWindow(project, plane, projectPoint(a), projectPoint(b)),
+              additive,
+            );
+          }}
+        />
         {nodes.map((n) => {
           const active = selected.has(`node:${n.id}`);
           const x = sx(n[axisU]),
@@ -879,22 +895,6 @@ export default function WorkPlaneView({
               pointerEvents="none"
             />
           ))}
-        <SelectionWindow
-          target={ref}
-          enabled={activeTool === "select" && !quick}
-          plane={plane}
-          projectId={project.id}
-          onApply={(a, b, additive) => {
-            const projectPoint = (pixel: { x: number; y: number }) => ({
-              u: (pixel.x - sx(0)) / camera.scale,
-              v: (sy(0) - pixel.y) / camera.scale,
-            });
-            onWindow(
-              objectsInWindow(project, plane, projectPoint(a), projectPoint(b)),
-              additive,
-            );
-          }}
-        />
       </svg>
       {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
         <div className="empty-canvas">

@@ -48,13 +48,11 @@ async function point(svg: Locator, x: number, y: number) {
   );
 }
 async function openModel(page: Page, buffer: Buffer) {
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "selecao.kstruct.json",
-      mimeType: "application/json",
-      buffer,
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "selecao.kstruct.json",
+    mimeType: "application/json",
+    buffer,
+  });
 }
 test("janela, cruzamento, Ctrl e cancelamento preservam a seleção compartilhada", async ({
   page,
@@ -101,6 +99,15 @@ test("janela, cruzamento, Ctrl e cancelamento preservam a seleção compartilhad
   await page.keyboard.up("Control");
   await expect(bar("B3")).toHaveAttribute("aria-pressed", "true");
   await expect(bar(inner.name)).toHaveAttribute("aria-pressed", "true");
+  const guide = svg.locator('line[data-axis="x"][data-position="0"]');
+  const x = await guide.getAttribute("x1");
+  await page.mouse.move(right.x, right.y);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(right.x + 20, right.y - 10, { steps: 4 });
+  await page.mouse.up({ button: "middle" });
+  await expect(guide).not.toHaveAttribute("x1", x!);
+  await expect(bar(inner.name)).toHaveAttribute("aria-pressed", "true");
+  await expect(bar("B3")).toHaveAttribute("aria-pressed", "true");
   await expect(button(page, "Desfazer")).toBeDisabled();
 });
 
@@ -121,7 +128,7 @@ test("filtra, salva, renomeia e recupera um grupo nas vistas após reabrir e usa
   await dialog.getByLabel("Seção", { exact: true }).selectOption("rect");
   await dialog.getByLabel("Pavimento", { exact: true }).selectOption("level1");
   await expect(dialog).toContainText(
-    "1 encontrado(s) · 1 na seleção após aplicar",
+    "1 objeto encontrado · 1 na seleção após aplicar",
   );
   await button(dialog, "Aplicar critérios").click();
   await dialog.getByLabel("Nome do grupo").fill("Pavimento");

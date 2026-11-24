@@ -87,21 +87,23 @@ export default function SelectionWindow({
     svg.addEventListener("pointerdown", down, true);
     svg.addEventListener("click", click, true);
     svg.addEventListener("lostpointercapture", lost);
+    svg.addEventListener("focusout", cancel);
     window.addEventListener("pointermove", move, true);
     window.addEventListener("pointerup", up, true);
-    window.addEventListener("pointercancel", lostOrCancelled, true);
+    window.addEventListener("pointercancel", pointerCancel, true);
     window.addEventListener("keydown", escape, true);
     window.addEventListener("blur", cancel);
-    function lostOrCancelled(e: PointerEvent) {
+    function pointerCancel(e: PointerEvent) {
       if (drag?.id === e.pointerId) cancel();
     }
     return () => {
       svg.removeEventListener("pointerdown", down, true);
       svg.removeEventListener("click", click, true);
       svg.removeEventListener("lostpointercapture", lost);
+      svg.removeEventListener("focusout", cancel);
       window.removeEventListener("pointermove", move, true);
       window.removeEventListener("pointerup", up, true);
-      window.removeEventListener("pointercancel", lostOrCancelled, true);
+      window.removeEventListener("pointercancel", pointerCancel, true);
       window.removeEventListener("keydown", escape, true);
       window.removeEventListener("blur", cancel);
       cancel();

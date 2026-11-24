@@ -70,7 +70,10 @@ export default function SelectionDialog({
       onCancel={onClose}
     >
       <h2 id="selection-title">Seleção e grupos</h2>
-      <p>Seleção atual · {selection.length} objeto(s)</p>
+      <p>
+        Seleção atual · {selection.length}{" "}
+        {selection.length === 1 ? "objeto" : "objetos"}
+      </p>
       <fieldset>
         <legend>Selecionar por critérios</legend>
         <div className="selection-fields">
@@ -149,8 +152,9 @@ export default function SelectionDialog({
           </select>
         </label>
         <p aria-live="polite">
-          {matches.length} encontrado(s) · {combined.length} na seleção após
-          aplicar
+          {matches.length}{" "}
+          {matches.length === 1 ? "objeto encontrado" : "objetos encontrados"} ·{" "}
+          {combined.length} na seleção após aplicar
         </p>
         <button onClick={() => onSelect(combined)}>Aplicar critérios</button>
       </fieldset>
