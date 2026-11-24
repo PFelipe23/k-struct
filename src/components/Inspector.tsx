@@ -10,6 +10,7 @@ import {
   type Project,
   type SelectedObject,
 } from "../domain/model";
+import { parseNumberInput } from "./numberInput";
 
 export function NumberField({
   label,
@@ -38,9 +39,8 @@ export function NumberField({
       cancelling.current = false;
       return;
     }
-    const n = Number(draft.trim().replace(",", "."));
+    const n = parseNumberInput(draft);
     if (
-      !draft.trim() ||
       !Number.isFinite(n) ||
       (min !== undefined && n < min) ||
       (max !== undefined && n > max)

@@ -1259,13 +1259,48 @@ button.primary {
   max-height: calc(100vh - 24px);
   overflow: auto;
 }
-.load-editor {
+.load-editor,
+.node-editor {
   width: 590px;
   color: #cbd2df;
 }
-.load-editor::backdrop {
+.launch-modal::backdrop {
   background: #050913c9;
   backdrop-filter: blur(4px);
+}
+.node-table-scroll {
+  max-height: min(420px, 48vh);
+  overflow: auto;
+  padding: 0 4px 4px;
+}
+.node-editor table {
+  width: 100%;
+  table-layout: fixed;
+  border-spacing: 0;
+  font-size: 11px;
+}
+.node-editor th,
+.node-editor td {
+  padding: 5px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.node-editor thead th {
+  position: sticky;
+  top: 0;
+  background: #1a2332;
+  color: #95a3b9;
+  border-bottom: 1px solid var(--line);
+}
+.node-editor tbody th {
+  padding-top: 12px;
+  font-weight: 500;
+}
+.coordinate-error {
+  display: block;
+  margin-top: 4px;
+  color: #efad9b;
 }
 .load-definition-fields {
   display: grid;

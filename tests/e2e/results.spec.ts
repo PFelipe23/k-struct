@@ -161,6 +161,95 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   );
 });
 
+test("tabela plana valida, cancela e aplica coordenadas em um único passo", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  const display = page.getByLabel("Visualização dos resultados");
+  await expect(display).toHaveValue("m");
+
+  const beam = page
+    .getByRole("application", { name: "Área de lançamento XZ" })
+    .locator('line[stroke="#8ca8cb"]');
+  const beamSpan = () =>
+    beam.evaluate((line) => ({
+      x: Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")),
+      z: Number(line.getAttribute("y1")) - Number(line.getAttribute("y2")),
+    }));
+  const originalSpan = await beamSpan();
+  const dialog = page.getByRole("dialog", { name: "Tabela de nós" });
+  const apply = dialog.getByRole("button", { name: "Aplicar", exact: true });
+  const x1 = dialog.getByLabel("X de N1", { exact: true });
+  const z2 = dialog.getByLabel("Z de N2", { exact: true });
+  await button("Tabela de nós").click();
+  await expect(dialog.getByRole("columnheader")).toHaveText([
+    "Nó",
+    "X (m)",
+    "Z (m)",
+  ]);
+  await x1.fill("0,0");
+  await apply.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(display).toHaveValue("m");
+  await expect(button("Desfazer")).toBeDisabled();
+
+  await button("Tabela de nós").click();
+  await x1.fill("-1,25");
+  await z2.fill("");
+  await apply.click();
+  await expect(x1).toHaveValue("-1,25");
+  await expect(x1).toHaveAttribute("aria-invalid", "false");
+  await expect(z2).toBeFocused();
+  await expect(z2).toHaveAttribute("aria-invalid", "true");
+  await expect(z2).toHaveAccessibleDescription("Preencha a coordenada.");
+  await z2.fill("1e999");
+  await apply.click();
+  await expect(z2).toHaveAccessibleDescription("Informe um número finito.");
+  await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect.poll(beamSpan).toEqual(originalSpan);
+  await expect(display).toHaveValue("m");
+  await expect(button("Desfazer")).toBeDisabled();
+
+  await button("Tabela de nós").click();
+  await expect(x1).toHaveValue("0");
+  await expect(z2).toHaveValue("0");
+  await x1.fill("-1,25");
+  await z2.fill("2.5");
+  await apply.click();
+  await expect(display).toHaveValue("model");
+  await expect(page.getByRole("status")).toContainText("Clique em Analisar");
+  const editedSpan = await beamSpan();
+  expect(editedSpan.x).toBeGreaterThan(originalSpan.x);
+  expect(editedSpan.z).toBeGreaterThan(originalSpan.z);
+  await button("Desfazer").click();
+  await expect.poll(beamSpan).toEqual(originalSpan);
+  await expect(button("Desfazer")).toBeDisabled();
+  await button("Refazer").click();
+  await expect.poll(beamSpan).toEqual(editedSpan);
+
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const path = (await (await download).path())!;
+  const saved = parseProject(await readFile(path, "utf8"));
+  expect(saved.nodes).toMatchObject([
+    { id: "A", x: -1.25, y: 0, z: 0 },
+    { id: "B", x: 6, y: 0, z: 2.5 },
+  ]);
+  expect(saved.members).toEqual(beamExample().members);
+  await button("Novo projeto").click();
+  await page.locator('input[type="file"]').setInputFiles(path);
+  await button("Tabela de nós").click();
+  await expect(x1).toHaveValue("-1.25");
+  await expect(z2).toHaveValue("2.5");
+});
+
 test("combinação linear lista casos pendentes, consulta resultados e preserva a composição", async ({
   page,
 }) => {
