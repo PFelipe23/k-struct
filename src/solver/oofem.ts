@@ -16,6 +16,7 @@ import {
   projectSchema,
   type Project,
 } from "../domain/model";
+import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
 export interface MeshNode extends Point3 {
   number: number;
@@ -35,6 +36,7 @@ export interface AnalysisInput {
   elements: MeshElement[];
   project: Project;
   caseId: string;
+  slab?: ReturnType<typeof exportSlab>["slab"];
 }
 export interface Displacement {
   ux: number;
@@ -74,6 +76,7 @@ export interface AnalysisResult extends StructuralResult {
   solver: string;
   completedAt: string;
   rawOutput: string;
+  slab?: SlabResult;
 }
 
 const spatialDofs = [
@@ -114,6 +117,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   if (errors.length) throw new Error(errors.join("\n"));
   const analysisCase = p.analysisCases.find((c) => c.id === caseId);
   if (!analysisCase) throw new Error("Caso de análise inexistente.");
+  if (p.slabs.length) {
+    const plate = exportSlab(p, analysisCase, p.slabs[0]);
+    return {
+      ...plate,
+      nodes: plate.slab.mesh.nodes,
+      elements: [],
+      project: p,
+      caseId,
+    };
+  }
   const spatial = p.mode === "spatial";
   const dofs = spatial ? spatialDofs : planarDofs;
   const dofList = `${dofs.length} ${dofs.map(([, number]) => number).join(" ")}`;
@@ -266,17 +279,41 @@ export function parseOofemOutput(
     );
   if (/\b(?:nan|inf(?:inity)?)\b/i.test(rawOutput))
     throw new Error("Resultado não finito. Análise rejeitada.");
-  const spatial = input.project.mode === "spatial";
-  const dofs = spatial ? spatialDofs : planarDofs;
-  const d = new Map<number, Displacement>();
+  const nodeOutput = new Map<number, Map<number, number>>();
   for (const match of rawOutput.matchAll(
     /Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\nNode|\n\s*Element output)/g,
   )) {
     const values = new Map<number, number>();
     for (const v of match[2].matchAll(/dof\s+(\d+)\s+d\s+(\S+)/g))
       values.set(Number(v[1]), numberList(v[2])[0]);
+    nodeOutput.set(Number(match[1]), values);
+  }
+  const reactionMap = new Map<string, number>();
+  for (const m of rawOutput.matchAll(
+    /Node\s+(\d+)\s+iDof\s+(\d+)\s+reaction\s+(\S+)/g,
+  ))
+    reactionMap.set(`${m[1]}:${m[2]}`, numberList(m[3])[0]);
+  const metadata = {
+    caseId: input.caseId,
+    solver: rawOutput.match(/OOFEM ver\.[^\n]+/)?.[0] ?? "OOFEM",
+    completedAt: new Date().toISOString(),
+    rawOutput,
+  };
+  if (input.slab)
+    return {
+      ...metadata,
+      displacements: {},
+      reactions: [],
+      members: {},
+      slab: parseSlabOutput(rawOutput, input.slab, nodeOutput, reactionMap),
+    };
+
+  const spatial = input.project.mode === "spatial";
+  const dofs = spatial ? spatialDofs : planarDofs;
+  const d = new Map<number, Displacement>();
+  for (const [number, values] of nodeOutput) {
     if (dofs.every(([, k]) => values.has(k)))
-      d.set(Number(match[1]), {
+      d.set(number, {
         ux: values.get(1)!,
         uy: spatial ? values.get(2)! : 0,
         uz: values.get(3)!,
@@ -321,11 +358,6 @@ export function parseOofemOutput(
     if (!stations.length) stations.push(station(false));
     stations.push(station(true));
   }
-  const reactionMap = new Map<string, number>();
-  for (const m of rawOutput.matchAll(
-    /Node\s+(\d+)\s+iDof\s+(\d+)\s+reaction\s+(\S+)/g,
-  ))
-    reactionMap.set(`${m[1]}:${m[2]}`, numberList(m[3])[0]);
   const reactions: Reaction[] = [];
   const modelNumbers = new Map(input.nodes.map((n) => [n.objectId, n.number]));
   for (const n of input.project.nodes) {
@@ -344,9 +376,7 @@ export function parseOofemOutput(
   }
   checkEquilibrium(input.project, input.caseId, reactions);
   return {
-    caseId: input.caseId,
-    solver: rawOutput.match(/OOFEM ver\.[^\n]+/)?.[0] ?? "OOFEM",
-    completedAt: new Date().toISOString(),
+    ...metadata,
     displacements: Object.fromEntries(
       input.nodes
         .filter((n) => n.objectId)
@@ -354,7 +384,6 @@ export function parseOofemOutput(
     ),
     reactions,
     members,
-    rawOutput,
   };
 }
 

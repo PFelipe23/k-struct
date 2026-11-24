@@ -18,6 +18,11 @@ import portal from "./fixtures/portal-planar.json";
 import portalExpected from "./fixtures/portal-expected.json";
 import { runDeck } from "./fixtures/solve-oofem";
 import {
+  navierSlabCenter,
+  slabBenchmark,
+  slabBenchmarkProject,
+} from "./fixtures/slab-benchmark";
+import {
   spatialBenchmark,
   spatialBenchmarkDifferences,
 } from "./fixtures/spatial-benchmark";
@@ -39,6 +44,87 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("laje da issue #9: equilíbrio e convergência da flecha e dos momentos no centro", () => {
+    const p = slabBenchmarkProject();
+    const [slab] = p.slabs;
+    const reference = navierSlabCenter();
+    const fields = ["uz", "mx", "my"] as const;
+    let previous = fields.map(() => Infinity);
+    for (const [nx, ny] of slabBenchmark.refinements) {
+      slab.divisionsX = nx;
+      slab.divisionsY = ny;
+      const result = solve(p).slab!;
+      expect(result.slabId).toBe(slab.id);
+      expect(result.nodes).toHaveLength((nx + 1) * (ny + 1));
+      expect(result.elements).toHaveLength(2 * nx * ny);
+      expect(result.totalLoadZ).toBe(-60000);
+      expect(Math.abs(result.totalReactionZ - 60000)).toBeLessThan(1);
+      const relative = fields.map((key) =>
+        Math.abs((result.center[key] - reference[key]) / reference[key]),
+      );
+      for (const [index, error] of relative.entries())
+        expect(error).toBeLessThan(previous[index]);
+      previous = relative;
+    }
+    for (const error of previous) expect(error).toBeLessThan(0.005);
+  });
+
+  it("apoios opostos e pressão com fatores reproduzem a flexão de faixa com ν nulo", () => {
+    const p = slabBenchmarkProject();
+    const [slab] = p.slabs;
+    p.materials.find(({ id }) => id === slab.materialId)!.nu = 0;
+    slab.x = -2;
+    slab.y = 5;
+    slab.divisionsX = 31;
+    slab.divisionsY = 24;
+    slab.supports.yMin = slab.supports.yMax = false;
+    p.loadPatterns.push({
+      id: "W",
+      name: "Sucção",
+      nodal: [],
+      uniform: [],
+      pressure: [{ slabId: slab.id, pz: 500 }],
+    });
+    p.analysisCases.push({
+      id: "S",
+      name: "Pressão ascendente",
+      type: "linear-static",
+      factors: [
+        { patternId: "G", factor: -1 },
+        { patternId: "W", factor: 2 },
+      ],
+    });
+    const result = solve(p, "S").slab!;
+    const q = 6000;
+    const rigidity = (slabBenchmark.E * slab.thickness ** 3) / 12;
+    const expectedUz = (5 * q * slab.lengthX ** 4) / (384 * rigidity);
+    const expectedMx = (-q * slab.lengthX ** 2) / 8;
+    expect(result.totalLoadZ).toBe(72000);
+    expect(Math.abs(result.totalReactionZ + 72000)).toBeLessThan(1);
+    expect(Math.abs(result.center.uz / expectedUz - 1)).toBeLessThan(0.005);
+    expect(Math.abs(result.center.mx / expectedMx - 1)).toBeLessThan(0.005);
+    expect(Math.abs(result.center.my)).toBeLessThan(
+      0.005 * Math.abs(expectedMx),
+    );
+  });
+
+  it("rejeita saída de laje sem pontos de Gauss ou em desequilíbrio", () => {
+    const input = exportOofem(slabBenchmarkProject(), "EL");
+    const raw = runDeck(input.deck, executable!);
+    expect(() =>
+      parseOofemOutput(raw.replace(/\bGP\s+1\.1\b/, "GP 1.4"), input),
+    ).toThrow(/Momentos ausentes/);
+    expect(() =>
+      parseOofemOutput(
+        raw.replace(
+          /(iDof\s+3\s+reaction\s+)\S+/,
+          (_, prefix: string) => `${prefix}1e+06`,
+        ),
+        input,
+      ),
+    ).toThrow(/equilíbrio/);
+  });
+
   it("pórtico plano de dois pavimentos concorda com a solução independente por rigidez direta", () => {
     const p = createProject();
     p.materials[0].E = portal.e;
@@ -284,6 +370,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         name: "Ações nodais",
         nodal: secondary,
         uniform: [],
+        pressure: [],
       });
       const factors = (g: number, w: number) => [
         { patternId: permanent.id, factor: g },

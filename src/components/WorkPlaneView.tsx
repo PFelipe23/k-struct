@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
@@ -17,8 +24,10 @@ import type {
   MemberEnvelopeResult,
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
+import SlabPlan from "./SlabPlan";
+import type { SlabMap } from "./SlabResults";
 
-export type Tool = "select" | "node" | "member";
+export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
 interface Props {
@@ -34,6 +43,7 @@ interface Props {
     onSection: (section: EnvelopeSection) => void;
   } | null;
   display: Display;
+  slabMap: SlabMap | null;
   patternId: string;
   pending: Point3 | null;
   onPoint: (p: Point3) => void;
@@ -55,6 +65,7 @@ export default function WorkPlaneView({
   result,
   envelope,
   display,
+  slabMap,
   patternId,
   pending,
   onPoint,
@@ -79,6 +90,24 @@ export default function WorkPlaneView({
   );
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
+  const slab =
+    plane.kind === "XY"
+      ? project.slabs.find((item) =>
+          project.guides.z.some(
+            (level) =>
+              level.id === item.levelId && level.position === plane.offset,
+          ),
+        )
+      : undefined;
+  const slabId = slab?.id;
+  const selectSlab = useCallback(
+    (event: MouseEvent<SVGGElement>) => {
+      if (tool !== "select" || !slabId) return;
+      event.stopPropagation();
+      onSelect({ kind: "slab", id: slabId }, additiveSelection(event));
+    },
+    [tool, slabId, onSelect],
+  );
 
   useEffect(() => {
     const resize = new ResizeObserver((entries) => {
@@ -93,10 +122,12 @@ export default function WorkPlaneView({
     const us = [
       ...project.nodes.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
+      ...(slab ? [slab.x, slab.x + slab.lengthX] : []),
     ];
     const vs = [
       ...project.nodes.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
+      ...(slab ? [slab.y, slab.y + slab.lengthY] : []),
     ];
     const minU = Math.min(0, ...us),
       maxU = Math.max(6, ...us);
@@ -121,8 +152,14 @@ export default function WorkPlaneView({
   }, [project.id, plane.kind]);
   useEffect(() => setCursor(null), [plane.offset]);
 
-  const sx = (u: number) => size.width / 2 + (u - camera.u) * camera.scale;
-  const sy = (v: number) => size.height / 2 - (v - camera.v) * camera.scale;
+  const sx = useCallback(
+    (u: number) => size.width / 2 + (u - camera.u) * camera.scale,
+    [size.width, camera],
+  );
+  const sy = useCallback(
+    (v: number) => size.height / 2 - (v - camera.v) * camera.scale,
+    [size.height, camera],
+  );
   const point = (event: {
     clientX: number;
     clientY: number;
@@ -135,6 +172,7 @@ export default function WorkPlaneView({
       -(event.clientY - rect.top - size.height / 2) / camera.scale + camera.v;
     const aligned =
       pending &&
+      tool === "member" &&
       spatial &&
       orthogonal !== event.shiftKey &&
       onPlane(pending, plane);
@@ -394,6 +432,22 @@ export default function WorkPlaneView({
             </g>
           ))}
         </g>
+        {slab && (
+          <SlabPlan
+            slab={slab}
+            z={plane.offset}
+            sx={sx}
+            sy={sy}
+            active={selected.has(`slab:${slab.id}`)}
+            labels={labels}
+            map={slabMap}
+            pressure={
+              patterns.pressure.find(({ slabId }) => slabId === slab.id)?.pz ??
+              0
+            }
+            onClick={selectSlab}
+          />
+        )}
         {bars.map((m) => {
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
@@ -682,19 +736,32 @@ export default function WorkPlaneView({
             />
           </g>
         )}
-        {pending && cursor && (
-          <line
-            x1={sx(pending[axisU])}
-            y1={sy(pending[axisV])}
-            x2={sx(cursor.u)}
-            y2={sy(cursor.v)}
-            stroke="var(--geometry-selected)"
-            strokeDasharray="6 4"
-            pointerEvents="none"
-          />
-        )}
+        {pending &&
+          cursor &&
+          (tool === "slab" ? (
+            <rect
+              x={Math.min(sx(pending.x), sx(cursor.u))}
+              y={Math.min(sy(pending.y), sy(cursor.v))}
+              width={Math.abs(sx(pending.x) - sx(cursor.u))}
+              height={Math.abs(sy(pending.y) - sy(cursor.v))}
+              fill="var(--geometry-selected)" fillOpacity={0.16}
+              stroke="var(--geometry-selected)"
+              strokeDasharray="6 4"
+              pointerEvents="none"
+            />
+          ) : (
+            <line
+              x1={sx(pending[axisU])}
+              y1={sy(pending[axisV])}
+              x2={sx(cursor.u)}
+              y2={sy(cursor.v)}
+              stroke="var(--geometry-selected)"
+              strokeDasharray="6 4"
+              pointerEvents="none"
+            />
+          ))}
       </svg>
-      {!project.nodes.length && (
+      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
         <div className="empty-canvas">
           <h2>Lance a primeira barra</h2>
           <p>
