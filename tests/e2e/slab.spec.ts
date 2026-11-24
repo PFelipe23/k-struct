@@ -129,6 +129,10 @@ for (const formulation of ["qdkt", "dkt"] as const) {
     await page
       .getByRole("button", { name: "Novo projeto", exact: true })
       .click();
+    await page
+      .getByRole("dialog", { name: "Novo projeto" })
+      .getByRole("button", { name: "Criar projeto", exact: true })
+      .click();
     const open = page.waitForEvent("filechooser");
     await page
       .getByRole("button", { name: "Abrir projeto", exact: true })

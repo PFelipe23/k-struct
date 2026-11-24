@@ -97,6 +97,10 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
   });
 
   await button(page, "Novo projeto").click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await file.setInputFiles(path);
   await expect(casePicker).toHaveValue(vertical.id);
   await expect(casePicker.locator("option")).toHaveCount(2);
