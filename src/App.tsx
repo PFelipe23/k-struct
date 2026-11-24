@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -58,6 +59,7 @@ import {
   type WorkPlane,
 } from "./domain/geometry";
 import { historyReducer } from "./domain/history";
+import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
 import WorkPlaneView, {
   additiveSelection,
   type Display,
@@ -157,6 +159,8 @@ export default function App() {
     [left, setLeft] = useState(true),
     [right, setRight] = useState(true),
     [dual, setDual] = useState(true);
+  const [theme, setTheme] = useState(readTheme);
+  useLayoutEffect(() => applyTheme(theme), [theme]);
   const [executable, setExecutable] = useState(() => {
     try {
       return localStorage.getItem("kstruct.oofem.path") ?? "";
@@ -868,32 +872,50 @@ export default function App() {
           </>
         )}
         {tab === "Exibição" && (
-          <div className="ribbon-group">
-            <div className="ribbon-tools">
-              <button
-                className={`tool-button ${left ? "active" : ""}`}
-                onClick={() => setLeft((v) => !v)}
-              >
-                <PanelLeft />
-                <span>Explorador</span>
-              </button>
-              <button
-                className={`tool-button ${right ? "active" : ""}`}
-                onClick={() => setRight((v) => !v)}
-              >
-                <PanelRight />
-                <span>Propriedades</span>
-              </button>
-              <button
-                className={`tool-button ${dual ? "active" : ""}`}
-                onClick={() => setDual((v) => !v)}
-              >
-                <Columns2 />
-                <span>Duas vistas</span>
-              </button>
+          <>
+            <div className="ribbon-group">
+              <div className="ribbon-tools">
+                <button
+                  className={`tool-button ${left ? "active" : ""}`}
+                  onClick={() => setLeft((v) => !v)}
+                >
+                  <PanelLeft />
+                  <span>Explorador</span>
+                </button>
+                <button
+                  className={`tool-button ${right ? "active" : ""}`}
+                  onClick={() => setRight((v) => !v)}
+                >
+                  <PanelRight />
+                  <span>Propriedades</span>
+                </button>
+                <button
+                  className={`tool-button ${dual ? "active" : ""}`}
+                  onClick={() => setDual((v) => !v)}
+                >
+                  <Columns2 />
+                  <span>Duas vistas</span>
+                </button>
+              </div>
+              <small>ÁREA DE TRABALHO</small>
             </div>
-            <small>ÁREA DE TRABALHO</small>
-          </div>
+            <div className="ribbon-group theme-group">
+              <label>
+                Tema
+                <select
+                  value={theme}
+                  onChange={(event) => {
+                    const next = event.target.value as Theme;
+                    setTheme(next);
+                    saveTheme(next);
+                  }}
+                >
+                  <option value="dark">Escuro</option>
+                  <option value="light">Claro</option>
+                </select>
+              </label>
+            </div>
+          </>
         )}
         <div className="run-group">
           <label>
@@ -1146,6 +1168,7 @@ export default function App() {
             />
             {dual && (
               <SpatialView
+                theme={theme}
                 project={p}
                 selection={selection}
                 result={visibleDisplay === "deformed" ? result : null}

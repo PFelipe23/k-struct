@@ -157,6 +157,110 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   );
 });
 
+test("tema alterna pelo teclado, preserva as vistas e retorna após recarregar", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1100, height: 720 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const root = page.locator("html");
+  const meta = page.locator('meta[name="theme-color"]');
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(root).toHaveCSS("color-scheme", "dark");
+  await expect(meta).toHaveAttribute("content", "#101522");
+
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  const display = page.getByLabel("Visualização dos resultados");
+  await display.selectOption("deformed");
+  await button("Aumentar zoom").click();
+  const drawing = page.getByRole("application", {
+    name: "Área de lançamento XZ",
+  });
+  const deformation = drawing.locator("polyline");
+  const points = (await deformation.getAttribute("points"))!;
+  await expect(deformation).toHaveCSS("stroke", "rgb(103, 214, 192)");
+
+  const canvas = page.locator(".three-container canvas");
+  const initialCamera = await canvas.screenshot();
+  const bounds = (await canvas.boundingBox())!;
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width * 0.7,
+    bounds.y + bounds.height * 0.4,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  const darkScene = await canvas.screenshot();
+  expect(darkScene.equals(initialCamera)).toBe(false);
+
+  const theme = page.getByRole("combobox", { name: "Tema", exact: true });
+  await button("Exibição").press("Enter");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+  await expect(theme).toBeFocused();
+  await expect(theme).toHaveCSS("outline-style", "solid");
+  await expect(theme).toHaveValue("dark");
+  await page.keyboard.press("End");
+  await expect(theme).toHaveValue("light");
+  await expect(theme).toBeInViewport();
+  await expect(theme).toHaveCSS("outline-color", "rgb(96, 51, 152)");
+  await expect(button("Analisar")).toBeInViewport();
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await expect(meta).toHaveAttribute("content", "#eff3f8");
+  await expect(page.locator(".viewport.elevation")).toHaveCSS(
+    "background-color",
+    "rgb(245, 248, 252)",
+  );
+  await expect(deformation).toHaveCSS("stroke", "rgb(0, 105, 95)");
+  await expect(deformation).toHaveAttribute("points", points);
+  await expect(
+    page.getByRole("heading", { name: "B1", exact: true }),
+  ).toBeVisible();
+  await expect(display).toHaveValue("deformed");
+
+  const lightScene = await canvas.screenshot();
+  const backgroundPixel = await page.evaluate(async (data) => {
+    const response = await fetch(`data:image/png;base64,${data}`);
+    const image = await createImageBitmap(await response.blob());
+    const context = new OffscreenCanvas(image.width, image.height).getContext(
+      "2d",
+    )!;
+    context.drawImage(image, 0, 0);
+    image.close();
+    return Array.from(context.getImageData(4, 4, 1, 1).data);
+  }, lightScene.toString("base64"));
+  expect(backgroundPixel).toEqual([237, 243, 250, 255]);
+  await page.keyboard.press("Home");
+  await expect(theme).toHaveValue("dark");
+  await expect(root).toHaveCSS("color-scheme", "dark");
+  expect((await canvas.screenshot()).equals(darkScene)).toBe(true);
+
+  await page.keyboard.press("End");
+  await expect(theme).toHaveValue("light");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await button("Exibição").click();
+  await expect(theme).toHaveValue("light");
+
+  await page.evaluate(() => localStorage.setItem("kstruct.theme", "inválido"));
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "dark");
+});
+
 test("combinação linear lista casos pendentes, consulta resultados e preserva a composição", async ({
   page,
 }) => {
@@ -359,6 +463,19 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
     });
   await page.mouse.click(middle.x, middle.y);
   await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
+  const maximum = plot.locator(".envelope-max-line polyline");
+  const minimum = plot.locator(".envelope-min-line polyline");
+  await expect(maximum).toHaveCSS("stroke", "rgb(130, 220, 230)");
+  await expect(minimum).toHaveCSS("stroke", "rgb(242, 174, 122)");
+  await button("Exibição").click();
+  await page
+    .getByRole("combobox", { name: "Tema", exact: true })
+    .selectOption("light");
+  await expect(maximum).toHaveCSS("stroke", "rgb(0, 101, 119)");
+  await expect(minimum).toHaveCSS("stroke", "rgb(145, 63, 18)");
+  await expect(region.getByLabel("Barra do envelope")).toHaveValue("V1");
+  await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
+  await expect(picker).toHaveValue(envelopeOption);
   const max = table.getByRole("row", { name: /Máximo/ });
   const min = table.getByRole("row", { name: /Mínimo/ });
   await expect(max).toContainText("Flexão positiva");
