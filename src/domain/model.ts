@@ -392,7 +392,7 @@ export function parseProject(source: string): Project {
   } catch {
     throw new Error("O arquivo não contém um JSON válido.");
   }
-  // Some older project writers included named groups before the field was versioned.
+  // Preserve explicit object references when a legacy file already includes groups.
   let oldGroups: unknown = [];
   if (
     value &&

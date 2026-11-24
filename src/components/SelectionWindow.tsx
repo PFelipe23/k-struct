@@ -36,7 +36,10 @@ export default function SelectionWindow({
     function down(e: PointerEvent) {
       if (e.button !== 0 || !e.isPrimary) return;
       blockClick.current = false;
-      if (enabled) drag = { id: e.pointerId, start: pixel(e), moved: false };
+      if (!enabled) return;
+      e.preventDefault();
+      svg.focus({ preventScroll: true });
+      drag = { id: e.pointerId, start: pixel(e), moved: false };
     }
     function move(e: PointerEvent) {
       if (!drag || e.pointerId !== drag.id) return;

@@ -123,10 +123,18 @@ test("filtra, salva, renomeia e recupera um grupo nas vistas após reabrir e usa
   const dialog = page.getByRole("dialog", { name: "Seleção e grupos" });
   const open = () => button(page, "Seleção e grupos").click();
   await open();
-  await dialog.getByLabel("Tipo de objeto").selectOption("member");
-  await dialog.getByLabel("Material", { exact: true }).selectOption("steel");
-  await dialog.getByLabel("Seção", { exact: true }).selectOption("rect");
-  await dialog.getByLabel("Pavimento", { exact: true }).selectOption("level1");
+  await dialog
+    .getByRole("combobox", { name: "Tipo de objeto", exact: true })
+    .selectOption("member");
+  await dialog
+    .getByRole("combobox", { name: "Material", exact: true })
+    .selectOption("steel");
+  await dialog
+    .getByRole("combobox", { name: "Seção", exact: true })
+    .selectOption("rect");
+  await dialog
+    .getByRole("combobox", { name: "Pavimento", exact: true })
+    .selectOption("level1");
   await expect(dialog).toContainText(
     "1 objeto encontrado · 1 na seleção após aplicar",
   );
@@ -171,7 +179,9 @@ test("filtra, salva, renomeia e recupera um grupo nas vistas após reabrir e usa
   async function count(n: number) {
     await open();
     await expect(
-      dialog.getByLabel("Grupo salvo").locator("option:checked"),
+      dialog
+        .getByRole("combobox", { name: "Grupo salvo", exact: true })
+        .locator("option:checked"),
     ).toHaveText(`Vigas de borda (${n})`);
     await button(dialog, "Fechar").click();
   }
@@ -182,7 +192,9 @@ test("filtra, salva, renomeia e recupera um grupo nas vistas após reabrir e usa
   await count(0);
   await open();
   await button(dialog, "Excluir grupo").click();
-  await expect(dialog.getByLabel("Grupo salvo").locator("option")).toHaveCount(
-    1,
-  );
+  await expect(
+    dialog
+      .getByRole("combobox", { name: "Grupo salvo", exact: true })
+      .locator("option"),
+  ).toHaveCount(1);
 });

@@ -625,6 +625,7 @@ button.primary {
 }
 
 .selection-trigger { white-space: nowrap; font-size: 11px; padding: 4px 8px; border-color: var(--line); }
+.drawing-select { user-select: none; -webkit-user-select: none; }
 .selection-window { color: var(--accent); }
 .selection-window[data-mode="crossing"] { color: var(--green); }
 .selection-window rect { stroke: currentColor; fill: currentColor; fill-opacity: .14; }
