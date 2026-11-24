@@ -456,6 +456,7 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   );
 
   await page.locator('input[type="file"]').setInputFiles(file);
+  await expect(picker).toHaveValue("EL");
   await picker.selectOption(combo);
   await button("Mensagens").click();
   await expect(status).toContainText("1,8 × Permanente − 0,3 × Variável");
