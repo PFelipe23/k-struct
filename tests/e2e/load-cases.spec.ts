@@ -207,9 +207,23 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
 
     await page.evaluate(() => Object.assign(window, { isTauri: false }));
     await button(page, "Esforços").click();
+    await page.getByLabel("Barra em Esforços").selectOption({ label: "B5" });
+    const memberCells = page.getByRole("table").locator("tbody td:first-child");
+    await expect(memberCells).toHaveText(
+      Array(model.mesh.segmentsPerMember + 1).fill("B5"),
+    );
     const csvDownload = page.waitForEvent("download");
     await button(page, "CSV").click();
     const csv = await readFile((await (await csvDownload).path())!, "utf8");
+    expect(
+      csv
+        .split("\n")
+        .slice(1)
+        .map((row) => row.split(";")[0]),
+    ).toEqual(Array(model.mesh.segmentsPerMember + 1).fill('"B5"'));
+    expect(csv).toContain(
+      '"N (kN)";"Vy (kN)";"Vz (kN)";"Mx (kN·m)";"My (kN·m)";"Mz (kN·m)"',
+    );
     expect(csv).toContain('"Caso";"ID do caso"');
     expect(csv).toContain('"Vertical";"EL"');
 
