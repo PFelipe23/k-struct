@@ -50,7 +50,12 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, connectIntersections, replicate } from "./domain/editing";
+import {
+  addMember,
+  addSlab,
+  connectIntersections,
+  replicate,
+} from "./domain/editing";
 import {
   onPlane,
   origin,
@@ -75,6 +80,13 @@ import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
 import NodeTable from "./components/NodeTable";
 import Results from "./components/Results";
+import SlabResults, {
+  SlabLegend,
+  buildSlabMap,
+  isSlabDisplay,
+  slabDisplays,
+  type SlabDisplay,
+} from "./components/SlabResults";
 import EnvelopeResults from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
@@ -106,6 +118,8 @@ import {
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v6") ??
+      localStorage.getItem("kstruct.draft.v5") ??
       localStorage.getItem("kstruct.draft.v4") ??
       localStorage.getItem("kstruct.draft.v3") ??
       localStorage.getItem("kstruct.draft.v2") ??
@@ -124,10 +138,11 @@ export default function App() {
   }));
   const p = history.current;
   const spatial = p.mode === "spatial";
+  const slab = p.slabs[0];
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
   const [preferredPlane, setPlane] = useState<PlaneKind>("XY");
-  const [guideId, setGuide] = useState("");
+  const [guideId, setGuide] = useState(slab?.levelId ?? "");
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
     "guides" | "replicate" | "nodes" | null
@@ -138,7 +153,7 @@ export default function App() {
     planeGuides.find((g) => g.id === guideId) ?? planeGuides[0];
   const plane: WorkPlane = { kind, offset: spatial ? activeGuide.position : 0 };
   const [pending, setPending] = useState<Point3 | null>(null),
-    [display, setDisplay] = useState<Display>("model");
+    [display, setDisplay] = useState<Display | SlabDisplay>("model");
   const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
     () => new Map(),
   );
@@ -192,11 +207,11 @@ export default function App() {
     p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
   const caseId = analysisCase.id;
   const combination =
-    derivedChoice?.kind === "combination"
+    !slab && derivedChoice?.kind === "combination"
       ? p.resultCombinations.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const envelope =
-    derivedChoice?.kind === "envelope"
+    !slab && derivedChoice?.kind === "envelope"
       ? p.resultEnvelopes.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const derived = combination ?? envelope;
@@ -204,6 +219,16 @@ export default function App() {
     p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
     p.loadPatterns[0].id;
   const caseResult = caseResults.get(caseId) ?? null;
+  const slabResult = caseResult?.slab ?? null;
+  const slabMap = useMemo(
+    () =>
+      slabResult && isSlabDisplay(display)
+        ? buildSlabMap(slabResult, display)
+        : null,
+    [slabResult, display],
+  );
+  const showSlabMap =
+    plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -268,20 +293,21 @@ export default function App() {
               : 0,
         }
       : null;
+  const beamDisplay = isSlabDisplay(display) ? "model" : display;
   const envelopeComponent =
-    display === "model" || display === "deformed"
+    beamDisplay === "model" || beamDisplay === "deformed"
       ? spatial
         ? "my"
         : "m"
-      : display;
+      : beamDisplay;
   const showEnvelope = Boolean(envelopeResult) && tool === "select";
   const result = envelope ? null : combined ? combined.result : caseResult;
   const visibleDisplay = showEnvelope
     ? envelopeComponent
     : result
-      ? display
+      ? beamDisplay
       : "model";
-  const defaultDiagram = spatial ? "deformed" : "m";
+  const defaultDiagram = slab ? "slab-uz" : spatial ? "deformed" : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
   );
@@ -296,7 +322,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v4", serialized);
+      localStorage.setItem("kstruct.draft.v6", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -317,6 +343,9 @@ export default function App() {
     setCaseResults(new Map());
     setDisplay("model");
     setPreferredSection(null);
+    setMessage(
+      "Modelo em edição. Analise a revisão atual para obter resultados.",
+    );
   }, []);
   const edit = useCallback(
     (fn: (p: Project) => void) => {
@@ -366,7 +395,8 @@ export default function App() {
     setDerivedChoice(null);
     setCaseId(selected.id);
     if (caseResults.has(selected.id)) {
-      setDisplay((value) => (value === "model" ? defaultDiagram : value));
+      if (slab) showDisplay(isSlabDisplay(display) ? display : "slab-uz");
+      else setDisplay((value) => (value === "model" ? defaultDiagram : value));
       setMessage(`Resultados do caso ${selected.name}.`);
     } else {
       setDisplay("model");
@@ -375,7 +405,7 @@ export default function App() {
   };
   const isSelected = (kind: SelectedObject["kind"], id: string) =>
     selection.some((s) => s.kind === kind && s.id === id);
-  const selectObject = (object: Selection, additive = false) => {
+  const selectObject = useCallback((object: Selection, additive = false) => {
     if (!additive) setSelection(object ? [object] : []);
     else if (object)
       setSelection((selected) => {
@@ -385,11 +415,21 @@ export default function App() {
           ? selected.filter((s) => !same(s))
           : [...selected, object];
       });
-  };
+  }, []);
   const changeTool = (t: Tool) => {
+    if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
     setTool(t);
     setPending(null);
     setDisplay("model");
+  };
+  const showDisplay = (value: Display | SlabDisplay) => {
+    if (slab && isSlabDisplay(value)) {
+      setPlane("XY");
+      setGuide(slab.levelId);
+      setTool("select");
+      setPending(null);
+    }
+    setDisplay(value);
   };
   const inspectSection = (target: EnvelopeSection) => {
     selectObject({ kind: "member", id: target.memberId });
@@ -401,10 +441,10 @@ export default function App() {
     invalidateResults();
     current.current = project;
     dispatch({ type: "reset", project });
-    setSelection([]);
+    setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
     setPending(null);
     setPlane("XY");
-    setGuide("");
+    setGuide(project.slabs[0]?.levelId ?? "");
     setCaseId(project.analysisCases[0].id);
     setDerivedChoice(null);
     setForceMemberId("");
@@ -487,6 +527,7 @@ export default function App() {
       if (!e.ctrlKey && !e.metaKey) {
         if (e.key.toLowerCase() === "b") changeTool("member");
         if (e.key.toLowerCase() === "n") changeTool("node");
+        if (e.key.toLowerCase() === "l") changeTool("slab");
         if (e.key.toLowerCase() === "v") changeTool("select");
         if (e.key === "Delete") remove();
       }
@@ -503,18 +544,22 @@ export default function App() {
       if (!error) selectObject({ kind: "node", id });
       return;
     }
-    if (tool !== "member") return;
+    if (tool !== "member" && tool !== "slab") return;
     if (!pending) {
       setPending(point);
       return;
     }
     let id = "";
     const error = edit((p) => {
-      id = addMember(p, pending, point).id;
+      id =
+        tool === "slab"
+          ? addSlab(p, activeGuide.id, pending, point).id
+          : addMember(p, pending, point).id;
     });
     if (!error) {
-      selectObject({ kind: "member", id });
+      selectObject({ kind: tool, id });
       setPending(null);
+      if (tool === "slab") setTool("select");
     }
   };
   const selectPlane = () => {
@@ -527,6 +572,9 @@ export default function App() {
       ...p.members
         .filter((m) => ids.has(m.start) && ids.has(m.end))
         .map((m) => ({ kind: "member" as const, id: m.id })),
+      ...(slab && plane.kind === "XY" && slab.levelId === activeGuide.id
+        ? [{ kind: "slab" as const, id: slab.id }]
+        : []),
     ]);
   };
   const connect = () => {
@@ -573,6 +621,7 @@ export default function App() {
       return updated;
     });
     setDisplay("model");
+    setMessage(`Analisando ${requestedCase.name}…`);
     try {
       const { execution, input } = await analyze(
         snapshot,
@@ -606,9 +655,9 @@ export default function App() {
       setCaseResults((results) =>
         new Map(results).set(completed.caseId, completed),
       );
-      setDisplay(defaultDiagram);
+      showDisplay(defaultDiagram);
       setMessage(
-        `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.${historyNotice}`,
+        `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. ${completed.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${historyNotice}`,
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -762,6 +811,22 @@ export default function App() {
                     <kbd>{shortcut}</kbd>
                   </button>
                 ))}
+                {spatial && (
+                  <button
+                    className={`tool-button ${tool === "slab" ? "active" : ""}`}
+                    title={
+                      slab
+                        ? "O projeto já contém uma laje isolada"
+                        : "Lançar laje retangular na planta XY (L)"
+                    }
+                    disabled={plane.kind !== "XY" || Boolean(slab)}
+                    onClick={() => changeTool("slab")}
+                  >
+                    <Square size={21} />
+                    <span>Laje</span>
+                    <kbd>L</kbd>
+                  </button>
+                )}
                 <button
                   className="tool-button"
                   disabled={!selection.length}
@@ -871,15 +936,21 @@ export default function App() {
             )}
             <div className="analysis-description">
               <b>
-                {spatial
-                  ? "Estática linear espacial"
-                  : "Estática linear no plano XZ"}
+                {slab
+                  ? "Estática linear · Laje isolada"
+                  : spatial
+                    ? "Estática linear espacial"
+                    : "Estática linear no plano XZ"}
               </b>
               <span>
-                Euler–Bernoulli · {p.mesh.segmentsPerMember} elementos por barra
+                {slab
+                  ? `Placa delgada DKT · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
+                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} elementos por barra`}
               </span>
               <span>
-                Peso próprio aplicado manualmente como carga distribuída
+                {slab
+                  ? "Peso próprio aplicado manualmente como pressão"
+                  : "Peso próprio aplicado manualmente como carga distribuída"}
               </span>
             </div>
           </>
@@ -932,9 +1003,11 @@ export default function App() {
         )}
         <div className="run-group">
           <label>
-            Caso, combinação ou envelope
+            {slab ? "Caso estático" : "Caso, combinação ou envelope"}
             <select
-              aria-label="Caso, combinação ou envelope"
+              aria-label={
+                slab ? "Caso estático" : "Caso, combinação ou envelope"
+              }
               disabled={running}
               value={
                 envelope
@@ -952,7 +1025,7 @@ export default function App() {
                   </option>
                 ))}
               </optgroup>
-              {p.resultCombinations.length > 0 && (
+              {!slab && p.resultCombinations.length > 0 && (
                 <optgroup label="Combinações lineares">
                   {p.resultCombinations.map((item) => (
                     <option key={item.id} value={`combination:${item.id}`}>
@@ -961,7 +1034,7 @@ export default function App() {
                   ))}
                 </optgroup>
               )}
-              {p.resultEnvelopes.length > 0 && (
+              {!slab && p.resultEnvelopes.length > 0 && (
                 <optgroup label="Envelopes">
                   {p.resultEnvelopes.map((item) => (
                     <option key={item.id} value={`envelope:${item.id}`}>
@@ -1055,6 +1128,28 @@ export default function App() {
                   </button>
                 ))}
               </details>
+              {spatial && (
+                <details open>
+                  <summary>
+                    Lajes <span>{p.slabs.length}</span>
+                  </summary>
+                  {slab && (
+                    <button
+                      key={slab.id}
+                      className={isSelected("slab", slab.id) ? "selected" : ""}
+                      aria-pressed={isSelected("slab", slab.id)}
+                      onClick={(event) =>
+                        selectObject(
+                          { kind: "slab", id: slab.id },
+                          additiveSelection(event),
+                        )
+                      }
+                    >
+                      <Square size={13} /> {slab.name}
+                    </button>
+                  )}
+                </details>
+              )}
               <details>
                 <summary>
                   Seções <span>{p.sections.length}</span>
@@ -1105,18 +1200,29 @@ export default function App() {
               {spatial ? "Modelo espacial" : "Modelo estrutural"}{" "}
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
+                {slab && " · 1 laje"}
               </span>
             </div>
             <select
               aria-label="Visualização dos resultados"
-              value={visibleDisplay}
-              onChange={(e) => setDisplay(e.target.value as Display)}
+              value={showSlabMap ? display : visibleDisplay}
+              onChange={(e) =>
+                showDisplay(e.target.value as Display | SlabDisplay)
+              }
             >
               {!showEnvelope && (
                 <option value="model">Geometria e cargas</option>
               )}
-              {result && <option value="deformed">Deformada ampliada</option>}
-              {(result || showEnvelope) && (
+              {slabResult &&
+                Object.entries(slabDisplays).map(([key, field]) => (
+                  <option key={key} value={key}>
+                    {field.label}
+                  </option>
+                ))}
+              {!slab && result && (
+                <option value="deformed">Deformada ampliada</option>
+              )}
+              {!slab && (result || showEnvelope) && (
                 <>
                   {spatial ? (
                     <>
@@ -1143,12 +1249,20 @@ export default function App() {
               guideId={activeGuide.id}
               guides={planeGuides}
               orthogonal={orthogonal}
-              selected={selection.length}
+              selected={
+                selection.some(({ kind }) => kind === "slab")
+                  ? 0
+                  : selection.length
+              }
               onPlane={(kind) => {
                 setPlane(kind);
                 setGuide("");
+                if (tool === "slab") changeTool("select");
               }}
-              onGuide={setGuide}
+              onGuide={(id) => {
+                setGuide(id);
+                if (tool === "slab") setPending(null);
+              }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
               editGuides={() => setLaunchDialog("guides")}
               selectPlane={selectPlane}
@@ -1174,6 +1288,7 @@ export default function App() {
                   : null
               }
               display={visibleDisplay}
+              slabMap={showSlabMap}
               patternId={patternId}
               pending={pending}
               onPoint={onPoint}
@@ -1189,7 +1304,13 @@ export default function App() {
               />
             )}
           </div>
-          {showEnvelope ? (
+          {showSlabMap && slab ? (
+            <SlabLegend
+              map={showSlabMap}
+              name={slab.name}
+              caseName={analysisCase.name}
+            />
+          ) : showEnvelope ? (
             <div className="diagram-caption envelope-legend">
               <span className="envelope-max-label">Máximo</span>
               <span className="envelope-min-label">Mínimo</span>
@@ -1209,7 +1330,20 @@ export default function App() {
               </div>
             )
           )}
-          {envelope ? (
+          {slab ? (
+            <SlabResults
+              slab={slab}
+              caseName={analysisCase.name}
+              result={slabResult}
+              rawOutput={slabResult ? caseResult?.rawOutput : undefined}
+              message={message}
+              running={running}
+              openRunHistory={
+                lastLog ? () => setShowRunHistory(true) : undefined
+              }
+              onExportError={setMessage}
+            />
+          ) : envelope ? (
             <EnvelopeResults
               key={envelope.id}
               project={p}
@@ -1270,15 +1404,19 @@ export default function App() {
                 : "Modelo em edição"}
         </span>
         <span>
-          {pending
-            ? "Marque a segunda extremidade · Esc para cancelar"
-            : tool === "member"
-              ? "Marque a primeira extremidade da barra"
-              : tool === "node"
-                ? "Clique na malha para inserir um nó"
-                : selection.length > 1
-                  ? `${selection.length} objetos selecionados`
-                  : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+          {tool === "slab"
+            ? pending
+              ? "Marque o canto oposto da laje · Esc para cancelar"
+              : "Marque o primeiro canto da laje na planta XY"
+            : pending
+              ? "Marque a segunda extremidade · Esc para cancelar"
+              : tool === "member"
+                ? "Marque a primeira extremidade da barra"
+                : tool === "node"
+                  ? "Clique na malha para inserir um nó"
+                  : selection.length > 1
+                    ? `${selection.length} objetos selecionados`
+                    : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           kN · m · rad <i /> {desktop() ? "Desktop" : "Navegador · edição"}{" "}

@@ -14,7 +14,8 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Selecionar, replicar por deslocamento e conectar interseções em 3D. As cópias levam geometria, seção e orientação, com nós novos sem apoios nem cargas.
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
-- Salvar e reabrir `.kstruct.json` no esquema v4, com migração dos projetos v1 a v3 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
+- Salvar e reabrir `.kstruct.json` no esquema v6, com migração dos projetos v1 a v5 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -62,6 +63,15 @@ Em **Modelo** → **Tabela de nós**, edite as coordenadas em metros de vários 
 
 Em **Exibição → Tema**, escolha **Claro** ou **Escuro**. A primeira abertura usa o tema escuro. A escolha é guardada nas preferências locais e vale para a interface e as duas vistas, inclusive durante a consulta de resultados.
 
+### Laje retangular isolada
+
+1. Abra **Novo pórtico espacial**, deixe a **Planta XY** ativa e selecione o pavimento. Ative **Laje** (`L`) e clique em dois cantos opostos do painel.
+2. Nas propriedades, informe os lados em metros, a espessura em centímetros, o material, as bordas com apoio simples, as subdivisões em X/Y e a **Pressão pZ** em kN/m² para o padrão escolhido. O sinal negativo indica pressão para baixo. Em **Elemento de placa**, o quadrilateral **QDKT** usa apoio simples nas quatro bordas. O triangular **DKT** permite liberar bordas e requer pelo menos duas apoiadas.
+3. Salve o projeto. No desktop, selecione o caso estático e clique em **Analisar**. O seletor de visualização oferece os mapas de **Flecha UZ**, **Momento local Mx** e **Momento local My**. O painel de resultados mostra os valores no centro e a soma de reações em Z.
+4. Para reproduzir a [placa de referência QDKT](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada), use 4 × 3 m, espessura de 10 cm, E = 30 GPa, ν = 0,20, as quatro bordas apoiadas e pZ = −5 kN/m². Repita com 8 × 6, 16 × 12 e 32 × 24 subdivisões.
+
+O fluxo de laje usa um painel isolado por projeto e resultados por caso estático. As propriedades do painel e da malha são guardadas no arquivo. Edições, desfazer e refazer descartam os resultados da revisão anterior.
+
 ### Padrões, casos, combinações e envelopes
 
 Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.
@@ -74,7 +84,7 @@ Na aba **Esforços** de um caso ou combinação, use **Barra** para filtrar as e
 
 Em **Cargas e casos** → **Envelopes**, dê um nome ao envelope e marque as combinações que participam. Depois de analisar seus casos, selecione o envelope e o componente de esforço. As curvas indicam o mínimo e o máximo com sinal nas estações da malha. Clique no diagrama ou escolha **Barra** e **Estação x/L** para consultar a combinação governante de cada extremo e todos os esforços que atuam simultaneamente naquela seção. O CSV inclui as estações de todas as barras para o componente em exibição, com IDs e fatores para rastrear cada extremo. Uma edição do projeto ou das definições descarta os resultados em memória.
 
-Atalhos: `V` selecionar, `N` nó, `B` barra, `Esc` cancelar lançamento, `Delete` excluir seleção, `Ctrl+Z` desfazer, `Ctrl+Shift+Z` refazer e `Ctrl+S` salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
+Use `V` para selecionar, `N` para criar nó, `B` para criar barra, `L` para lançar laje, `Esc` para cancelar lançamento, `Delete` para excluir seleção, `Ctrl+Z` para desfazer, `Ctrl+Shift+Z` para refazer e `Ctrl+S` para salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
 
 ## Verificação
 
@@ -89,7 +99,7 @@ Os benchmarks numéricos exigem `OOFEM_BIN`. Sem ele, aparecem explicitamente co
 
 ```sh
 OOFEM_BIN=/caminho/absoluto/oofem npm test
-OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- spatial.spec.ts load-cases.spec.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- spatial.spec.ts load-cases.spec.ts slab.spec.ts
 cargo test --manifest-path crates/solver-runner/Cargo.toml
 ```
 

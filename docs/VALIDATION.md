@@ -114,6 +114,36 @@ OOFEM_BIN="$PWD/.oofem-dist/build/bin/oofem" npm test -- tests/plate.integration
 
 No Windows, use o caminho absoluto do `oofem.exe` em `OOFEM_BIN`. A regressão integra `npm run check` e é explicitamente ignorada se `OOFEM_BIN` estiver ausente.
 
+A regressão também lança o painel QDKT pelo modelo do editor, em posição deslocada da origem, e compara a entrada e o parser de produção com os resultados do gerador independente nas três malhas. A comparação cobre a soma de reações e os valores centrais de UZ, Mx e My.
+
+## Laje retangular isolada
+
+Selecione **Triangular DKT** para repetir os resultados desta seção. **Quadrilateral QDKT** é a formulação inicial do editor e reproduz a tabela da seção anterior.
+
+O caso da [issue #9](https://github.com/ricardocorsini/k-struct/issues/9) usa uma placa de 4 × 3 m, espessura de 0,10 m, E = 30 GPa, ν = 0,20 e pZ = −5 kN/m². A resultante aplicada é −60 kN. A malha DKT usa dois triângulos de Kirchhoff (DKT) por célula retangular. O apoio simples impõe UZ e a rotação correspondente à inclinação tangencial de cada borda. No interior das bordas, a rotação em torno da própria borda fica livre. Essa condição aproxima as bordas com flecha nula e momento normal nulo da referência. As propriedades do elemento e as cargas nodais equivalentes estão no [contrato do motor](OOFEM.md#laje-retangular-isolada).
+
+A referência independente é a série de Navier para uma placa elástica isotrópica delgada. Com a e b como lados, usa-se D = Eh³/[12(1−ν²)], α = mπ/a e β = nπ/b. Para m e n ímpares, a amplitude de UZ é 16 pZ/[π²mn D(α² + β²)²]. As amplitudes de Mx e My na convenção sagente positiva são obtidas multiplicando a de UZ por −D(α² + νβ²) e −D(β² + να²), respectivamente. No centro, os senos alternam entre +1 e −1. A [implementação da série](../tests/fixtures/slab-benchmark.ts) soma os índices ímpares até 201. A referência e o DKT desprezam o cisalhamento transversal.
+
+O parser lê UZ diretamente no nó central nas três malhas de referência. Nos mapas, Mx e My são a média dos três pontos de Gauss de cada triângulo. Para a consulta central, os momentos são extrapolados linearmente para os vértices e promediados entre os triângulos adjacentes. No ponto de Gauss mais próximo de um vértice, os pesos baricêntricos são 2/3, 1/6 e 1/6. A inversão é `M_vértice = 2 M_GP − M_médio`. Um teste com campos afins de Mx e My confere cada vértice, inclusive os de borda. Com subdivisões ímpares, a consulta interpola no segmento que passa pelo centro.
+
+Valores medidos com OOFEM 3.0 no commit `214b161ed3acb471f2d0104b004c37fd73bafaa2`. UZ é negativo para baixo. Momentos positivos tracionam a face inferior na direção indicada pelos eixos X e Y do painel.
+
+| Subdivisões X × Y | Triângulos | ΣRZ (kN) | UZ (mm) | Mx (kN·m/m) | My (kN·m/m) | Erro UZ / Mx / My |
+| ----------------- | ---------- | -------- | ------- | ----------- | ----------- | ----------------- |
+| 8 × 6             | 96         | 59,99980 | −1,013955 | 2,02504    | 3,10462     | 1,65% / 1,96% / 0,97% |
+| 16 × 12           | 384        | 60,00012 | −1,026874 | 1,99603    | 3,08276     | 0,39% / 0,50% / 0,26% |
+| 32 × 24           | 1.536      | 59,99996 | −1,029932 | 1,98866    | 3,07682     | 0,10% / 0,13% / 0,07% |
+| Navier            | —          | 60,00000 | −1,030920 | 1,98613    | 3,07472     | — |
+
+O teste exige erro decrescente em todas as grandezas centrais, erro relativo inferior a 0,5% na malha final e diferença inferior a 1 N na soma das reações verticais em cada malha. A tolerância de 0,5% cobre o erro de discretização e recuperação de momentos na malha fina. A de 1 N acomoda a precisão textual do OOFEM para as reações. Uma segunda regressão verifica apoios opostos, pressão ascendente obtida por fatores de carga e a solução de faixa para ν = 0. Uma análise incompleta ou em desequilíbrio é rejeitada.
+
+O Playwright lança a laje na cota do pavimento, edita as bordas e a pressão, salva, reabre e compara a entrada exportada com a do modelo persistido. Com o motor disponível, substitui apenas a fronteira IPC e resolve a entrada que a própria interface envia ao OOFEM. Confere os três mapas, a tabela central, o refinamento e a invalidação por edição, desfazer, refazer e conclusão de uma análise iniciada em revisão anterior.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm run check
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- slab.spec.ts
+```
+
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, placas com deformação por cisalhamento transversal, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.

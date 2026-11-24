@@ -21,6 +21,8 @@ interface SceneState {
 }
 function createModelMaterials() {
   return {
+    slab: new THREE.MeshStandardMaterial(),
+    selectedSlab: new THREE.MeshStandardMaterial(),
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
@@ -125,6 +127,8 @@ export default function SpatialView({
       light.groundColor.set(color("--scene-light-ground"));
       recolorGrid(grid, color("--scene-grid"), color("--scene-grid-center"));
       axes.setColors(color("--axis-x"), color("--axis-y"), color("--axis-z"));
+      materials.slab.color.set(color("--geometry-member"));
+      materials.selectedSlab.color.set(color("--geometry-selected"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
       materials.deformed.color.set(color("--geometry-deformed"));
@@ -232,6 +236,26 @@ export default function SpatialView({
     const selectedIds = new Set(
       selection.map((item) => `${item.kind}:${item.id}`),
     );
+    for (const slab of project.slabs) {
+      const z = project.guides.z.find(
+        ({ id }) => id === slab.levelId,
+      )!.position;
+      const surface = new THREE.Mesh(
+        new THREE.BoxGeometry(slab.lengthX, slab.thickness, slab.lengthY),
+        selectedIds.has(`slab:${slab.id}`)
+          ? s.materials.selectedSlab
+          : s.materials.slab,
+      );
+      surface.position.copy(
+        scenePoint({
+          x: slab.x + slab.lengthX / 2,
+          y: slab.y + slab.lengthY / 2,
+          z,
+        }),
+      );
+      surface.userData.selection = { kind: "slab", id: slab.id };
+      s.model.add(surface);
+    }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
@@ -289,7 +313,7 @@ export default function SpatialView({
   }, [theme]);
   useEffect(() => {
     state.current?.fit();
-  }, [project.id]);
+  }, [project.id, project.slabs[0]?.id]);
   return (
     <section className="viewport spatial">
       <div className="view-heading">

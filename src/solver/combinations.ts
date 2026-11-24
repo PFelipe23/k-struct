@@ -80,6 +80,8 @@ function weightedCases(
   combination: ResultCombination,
   caseResults: ReadonlyMap<string, AnalysisResult>,
 ) {
+  if (project.slabs.length)
+    throw new Error("Consulte os resultados da laje por caso estático.");
   const terms = combination.factors.filter((term) => term.factor !== 0);
   if (!terms.length)
     throw new Error("Informe pelo menos um fator diferente de zero.");

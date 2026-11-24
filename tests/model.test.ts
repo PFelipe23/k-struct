@@ -7,7 +7,10 @@ import {
   parseProject,
   removeSelection,
   serializeProject,
+  type Project,
 } from "../src/domain/model";
+import { meshSlab } from "../src/domain/slab";
+import { parseSlabOutput } from "../src/solver/slab";
 import { historyReducer } from "../src/domain/history";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
 import {
@@ -16,6 +19,14 @@ import {
   replicate,
 } from "../src/domain/editing";
 import { nodalLoad, uniformLoad } from "../src/domain/model";
+import { slabBenchmarkProject } from "./fixtures/slab-benchmark";
+
+function beforeSlabs({ slabs, loadPatterns, ...project }: Project) {
+  return {
+    ...project,
+    loadPatterns: loadPatterns.map(({ pressure, ...pattern }) => pattern),
+  };
+}
 
 describe("projeto versionado e edição", () => {
   it("salva e reabre sem alterar IDs, unidades ou cargas", () => {
@@ -24,7 +35,7 @@ describe("projeto versionado e edição", () => {
   });
   it("migra o arquivo gerado pela versão 0.2 com o contrato plano original", () => {
     const { mode, guides, resultCombinations, resultEnvelopes, ...current } =
-      beamExample();
+      beforeSlabs(beamExample());
     const legacy = {
       ...current,
       schemaVersion: 1,
@@ -44,7 +55,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(4);
+    expect(p.schemaVersion).toBe(6);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -59,7 +70,8 @@ describe("projeto versionado e edição", () => {
   it("migra o esquema v2 preservando os casos e inicia a lista de combinações vazia", () => {
     const project = createProject("spatial");
     project.analysisCases[0].factors[0].factor = -0.75;
-    const { resultCombinations, resultEnvelopes, ...old } = project;
+    const { resultCombinations, resultEnvelopes, ...old } =
+      beforeSlabs(project);
     expect(parseProject(JSON.stringify({ ...old, schemaVersion: 2 }))).toEqual(
       project,
     );
@@ -72,7 +84,7 @@ describe("projeto versionado e edição", () => {
       type: "linear",
       factors: [{ caseId: "EL", factor: 1 }],
     });
-    const { resultEnvelopes, ...old } = project;
+    const { resultEnvelopes, ...old } = beforeSlabs(project);
     expect(parseProject(JSON.stringify({ ...old, schemaVersion: 3 }))).toEqual(
       project,
     );
@@ -82,6 +94,11 @@ describe("projeto versionado e edição", () => {
       combinationIds: ["C1"],
     };
     project.resultEnvelopes = [envelope];
+    expect(
+      parseProject(
+        JSON.stringify({ ...beforeSlabs(project), schemaVersion: 4 }),
+      ),
+    ).toEqual(project);
     expect(parseProject(serializeProject(project))).toEqual(project);
     envelope.combinationIds.push("C1");
     expect(() => parseProject(serializeProject(project))).toThrow(
@@ -117,7 +134,7 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 5 })),
+      parseProject(JSON.stringify({ ...p, schemaVersion: 7 })),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),
@@ -147,6 +164,152 @@ describe("projeto versionado e edição", () => {
     const first = addPoint(p, point);
     expect(addPoint(p, point).id).toBe(first.id);
     expect(p.nodes).toHaveLength(1);
+  });
+});
+
+describe("laje retangular isolada", () => {
+  it("migra os dois formatos v5 e mantém a cota livre e as pressões por padrão", () => {
+    const original = slabBenchmarkProject();
+    const { formulation, ...triangle } = original.slabs[0];
+    const v5 = { ...original, schemaVersion: 5, slabs: [triangle] };
+    expect(parseProject(JSON.stringify(v5))).toEqual(original);
+    const { levelId, divisionsX, divisionsY, ...geometry } = triangle;
+    const quadV5 = {
+      ...v5,
+      slabs: [{ ...geometry, z: 1.25, nx: divisionsX, ny: divisionsY }],
+      loadPatterns: original.loadPatterns.map(({ pressure, ...pattern }) => ({
+        ...pattern,
+        pressures: pressure.map(({ slabId, pz }) => ({ slabId, qz: pz })),
+      })),
+    };
+    const imported = parseProject(JSON.stringify(quadV5));
+    const [panel] = imported.slabs;
+    expect(panel.formulation).toBe("qdkt");
+    expect(
+      imported.guides.z.find((level) => level.id === panel.levelId)?.position,
+    ).toBe(1.25);
+    expect(imported.loadPatterns).toEqual(original.loadPatterns);
+    expect(parseProject(serializeProject(imported))).toEqual(imported);
+    expect(exportOofem(imported, "EL").deck).toContain(
+      "qdktplate 1 nodes 4 11 10 1 2",
+    );
+    panel.supports.xMin = false;
+    expect(analysisErrors(imported).join(" ")).toMatch(/quatro bordas/);
+  });
+  it("persiste a laje, referências e pressão e exclui a carga dependente", () => {
+    const p = slabBenchmarkProject();
+    const [slab] = p.slabs;
+    slab.divisionsX = 16;
+    slab.supports.yMax = false;
+    expect(parseProject(serializeProject(p))).toEqual(p);
+    const input = exportOofem(p, "EL");
+    expect(exportOofem(parseProject(serializeProject(p)), "EL").deck).toBe(
+      input.deck,
+    );
+    removeSelection(p, [{ kind: "slab", id: slab.id }]);
+    expect(p.slabs).toEqual([]);
+    expect(p.loadPatterns[0].pressure).toEqual([]);
+  });
+
+  it("recupera exatamente campos lineares de momentos nos vértices DKT", () => {
+    const project = slabBenchmarkProject();
+    project.loadPatterns[0].pressure = [];
+    Object.assign(project.slabs[0], { divisionsX: 2, divisionsY: 2 });
+    const input = exportOofem(project, "EL").slab!;
+    const { nodes, elements } = input.mesh;
+    const mx = (x: number, y: number) => 7 + 2 * x - 3 * y;
+    const my = (x: number, y: number) => -4 + 5 * x + y;
+    const coordinates = [
+      [1 / 6, 1 / 6],
+      [2 / 3, 1 / 6],
+      [1 / 6, 2 / 3],
+    ];
+    const raw = elements
+      .map((element) => {
+        const [a, b, c] = element.nodes.map((id) => nodes[id - 1]);
+        const stresses = coordinates.map(([l1, l2], i) => {
+          const l3 = 1 - l1 - l2;
+          const x = l1 * a.x + l2 * b.x + l3 * c.x;
+          const y = l1 * a.y + l2 * b.y + l3 * c.y;
+          return ` GP 1.${i + 1} :
+  stresses 0 0 0 ${-mx(x, y)} ${-my(x, y)} 0 0 0`;
+        });
+        return [
+          `element ${element.number} (${element.number}):`,
+          ...stresses,
+        ].join("\n");
+      })
+      .join("\n");
+    const dofs = new Map(
+      nodes.map((node) => [
+        node.number,
+        new Map([
+          [3, 0],
+          [4, 0],
+          [5, 0],
+        ]),
+      ]),
+    );
+    const reactions = new Map<string, number>();
+    for (const node of nodes)
+      for (const dof of node.restraints)
+        reactions.set(`${node.number}:${dof}`, 0);
+    const result = parseSlabOutput(raw, input, dofs, reactions);
+    for (const { number, x, y } of nodes) {
+      expect(result.nodes[number - 1].mx).toBeCloseTo(mx(x, y), 11);
+      expect(result.nodes[number - 1].my).toBeCloseTo(my(x, y), 11);
+    }
+  });
+  it("gera triângulos numerados no sentido anti-horário, com bordas e GL coerentes", () => {
+    const p = slabBenchmarkProject();
+    const [slab] = p.slabs;
+    slab.divisionsX = slab.divisionsY = 2;
+    const mesh = meshSlab(slab, 3);
+    expect(mesh).toEqual(meshSlab(slab, 3));
+    expect(mesh.edges).toEqual({
+      xMin: [1, 4, 7],
+      xMax: [3, 6, 9],
+      yMin: [1, 2, 3],
+      yMax: [7, 8, 9],
+    });
+    expect(mesh.elements).toHaveLength(8);
+    expect(mesh.elements.slice(0, 2)).toEqual([
+      { number: 1, nodes: [1, 2, 5] },
+      { number: 2, nodes: [1, 5, 4] },
+    ]);
+    expect(mesh.nodes[0].restraints).toEqual([3, 4, 5]);
+    expect(mesh.nodes[1].restraints).toEqual([3, 5]);
+    expect(mesh.nodes[3].restraints).toEqual([3, 4]);
+    expect(mesh.nodes[4]).toMatchObject({ x: 2, y: 1.5, z: 3, restraints: [] });
+  });
+
+  it("rejeita entradas inválidas e análises sem a estabilidade e o isolamento exigidos", () => {
+    const p = slabBenchmarkProject();
+    const [slab] = p.slabs;
+    const withChange = (change: Partial<typeof slab>) =>
+      JSON.stringify({ ...p, slabs: [{ ...slab, ...change }] });
+    expect(() => parseProject(withChange({ thickness: 0 }))).toThrow();
+    expect(() => parseProject(withChange({ lengthX: -4 }))).toThrow();
+    expect(() => parseProject(withChange({ divisionsX: 3.5 }))).toThrow();
+    expect(() => parseProject(withChange({ divisionsY: 65 }))).toThrow();
+    expect(() => parseProject(withChange({ levelId: "ausente" }))).toThrow(
+      /pavimento inexistente/,
+    );
+    expect(() => parseProject(withChange({ materialId: "ausente" }))).toThrow(
+      /material inexistente/,
+    );
+    expect(() => parseProject(withChange({ x: 1e20 }))).toThrow(
+      /coordenadas da malha/,
+    );
+    slab.supports = { xMin: true, xMax: false, yMin: false, yMax: false };
+    expect(() => exportOofem(p, "EL")).toThrow(/pelo menos duas bordas/);
+    slab.supports.xMax = true;
+    addPoint(p, { x: 1, y: 1, z: 3 });
+    expect(() => exportOofem(p, "EL")).toThrow(/laje isolada/);
+    p.loadPatterns[0].pressure[0].slabId = "ausente";
+    expect(() => parseProject(serializeProject(p))).toThrow(
+      /pressão em laje inexistente/,
+    );
   });
 });
 
@@ -238,7 +401,10 @@ describe("pré-validação e contrato do adaptador", () => {
     const input = exportOofem(beamExample(), "EL");
     expect(() => parseOofemOutput("incomplete", input)).toThrow(/incompleta/);
     expect(() =>
-      parseOofemOutput("Output for time 1\nFinishing analysis", input),
+      parseOofemOutput(
+        "Output for time 1\nFinishing analysis on: 2026-11-24",
+        input,
+      ),
     ).toThrow(/ausentes/);
   });
   it("impede cargas ponderadas não finitas apenas no caso que as aplica", () => {

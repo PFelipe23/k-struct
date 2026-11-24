@@ -33,10 +33,21 @@ A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python.
 
 ## Contrato de análise
 
-- Um passo de `StaticStructural`. O modelo plano usa `Beam2d` no domínio `2dBeam`. O espacial usa `Beam3d` no domínio `3dShell`, com seis graus de liberdade por nó.
+- Um passo de `StaticStructural`. As barras no plano usam `Beam2d` no domínio `2dBeam`. As barras espaciais usam `Beam3d` no domínio `3dShell`, com seis graus de liberdade por nó.
 - Barras retangulares elásticas com ligações rígidas e cargas uniformes e nodais. O peso próprio é atribuído como carga.
 - `beamShearCoeff = 1e18` aproxima a hipótese de Euler–Bernoulli.
 - `Beam3d` usa inércias Iy/Iz e a constante de torção de Saint-Venant calculada pela série para uma seção retangular maciça.
 - Uma execução ativa por vez, com diretório temporário, prazo de 60 s e limite de 32 MB por arquivo de saída.
 - Cancelar termina o processo e preserva as mensagens disponíveis no histórico. O histórico inclui origem e versão do motor, data, duração, estado e a parte final de stdout e stderr quando o limite do log é atingido.
 - Resultados de uma execução cancelada, incompleta ou de um modelo já alterado ficam fora das vistas e tabelas de resultados.
+
+### Laje retangular isolada
+
+- O painel usa `qdktplate` de quatro nós por padrão ou `DKTPlate` triangular, `SimpleCS` com `thick` em metros e material `IsoLE`. O registro de domínio `2dMindlinPlate` seleciona os graus de liberdade 3 (UZ), 4 (RX) e 5 (RY). A flexão nas duas formulações segue a teoria de Kirchhoff e despreza a deformação por cisalhamento transversal.
+- Uma borda de X constante com apoio simples impõe UZ e RX. Uma borda de Y constante com apoio simples impõe UZ e RY. No canto de duas bordas apoiadas, as três restrições são reunidas. As bordas livres não recebem vínculos.
+- A pressão global resulta da soma dos padrões multiplicados pelos fatores do caso. O QDKT recebe uma `ConstantSurfaceLoad` global na face 1 de cada quadrilátero. O DKT usa cargas nodais equivalentes. Cada triângulo de área A contribui com pZ × A/3 em cada um dos três nós, conforme a interpolação linear da carga transversal do DKT. O adaptador acumula as contribuições em `NodalLoad` no grau 3, incluindo os nós de apoio.
+- O parser recupera UZ, RX e RY por nó, as reações nos graus prescritos e as componentes 4 e 5 da linha `stresses` nos quatro pontos de Gauss do quadrilátero ou nos três do triângulo. Essas componentes recebem inversão de sinal para a convenção de momento sagente positivo do KStruct. O equilíbrio usa a soma das forças em Z e dos momentos em X e Y, incluindo os binários dos graus restringidos.
+
+O QDKT usa coordenadas locais no plano da placa e quatro bordas simplesmente apoiadas. O parser extrapola os quatro pontos de Gauss para os vértices e faz a média entre elementos adjacentes. [Implementação QDKT na versão fixada](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/qdkt.C)
+
+Veja o [caso de validação](VALIDATION.md#laje-retangular-isolada) e a [implementação DKT na versão fixada](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/dkt.C).
