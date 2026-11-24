@@ -11,6 +11,9 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { planTransform } from "../src/domain/transform";
+import { addMember } from "../src/domain/editing";
+import { origin } from "../src/domain/geometry";
 import { combineLinearResults } from "../src/solver/combinations";
 import { evaluateMemberEnvelope } from "../src/solver/envelopes";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
@@ -250,6 +253,98 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       8,
     );
     expect(r.displacements.B.uz).toBeCloseTo((axial - bending) * 0.6 * 0.8, 8);
+  });
+  it("balanços espelhados em YZ conservam eixos e sinais em cada estação", () => {
+    const p = createProject("spatial");
+    const bar = addMember(
+      p,
+      { x: 2, y: 1, z: 0 },
+      { x: 4, y: 1, z: 0 },
+      { sectionId: p.sections[0].id, roll: 27 },
+    );
+    Object.assign(p.sections[0], { width: 0.14, height: 0.32 });
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.loadPatterns[0].nodal = [
+      {
+        ...nodalLoad(bar.end),
+        fx: 1200,
+        fy: 800,
+        fz: -2600,
+        mx: 150,
+        my: 70,
+        mz: -90,
+      },
+    ];
+    p.loadPatterns[0].uniform = [
+      { ...uniformLoad(bar.id), qx: 80, qy: -130, qz: -450 },
+    ];
+    const plan = planTransform(
+      p,
+      [{ kind: "member", id: bar.id }],
+      { kind: "mirror", center: origin, normal: { ...origin, x: 1 } },
+      { supports: true, patterns: ["G"], conflicts: "ask" },
+    );
+    expect(plan.ready).toBe(true);
+    const r = solve(plan.project),
+      map = plan.maps[0];
+    const u = r.displacements[bar.end],
+      U = r.displacements[map.nodes.get(bar.end)!];
+    for (const [k, sign] of Object.entries({
+      ux: -1,
+      uy: 1,
+      uz: 1,
+      rx: 1,
+      ry: -1,
+      rz: -1,
+    }) as [keyof typeof u, number][])
+      expect(U[k]).toBeCloseTo(sign * u[k], 9);
+    const root = r.reactions.find((n) => n.nodeId === bar.start)!,
+      mirror = r.reactions.find((n) => n.nodeId === map.nodes.get(bar.start))!;
+    const check = (actual: number, expected: number) =>
+      expect(Math.abs(actual - expected)).toBeLessThan(
+        0.05 + Math.abs(expected) * 0.00005,
+      );
+    // Independent statics at x=2 m: R = -(F+qL), M = -(M_tip+r×F+r_mid×qL).
+    for (const [k, value] of Object.entries({
+      fx: -1360,
+      fy: -540,
+      fz: 3500,
+      mx: -150,
+      my: -6170,
+      mz: -1250,
+    }) as ["fx" | "fy" | "fz" | "mx" | "my" | "mz", number][])
+      check(root[k], value);
+    for (const [k, sign] of Object.entries({
+      fx: -1,
+      fy: 1,
+      fz: 1,
+      mx: 1,
+      my: -1,
+      mz: -1,
+    }) as ["fx" | "fy" | "fz" | "mx" | "my" | "mz", number][])
+      check(mirror[k], sign * root[k]);
+    const original = r.members[bar.id],
+      copy = r.members[map.members.get(bar.id)!];
+    expect(copy.length).toBe(original.length);
+    for (const [i, station] of original.entries()) {
+      expect(copy[i].t).toBe(station.t);
+      for (const [k, sign] of Object.entries({
+        n: 1,
+        vy: -1,
+        vz: 1,
+        mx: -1,
+        my: 1,
+        mz: -1,
+      }) as ["n" | "vy" | "vz" | "mx" | "my" | "mz", number][])
+        check(copy[i][k], sign * station[k]);
+    }
   });
   it("balanço espacial com seção girada: flexão biaxial, normal e torção", () => {
     const p = createProject("spatial");

@@ -11,7 +11,7 @@ KStruct faz referência à matriz de rigidez **[K]**. A direção do produto é 
 O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma seleção na vista de lançamento, na perspectiva 3D e no explorador.
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
-- Selecionar, replicar por deslocamento e conectar interseções em 3D. As cópias levam geometria, seção e orientação, com nós novos sem apoios nem cargas.
+- Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
@@ -58,6 +58,10 @@ Para explorar os envelopes de esforços, baixe o [projeto de exemplo do pórtico
 5. Para começar do zero, use **Novo projeto** para XZ ou **Novo pórtico espacial** para XYZ. Ative **Barra** (`B`) e marque duas extremidades. Defina apoios e cargas antes de analisar.
 
 No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolha o pavimento para lançar vigas em planta e alterne para uma elevação para lançar pilares. **Orto** alinha a segunda extremidade no plano. Segure `Shift` para inverter o modo durante o clique. Use `Ctrl` ou `Shift` para montar uma seleção e **Replicar** para copiar a geometria até outro pavimento. Use **Conectar interseções** onde as barras precisam compartilhar nós.
+
+Para transformar a seleção, abra **Replicar** no modelo espacial ou **Transformar** no modelo plano. Escolha a operação. Em **Mover por vetor**, expanda **Barras incidentes** para conferir os comprimentos antes e depois do movimento. Para espelhar, indique um ponto e a reta em XZ ou o plano em XYZ. Na rotação, defina o centro, o eixo, o passo angular e o número de cópias. Por exemplo, um passo de +90° em torno de Z, com centro na origem, leva (2, 0, 0) a (0, 2, 0).
+
+As cópias preservam seção e orientação. Por padrão, os novos nós ficam livres e sem carga. Marque **Copiar apoios** e os padrões que deseja levar. Ao reutilizar um nó com dados conflitantes, escolha entre conservar os dados existentes ou unir vínculos e somar cargas dentro do mesmo padrão. A prévia informa quando a direção de um apoio exigiria um vínculo inclinado. Confirme para aplicar toda a operação em uma edição, que pode ser desfeita de uma só vez.
 
 Em **Barra** (`B`), escolha o **Traçado**. **Dois pontos** lança uma barra por par de cliques. **Em cadeia** aproveita a última extremidade para o próximo trecho. **Vão entre eixos** destaca o intervalo entre duas guias consecutivas e o lança com um clique. Aponte para o interior do vão para indicar a direção. Escolha a seção ativa e, em XYZ, a rotação em graus. `Esc` encerra o lançamento e **Desfazer** remove um trecho por vez.
 

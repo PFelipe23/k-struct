@@ -40,6 +40,12 @@ O [workflow de pacotes](https://github.com/ricardocorsini/k-struct/actions/workf
 
 Os testes do runner exercitam cancelamento, tempo limite e persistência de registros. O Playwright verifica as ações de cancelar, recuperar o histórico e consultar o diagnóstico usando a fronteira IPC simulada, enquanto os testes dos pacotes executam o OOFEM real.
 
+## Reflexão de uma viga espacial
+
+O teste de integração monta dois balanços independentes de 2 m no mesmo projeto. O inicial parte de (2, 1, 0) na direção +X e tem seção de 14 × 32 cm girada em 27°. A cópia é produzida pelo comando de espelho no plano YZ, incluindo engaste, carga distribuída, força e momento de ponta. O teste verifica por equilíbrio as reações na raiz do balanço inicial. No referencial global elas são (−1360, −540, 3500) N e (−150, −6170, −1250) N·m.
+
+Se $Q$ representa a reflexão, forças, translações e cargas lineares acompanham $Q$. Momentos e rotações acompanham $-Q$. A barra conserva a ordem início–fim e a direção física do eixo local $z$ da seção. O eixo local $y$ resulta do produto $z \times x$. O teste com o OOFEM 3.0 confere os seis deslocamentos de ponta, as seis reações e os seis esforços em cada estação. Nas bases locais do original e da cópia, os fatores de sinal de $(N,V_y,V_z,M_x,M_y,M_z)$ são $(+1,-1,+1,-1,+1,-1)$.
+
 ## Pórtico espacial de dois pavimentos
 
 O [modelo de referência](../tests/fixtures/portal-spatial.json) tem nove nós, onze barras e três bases engastadas. Os pavimentos estão a 2,8 m e 6 m. Na cobertura, uma barra oblíqua tem seção girada em 27°, com carga uniforme em X, Y e Z. O nó N5 recebe forças em Y e Z e momentos em X e Z.

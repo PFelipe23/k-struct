@@ -50,12 +50,7 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import {
-  addMember,
-  addSlab,
-  connectIntersections,
-  replicate,
-} from "./domain/editing";
+import { addMember, addSlab, connectIntersections } from "./domain/editing";
 import {
   onPlane,
   origin,
@@ -72,17 +67,15 @@ import WorkPlaneView, {
   type Tool,
   type PlaneCamera,
 } from "./components/WorkPlaneView";
-import {
-  GuideEditor,
-  ReplicateDialog,
-  WorkPlaneControls,
-} from "./components/LaunchTools";
+import { GuideEditor, WorkPlaneControls } from "./components/LaunchTools";
 import { parseNumberInput } from "./components/numberInput";
 import NewProjectDialog from "./components/NewProjectDialog";
 import SpatialView, { type SpatialCamera } from "./components/SpatialView";
 import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
+import TransformDialog from "./components/TransformDialog";
+import type { TransformPlan } from "./domain/transform";
 import { combineSelection } from "./domain/selection";
 import NodeTable from "./components/NodeTable";
 import Results from "./components/Results";
@@ -713,17 +706,18 @@ export default function App() {
         : "Nenhuma interseção ou nó interno pendente de conexão.",
     );
   };
-  const replicateSelection = (offset: Point3, copies: number) => {
-    let created: SelectedObject[] = [];
-    const error = edit((p) => {
-      created = replicate(p, selection, offset, copies);
+  const applyTransform = (plan: TransformPlan) => {
+    if (!plan.ready || current.current !== plan.source)
+      return "O modelo mudou. Reabra a prévia para confirmar.";
+    const error = edit((draft) => {
+      draft.nodes = plan.project.nodes;
+      draft.members = plan.project.members;
+      draft.loadPatterns = plan.project.loadPatterns;
     });
     if (!error) {
       changeTool("select");
-      setSelection(created);
-      setMessage(
-        `${copies} cópia(s) criada(s) · ${created.length} objetos selecionados.`,
-      );
+      setSelection(plan.selected);
+      setMessage("Transformação aplicada à seleção.");
     }
     return error;
   };
@@ -1385,6 +1379,17 @@ export default function App() {
                 {slab && " · 1 laje"}
               </span>
             </div>
+            {!spatial && (
+              <button
+                className="selection-trigger"
+                disabled={
+                  !selection.length || selection.some((s) => s.kind === "slab")
+                }
+                onClick={() => setLaunchDialog("replicate")}
+              >
+                Transformar
+              </button>
+            )}
             <button
               className="selection-trigger"
               onClick={() => {
@@ -1791,10 +1796,13 @@ export default function App() {
         />
       )}
       {launchDialog === "replicate" && (
-        <ReplicateDialog
-          count={selection.length}
+        <TransformDialog
+          project={p}
+          selection={selection}
+          plane={plane.kind}
           initial={{
             ...origin,
+            x: plane.kind === "XY" ? 0 : 1,
             z:
               plane.kind === "XY"
                 ? ([...p.guides.z]
@@ -1803,7 +1811,7 @@ export default function App() {
                     plane.offset) - plane.offset
                 : 0,
           }}
-          onApply={replicateSelection}
+          onApply={applyTransform}
           onClose={() => setLaunchDialog(null)}
         />
       )}

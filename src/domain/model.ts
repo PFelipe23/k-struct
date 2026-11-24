@@ -832,6 +832,23 @@ export function nextName(prefix: string, objects: { name: string }[]) {
   return `${prefix}${i}`;
 }
 
+function hasMember(p: Project, a: string, b: string) {
+  return p.members.some(
+    (m) => (m.start === a && m.end === b) || (m.start === b && m.end === a),
+  );
+}
+
+export function appendMember(
+  p: Project,
+  properties: Omit<Member, "id" | "name">,
+) {
+  if (hasMember(p, properties.start, properties.end))
+    throw new Error("Já existe uma barra entre esses nós.");
+  const bar = { ...properties, id: uid(), name: nextName("B", p.members) };
+  p.members.push(bar);
+  return bar;
+}
+
 export function addPoint(p: Project, point: Point3): StructuralNode {
   const existing = p.nodes.find((n) => distance(n, point) < tolerance);
   if (existing) return existing;
