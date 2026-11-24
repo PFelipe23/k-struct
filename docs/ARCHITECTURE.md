@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v4, migração v1 a v3, geometria, validação e histórico      | `src/domain`                 |
+| Domínio           | Formato v5, migração v1 a v4, geometria, validação e histórico       | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,11 +19,13 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v4 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. O modo `spatial` usa UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia.
+O esquema v5 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
 IDs do projeto são persistentes. IDs numéricos do OOFEM são reconstruídos a cada exportação. Uma barra é dividida em oito elementos por padrão. Nós intermediários da análise não aparecem como objetos editáveis. A propriedade `segmentsPerMember` aceita de 2 a 32 segmentos. Versões futuras precisam avaliar convergência e melhorar a amostragem dos diagramas.
+
+O painel de laje tem ID persistente, origem XY, lados, referência ao pavimento, material, espessura, quatro condições de borda e subdivisões independentes em X/Y. `meshSlab` numera os nós em linhas de X crescente e corta cada célula em dois triângulos anti-horários pela diagonal do canto inferior esquerdo ao superior direito. As bordas referenciam os mesmos nós da conectividade. A malha e os resultados são derivados do painel na revisão atual. A análise de laje aceita um painel isolado por projeto.
 
 O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. A combinação linear armazena IDs de casos estáticos e os respectivos fatores. O envelope guarda os IDs das combinações incluídas, na ordem escolhida. O editor aplica as mudanças de padrões, casos, combinações e envelopes em uma única edição. Antes de excluir um padrão, caso ou combinação, retire suas referências das definições que o utilizam.
 
@@ -40,6 +42,8 @@ No espaço, x local vai do início ao fim. A projeção de Z global no plano nor
 Os esforços espaciais `N, Vy, Vz, Mx, My, Mz` são resultantes na face de corte com normal +x local. Usa-se o oposto da ação na extremidade inicial e o valor da ação na final. N positivo representa tração. As reações e deslocamentos são globais. Os diagramas 2D mostram a ordenada do componente escolhido perpendicular à barra no plano em tela.
 
 As tabelas apresentam estações da malha. Deformadas e diagramas são linhas interpoladas entre estas estações, sem pretensão de avaliar extremos exatos entre elas.
+
+Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interface exibe pZ em kN/m², UZ em mm e os momentos Mx e My em kN·m/m. Os eixos locais do painel coincidem com X e Y globais. Mx positivo representa tração na face inferior na direção X, e My positivo representa tração na face inferior na direção Y. Os mapas usam a média por triângulo. A consulta central usa os deslocamentos nodais e os momentos recuperados nos vértices.
 
 ## Consistência
 

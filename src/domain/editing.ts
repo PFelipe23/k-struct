@@ -17,6 +17,7 @@ import {
   type Member,
   type Project,
   type SelectedObject,
+  type Slab,
 } from "./model";
 
 function hasMember(p: Project, a: string, b: string) {
@@ -48,12 +49,63 @@ export function addMember(p: Project, from: Point3, to: Point3) {
   });
 }
 
+export function addSlab(
+  p: Project,
+  levelId: string,
+  from: Point3,
+  to: Point3,
+): Slab {
+  const level = p.guides.z.find((item) => item.id === levelId);
+  if (
+    p.mode !== "spatial" ||
+    !level ||
+    from.z !== level.position ||
+    to.z !== level.position
+  )
+    throw new Error("Lance a laje na planta XY de um pavimento.");
+  if (p.slabs.length)
+    throw new Error("Este projeto já contém uma laje isolada.");
+  const lengthX = Math.abs(to.x - from.x);
+  const lengthY = Math.abs(to.y - from.y);
+  if (lengthX < tolerance || lengthY < tolerance)
+    throw new Error("Marque dois cantos opostos para definir um retângulo.");
+  const concrete = { E: 30e9, nu: 0.2, density: 2500 };
+  let material = p.materials.find(
+    (item) =>
+      item.E === concrete.E &&
+      item.nu === concrete.nu &&
+      item.density === concrete.density,
+  );
+  if (!material) {
+    material = { id: uid(), name: "Concreto", ...concrete };
+    p.materials.push(material);
+  }
+  const slab: Slab = {
+    id: uid(),
+    name: "L1",
+    levelId,
+    x: Math.min(from.x, to.x),
+    y: Math.min(from.y, to.y),
+    lengthX,
+    lengthY,
+    thickness: 0.1,
+    materialId: material.id,
+    divisionsX: 8,
+    divisionsY: 6,
+    supports: { xMin: true, xMax: true, yMin: true, yMax: true },
+  };
+  p.slabs.push(slab);
+  return slab;
+}
+
 export function replicate(
   p: Project,
   selection: SelectedObject[],
   offset: Point3,
   copies: number,
 ): SelectedObject[] {
+  if (selection.some((item) => item.kind === "slab"))
+    throw new Error("A replicação está disponível para nós e barras.");
   if (
     !selection.length ||
     !Number.isInteger(copies) ||

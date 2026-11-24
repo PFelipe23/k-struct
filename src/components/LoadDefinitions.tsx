@@ -107,7 +107,13 @@ export default function LoadDefinitions({
     const id = uid();
     setPatterns([
       ...patterns,
-      { id, name: nextName("Padrão ", patterns), nodal: [], uniform: [] },
+      {
+        id,
+        name: nextName("Padrão ", patterns),
+        nodal: [],
+        uniform: [],
+        pressure: [],
+      },
     ]);
     setPatternId(id);
     setError("");
@@ -374,8 +380,10 @@ export default function LoadDefinitions({
             </label>
             <p>
               {pattern.nodal.length} cargas nodais · {pattern.uniform.length}{" "}
-              cargas distribuídas. Atribua forças e momentos pelo painel de
-              propriedades.
+              cargas distribuídas
+              {project.slabs.length > 0 &&
+                ` · ${pattern.pressure.length} pressões em laje`}
+              . Atribua as cargas pelo painel de propriedades.
             </p>
           </div>
         ) : page === "envelopes" ? (

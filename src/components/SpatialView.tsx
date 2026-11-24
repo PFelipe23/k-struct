@@ -180,6 +180,26 @@ export default function SpatialView({
     const selectedIds = new Set(
       selection.map((item) => `${item.kind}:${item.id}`),
     );
+    for (const slab of project.slabs) {
+      const z = project.guides.z.find(
+        ({ id }) => id === slab.levelId,
+      )!.position;
+      const surface = new THREE.Mesh(
+        new THREE.BoxGeometry(slab.lengthX, slab.thickness, slab.lengthY),
+        new THREE.MeshStandardMaterial({
+          color: selectedIds.has(`slab:${slab.id}`) ? "#a48ac8" : "#597592",
+        }),
+      );
+      surface.position.copy(
+        scenePoint({
+          x: slab.x + slab.lengthX / 2,
+          y: slab.y + slab.lengthY / 2,
+          z,
+        }),
+      );
+      surface.userData.selection = { kind: "slab", id: slab.id };
+      s.model.add(surface);
+    }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
@@ -236,7 +256,7 @@ export default function SpatialView({
   }, [project, selection, result, deformationScale]);
   useEffect(() => {
     state.current?.fit();
-  }, [project.id]);
+  }, [project.id, project.slabs[0]?.id]);
   return (
     <section className="viewport spatial">
       <div className="view-heading">
