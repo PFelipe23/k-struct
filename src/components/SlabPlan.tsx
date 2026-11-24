@@ -49,7 +49,7 @@ export default memo(function SlabPlan({
         y={top}
         width={right - left}
         height={bottom - top}
-        fill={active ? "#342a4b" : "#23344a"}
+        fill={active ? "var(--selected-bg)" : "var(--surface-raised)"}
       />
       {map ? (
         <g
@@ -63,7 +63,7 @@ export default memo(function SlabPlan({
               fill={slabMapColor(map.values[i], map.scale)}
             >
               <title>
-                Triângulo {mesh.elements[i].number} ·{" "}
+                Elemento {mesh.elements[i].number} ·{" "}
                 {formatResult(map.values[i] * map.definition.factor)}{" "}
                 {map.definition.unit}
               </title>

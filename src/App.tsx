@@ -118,6 +118,7 @@ import {
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v6") ??
       localStorage.getItem("kstruct.draft.v5") ??
       localStorage.getItem("kstruct.draft.v4") ??
       localStorage.getItem("kstruct.draft.v3") ??
@@ -321,7 +322,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v5", serialized);
+      localStorage.setItem("kstruct.draft.v6", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",

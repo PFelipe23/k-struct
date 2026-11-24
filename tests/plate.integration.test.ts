@@ -3,6 +3,22 @@ import { makePlateDeck, readPlateResults } from "./fixtures/plate-benchmark";
 import { navierPlateCenter } from "./fixtures/plate-navier";
 import { runDeck } from "./fixtures/solve-oofem";
 
+import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
+import { slabBenchmarkProject } from "./fixtures/slab-benchmark";
+
+function quadInput(divisionsX: number, divisionsY: number, pressure = -5000) {
+  const project = slabBenchmarkProject();
+  Object.assign(project.slabs[0], {
+    formulation: "qdkt",
+    divisionsX,
+    divisionsY,
+    x: 12,
+    y: -7,
+  });
+  project.loadPatterns[0].pressure[0].pz = pressure;
+  return exportOofem(project, "EL");
+}
+
 const executable = process.env.OOFEM_BIN;
 
 it.skipIf(!executable)(
@@ -18,6 +34,15 @@ it.skipIf(!executable)(
     const results = meshes.map(([nx, ny]) => {
       const input = makePlateDeck(nx, ny);
       const result = readPlateResults(runDeck(input.deck, executable!), input);
+      const model = quadInput(nx, ny);
+      const calculated = parseOofemOutput(
+        runDeck(model.deck, executable!),
+        model,
+      ).slab!;
+      expect(calculated.elements).toHaveLength(nx * ny);
+      expect(calculated.totalReactionZ).toBeCloseTo(result.rz, 3);
+      for (const key of ["uz", "mx", "my"] as const)
+        expect(calculated.center[key]).toBeCloseTo(result[key], 7);
       return {
         mesh: `${nx} × ${ny}`,
         elements: input.elements.length,
@@ -56,5 +81,29 @@ it.skipIf(!executable)(
         tolerances[key],
       );
     }
+  },
+);
+
+it.skipIf(!executable)(
+  "placa QDKT sem pressão mantém resposta nula e verifica a saída inteira",
+  () => {
+    const input = quadInput(5, 3, 0);
+    const output = runDeck(input.deck, executable!);
+    const slab = parseOofemOutput(output, input).slab!;
+    expect(slab.totalReactionZ).toBe(0);
+    expect(slab.center).toEqual({ uz: 0, mx: 0, my: 0 });
+    expect(slab.elements).toHaveLength(15);
+    const missing = output.replace(
+      /(GP\s+1\.4[^\n]*\n)[ \t]+stresses[^\n]*/,
+      "$1",
+    );
+    expect(() => parseOofemOutput(missing, input)).toThrow(/Momentos ausentes/);
+    const duplicated = output.replace(
+      /(^[ \t]+Node\s+\d+\s+iDof\s+3\s+reaction[^\n]+)/m,
+      "$1\n$1",
+    );
+    expect(() => parseOofemOutput(duplicated, input)).toThrow(
+      /Reação duplicada/,
+    );
   },
 );

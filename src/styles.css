@@ -30,6 +30,9 @@
   --accent-border: #4b405e;
   --accent-pattern: #9f81c32b;
   --green: #75cbb8;
+  --slab-negative: #4697de;
+  --slab-zero: #253046;
+  --slab-positive: #f1a353;
   --danger: #f4b5ad;
   --danger-border: #77494c;
   --line: #2a3344;
@@ -95,6 +98,9 @@
   --accent-border: #c7b6dd;
   --accent-pattern: #7749a526;
   --green: #206a5c;
+  --slab-negative: #2468a1;
+  --slab-zero: #e5ebf0;
+  --slab-positive: #a55414;
   --danger: #992e34;
   --danger-border: #ab5a5b;
   --line: #cdd7e4;
@@ -964,23 +970,23 @@ button.primary {
   pointer-events: none;
 }
 .slab-mesh {
-  stroke: #536e8f;
+  stroke: var(--muted);
   stroke-width: 0.65;
 }
 .slab-supported-edge {
-  stroke: #67c7b1;
+  stroke: var(--geometry-support);
   stroke-width: 2.4;
 }
 .slab-free-edge {
-  stroke: #91a9c7;
+  stroke: var(--geometry-member);
   stroke-dasharray: 5 3;
 }
 .slab-selected-outline {
-  stroke: #c6a8ed;
+  stroke: var(--geometry-selected);
   stroke-dasharray: 4 3;
 }
 .slab-map polygon {
-  stroke: #0d17254d;
+  stroke: var(--line);
   stroke-width: 0.5;
 }
 .slab-legend {
@@ -1004,12 +1010,12 @@ button.primary {
   align-self: center;
   padding: 0 12px;
   font-size: 11px;
-  color: #d1b9f0;
+  color: var(--violet);
 }
 .slab-equilibrium {
   padding: 0 15px;
   font-size: 10px;
-  color: #aabbd1;
+  color: var(--muted);
 }
 .results-heading {
   height: 35px;

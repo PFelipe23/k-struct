@@ -61,6 +61,7 @@ export function exportSlab(
     );
 
   const { nodes, elements } = mesh;
+  const quad = definition.formulation === "qdkt";
   const conditions: string[] = [];
   const sets = [`Set 1 elementranges {(1 ${elements.length})}`];
   const nodeSet = (numbers: number[]) => {
@@ -77,7 +78,15 @@ export function exportSlab(
         `BoundaryCondition ${conditions.length + 1} loadTimeFunction 1 dofs 1 ${dof} values 1 0 set ${nodeSet(fixed)}`,
       );
   }
-  if (totalLoadZ !== 0) {
+  if (quad && pressureZ !== 0) {
+    const set = sets.length + 1;
+    sets.push(
+      `Set ${set} elementboundaries ${2 * elements.length} ${elements.map(({ number }) => `${number} 1`).join(" ")}`,
+    );
+    conditions.push(
+      `ConstantSurfaceLoad ${conditions.length + 1} loadTimeFunction 1 dofs 3 3 4 5 components 3 ${pressureZ} 0 0 csType 0 set ${set}`,
+    );
+  } else if (totalLoadZ !== 0) {
     // DKT uses the linear transverse shape functions for loads: integral(Ni * qZ) = qZ * A / 3.
     const perVertex = totalLoadZ / elements.length / 3;
     const nodalForces = nodes.map(() => 0);
@@ -90,16 +99,23 @@ export function exportSlab(
   }
   const deck = [
     "analysis.out",
-    "KStruct - isolated XY slab - SI N m kg s - Discrete Kirchhoff Triangle",
+    `KStruct - isolated XY slab - SI N m kg s - ${definition.formulation.toUpperCase()}`,
     "StaticStructural nsteps 1 deltat 1",
     "domain 2dMindlinPlate",
     "OutputManager tstep_all dofman_all element_all",
     `ndofman ${nodes.length} nelem ${elements.length} ncrosssect 1 nmat 1 nbc ${conditions.length} nic 0 nltf 1 nset ${sets.length}`,
-    ...nodes.map(
-      ({ number, x, y, z }) => `Node ${number} coords 3 ${x} ${y} ${z}`,
-    ),
+    ...nodes.map(({ number, x, y, z }) => {
+      // QDKT uses panel-local coordinates. Global mesh positions remain available for the maps.
+      if (quad) {
+        const i = (number - 1) % (definition.divisionsX + 1);
+        const j = Math.floor((number - 1) / (definition.divisionsX + 1));
+        return `Node ${number} coords 3 ${(i / definition.divisionsX) * definition.lengthX} ${(j / definition.divisionsY) * definition.lengthY} 0`;
+      }
+      return `Node ${number} coords 3 ${x} ${y} ${z}`;
+    }),
     ...elements.map(
-      ({ number, nodes }) => `DKTPlate ${number} nodes 3 ${nodes.join(" ")}`,
+      ({ number, nodes }) =>
+        `${quad ? "qdktplate" : "DKTPlate"} ${number} nodes ${nodes.length} ${nodes.join(" ")}`,
     ),
     `SimpleCS 1 thick ${definition.thickness} material 1 set 1`,
     `IsoLE 1 d ${material.density} E ${material.E} n ${material.nu} tAlpha 0`,
@@ -111,7 +127,7 @@ export function exportSlab(
   return { deck, slab: { definition, mesh, totalLoadZ } satisfies SlabInput };
 }
 
-function gaussMoments(raw: string) {
+function gaussMoments(raw: string, count: number) {
   const elements = new Map<number, { mx: number; my: number }[]>();
   for (const element of raw.matchAll(
     /^element[ \t]+(\d+)[ \t]+\([ \t]*\d+\)[ \t]*:([\s\S]*?)(?=^element[ \t]+\d+|(?![\s\S]))/gm,
@@ -119,25 +135,29 @@ function gaussMoments(raw: string) {
     const points = new Map<number, { mx: number; my: number }>();
     const number = Number(element[1]);
     for (const match of element[2].matchAll(
-      /^[ \t]*GP[ \t]+1\.([123])[ \t]*:[^\r\n]*\r?\n[ \t]*stresses[ \t]+([^\r\n]+)/gm,
+      /^[ \t]*GP[ \t]+1\.(\d+)[ \t]*:[^\r\n]*\r?\n[ \t]*stresses[ \t]+([^\r\n]+)/gm,
     )) {
       const point = Number(match[1]);
       const stress = match[2].trim().split(/\s+/).map(Number);
       if (
+        point < 1 ||
+        point > count ||
         points.has(point) ||
         stress.length !== 8 ||
         !stress.every(Number.isFinite)
       )
-        throw new Error(`Momentos inválidos no triângulo ${number}.`);
+        throw new Error(`Momentos inválidos no elemento ${number}.`);
       // The generalized stress entries 4 and 5 use the opposite of sagging-positive.
       points.set(point, { mx: -stress[3], my: -stress[4] });
     }
-    if (elements.has(number) || points.size !== 3)
-      throw new Error(
-        `Momentos ausentes ou duplicados no triângulo ${number}.`,
-      );
+    if (elements.has(number) || points.size !== count)
+      throw new Error(`Momentos ausentes ou duplicados no elemento ${number}.`);
     // Barycentric GP coordinates are (1/6,1/6), (2/3,1/6), (1/6,2/3).
-    elements.set(number, [points.get(2)!, points.get(3)!, points.get(1)!]);
+    const order = count === 3 ? [2, 3, 1] : [1, 2, 3, 4];
+    elements.set(
+      number,
+      order.map((id) => points.get(id)!),
+    );
   }
   return elements;
 }
@@ -188,6 +208,25 @@ function slabReactions(
   return reactions;
 }
 
+// OOFEM QDKT reports four Gauss points in (-,-), (-,+), (+,-), (+,+) order.
+// The rows extrapolate a bilinear field to each corner in QDKT connectivity order.
+const quadCornerWeights = [
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+  [1, -1],
+].map(([xi, eta]) =>
+  [
+    [-1, -1],
+    [-1, 1],
+    [1, -1],
+    [1, 1],
+  ].map(
+    ([sx, sy]) =>
+      ((1 + sx * xi * Math.sqrt(3)) * (1 + sy * eta * Math.sqrt(3))) / 4,
+  ),
+);
+
 export function parseSlabOutput(
   raw: string,
   input: SlabInput,
@@ -207,31 +246,39 @@ export function parseSlabOutput(
       my: 0,
     };
   });
-  const moments = gaussMoments(raw);
+  const quad = definition.formulation === "qdkt";
+  const moments = gaussMoments(raw, quad ? 4 : 3);
   const contributions = nodes.map(() => 0);
   const elements = mesh.elements.map(({ number, nodes: indices }) => {
     const gp = moments.get(number);
-    if (!gp) throw new Error(`Momentos ausentes no triângulo ${number}.`);
-    const mx = (gp[0].mx + gp[1].mx + gp[2].mx) / 3;
-    const my = (gp[0].my + gp[1].my + gp[2].my) / 3;
+    if (!gp) throw new Error(`Momentos ausentes no elemento ${number}.`);
+    const mx = gp.reduce((sum, point) => sum + point.mx / gp.length, 0);
+    const my = gp.reduce((sum, point) => sum + point.my / gp.length, 0);
     let uz = 0;
     for (const [vertex, id] of indices.entries()) {
       const node = nodes[id - 1];
-      uz += node.uz / 3;
-      // Invert the barycentric interpolation, then average the adjacent triangles at each node.
-      node.mx += 2.5 * gp[vertex].mx - 1.5 * mx;
-      node.my += 2.5 * gp[vertex].my - 1.5 * my;
+      uz += node.uz / indices.length;
+      if (quad) {
+        for (const [i, weight] of quadCornerWeights[vertex].entries()) {
+          node.mx += weight * gp[i].mx;
+          node.my += weight * gp[i].my;
+        }
+      } else {
+        // Invert the triangular barycentric interpolation.
+        node.mx += 2.5 * gp[vertex].mx - 1.5 * mx;
+        node.my += 2.5 * gp[vertex].my - 1.5 * my;
+      }
       contributions[id - 1]++;
     }
     if (![uz, mx, my].every(Number.isFinite))
       throw new Error(
-        `Resultado fora do intervalo numérico no triângulo ${number}.`,
+        `Resultado fora do intervalo numérico no elemento ${number}.`,
       );
     return { uz, mx, my };
   });
   if (moments.size !== elements.length)
     throw new Error(
-      "A quantidade de triângulos na saída diverge da malha da laje.",
+      "A quantidade de elementos na saída diverge da malha da laje.",
     );
   for (const [i, node] of nodes.entries()) {
     node.mx /= contributions[i];
@@ -242,13 +289,21 @@ export function parseSlabOutput(
       );
   }
   const { divisionsX: nx, divisionsY: ny } = definition;
-  const a = nodes[Math.floor(ny / 2) * (nx + 1) + Math.floor(nx / 2)];
-  const b = nodes[Math.ceil(ny / 2) * (nx + 1) + Math.ceil(nx / 2)];
-  const center = {
-    uz: a.uz / 2 + b.uz / 2,
-    mx: a.mx / 2 + b.mx / 2,
-    my: a.my / 2 + b.my / 2,
-  };
+  const at = (i: number, j: number) => nodes[j * (nx + 1) + i];
+  const left = Math.floor(nx / 2),
+    right = Math.ceil(nx / 2);
+  const bottom = Math.floor(ny / 2),
+    top = Math.ceil(ny / 2);
+  // The center lies on the DKT diagonal. In QDKT use bilinear interpolation.
+  const near = quad
+    ? [at(left, bottom), at(right, bottom), at(left, top), at(right, top)]
+    : [at(left, bottom), at(right, top)];
+  const center = { uz: 0, mx: 0, my: 0 };
+  for (const point of near) {
+    center.uz += point.uz / near.length;
+    center.mx += point.mx / near.length;
+    center.my += point.my / near.length;
+  }
   const reactions = slabReactions(input, reactionMap);
   return {
     slabId: definition.id,

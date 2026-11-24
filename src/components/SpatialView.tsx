@@ -21,6 +21,8 @@ interface SceneState {
 }
 function createModelMaterials() {
   return {
+    slab: new THREE.MeshStandardMaterial(),
+    selectedSlab: new THREE.MeshStandardMaterial(),
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
@@ -125,6 +127,8 @@ export default function SpatialView({
       light.groundColor.set(color("--scene-light-ground"));
       recolorGrid(grid, color("--scene-grid"), color("--scene-grid-center"));
       axes.setColors(color("--axis-x"), color("--axis-y"), color("--axis-z"));
+      materials.slab.color.set(color("--geometry-member"));
+      materials.selectedSlab.color.set(color("--geometry-selected"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
       materials.deformed.color.set(color("--geometry-deformed"));
@@ -238,9 +242,9 @@ export default function SpatialView({
       )!.position;
       const surface = new THREE.Mesh(
         new THREE.BoxGeometry(slab.lengthX, slab.thickness, slab.lengthY),
-        new THREE.MeshStandardMaterial({
-          color: selectedIds.has(`slab:${slab.id}`) ? "#a48ac8" : "#597592",
-        }),
+        selectedIds.has(`slab:${slab.id}`)
+          ? s.materials.selectedSlab
+          : s.materials.slab,
       );
       surface.position.copy(
         scenePoint({

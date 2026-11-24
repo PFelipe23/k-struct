@@ -40,11 +40,6 @@ export type SlabDisplay = keyof typeof slabDisplays;
 export const isSlabDisplay = (value: string): value is SlabDisplay =>
   Object.hasOwn(slabDisplays, value);
 
-const negativeColor = [70, 151, 222];
-const zeroColor = [37, 48, 70];
-const positiveColor = [241, 163, 83];
-const rgb = (color: number[]) => `rgb(${color.join(" ")})`;
-
 export function buildSlabMap(result: SlabResult, display: SlabDisplay) {
   const definition = slabDisplays[display];
   const values = result.elements.map((element) => element[definition.field]);
@@ -54,11 +49,9 @@ export function buildSlabMap(result: SlabResult, display: SlabDisplay) {
 export type SlabMap = ReturnType<typeof buildSlabMap>;
 
 export function slabMapColor(value: number, scale: number) {
-  const ratio = scale ? Math.abs(value) / scale : 0;
-  const limit = value >= 0 ? positiveColor : negativeColor;
-  return rgb(
-    zeroColor.map((base, i) => Math.round(base + (limit[i] - base) * ratio)),
-  );
+  const percent = scale ? 100 * Math.min(1, Math.abs(value) / scale) : 0;
+  const limit = value >= 0 ? "var(--slab-positive)" : "var(--slab-negative)";
+  return `color-mix(in srgb, ${limit} ${percent}%, var(--slab-zero))`;
 }
 
 export function SlabLegend({
@@ -88,12 +81,13 @@ export function SlabLegend({
         <i
           aria-hidden="true"
           style={{
-            background: `linear-gradient(to right, ${rgb(negativeColor)}, ${rgb(zeroColor)}, ${rgb(positiveColor)})`,
+            background:
+              "linear-gradient(to right, var(--slab-negative), var(--slab-zero), var(--slab-positive))",
           }}
         />
         {formatResult(limit)} {definition.unit}
       </span>
-      <span>{definition.sign} · valores médios por triângulo</span>
+      <span>{definition.sign} · valores médios por elemento</span>
     </div>
   );
 }

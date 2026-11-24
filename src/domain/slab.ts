@@ -8,7 +8,7 @@ interface SlabNode extends Point3 {
 }
 export interface SlabElement {
   number: number;
-  nodes: [number, number, number];
+  nodes: [number, number, number] | [number, number, number, number];
 }
 export interface SlabMesh {
   nodes: SlabNode[];
@@ -44,14 +44,24 @@ export function meshSlab(slab: Slab, z: number): SlabMesh {
       });
       if (i < nx && j < ny) {
         const opposite = number(i + 1, j + 1);
-        elements.push({
-          number: elements.length + 1,
-          nodes: [id, number(i + 1, j), opposite],
-        });
-        elements.push({
-          number: elements.length + 1,
-          nodes: [id, opposite, number(i, j + 1)],
-        });
+        const right = number(i + 1, j);
+        const top = number(i, j + 1);
+        if (slab.formulation === "qdkt") {
+          // Natural corner order in OOFEM: (+,+), (-,+), (-,-), (+,-).
+          elements.push({
+            number: elements.length + 1,
+            nodes: [opposite, top, id, right],
+          });
+        } else {
+          elements.push({
+            number: elements.length + 1,
+            nodes: [id, right, opposite],
+          });
+          elements.push({
+            number: elements.length + 1,
+            nodes: [id, opposite, top],
+          });
+        }
       }
     }
   }

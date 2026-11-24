@@ -90,6 +90,7 @@ export function addSlab(
     lengthY,
     thickness: 0.1,
     materialId: material.id,
+    formulation: "qdkt",
     divisionsX: 8,
     divisionsY: 6,
     supports: { xMin: true, xMax: true, yMin: true, yMax: true },

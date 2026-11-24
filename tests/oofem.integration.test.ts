@@ -113,7 +113,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const raw = runDeck(input.deck, executable!);
     expect(() =>
       parseOofemOutput(raw.replace(/\bGP\s+1\.1\b/, "GP 1.4"), input),
-    ).toThrow(/Momentos ausentes/);
+    ).toThrow(/Momentos inválidos/);
     expect(() =>
       parseOofemOutput(
         raw.replace(

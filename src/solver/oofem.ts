@@ -271,7 +271,7 @@ export function parseOofemOutput(
   input: AnalysisInput,
 ): AnalysisResult {
   if (
-    !rawOutput.includes("Finishing analysis") ||
+    !/^Finishing analysis on:/m.test(rawOutput) ||
     (rawOutput.match(/Output for time /g) || []).length !== 1
   )
     throw new Error(
@@ -284,15 +284,26 @@ export function parseOofemOutput(
     /Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\nNode|\n\s*Element output)/g,
   )) {
     const values = new Map<number, number>();
-    for (const v of match[2].matchAll(/dof\s+(\d+)\s+d\s+(\S+)/g))
-      values.set(Number(v[1]), numberList(v[2])[0]);
-    nodeOutput.set(Number(match[1]), values);
+    const node = Number(match[1]);
+    if (nodeOutput.has(node))
+      throw new Error(`Deslocamento duplicado no nó ${node}.`);
+    for (const v of match[2].matchAll(/dof\s+(\d+)\s+d\s+(\S+)/g)) {
+      const dof = Number(v[1]);
+      if (values.has(dof))
+        throw new Error(`Deslocamento duplicado no nó ${node}, GL ${dof}.`);
+      values.set(dof, numberList(v[2])[0]);
+    }
+    nodeOutput.set(node, values);
   }
   const reactionMap = new Map<string, number>();
   for (const m of rawOutput.matchAll(
     /Node\s+(\d+)\s+iDof\s+(\d+)\s+reaction\s+(\S+)/g,
-  ))
-    reactionMap.set(`${m[1]}:${m[2]}`, numberList(m[3])[0]);
+  )) {
+    const key = `${m[1]}:${m[2]}`;
+    if (reactionMap.has(key))
+      throw new Error(`Reação duplicada no nó ${m[1]}, GL ${m[2]}.`);
+    reactionMap.set(key, numberList(m[3])[0]);
+  }
   const metadata = {
     caseId: input.caseId,
     solver: rawOutput.match(/OOFEM ver\.[^\n]+/)?.[0] ?? "OOFEM",

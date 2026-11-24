@@ -252,6 +252,20 @@ function SlabFields({
         ))}
       </div>
       <h4>Malha de análise</h4>
+      <label className="stack-field">
+        Elemento de placa
+        <select
+          value={slab.formulation}
+          onChange={(e) =>
+            updateSlab({
+              formulation: e.target.value === "dkt" ? "dkt" : "qdkt",
+            })
+          }
+        >
+          <option value="qdkt">Quadrilateral QDKT</option>
+          <option value="dkt">Triangular DKT</option>
+        </select>
+      </label>
       {(
         [
           ["divisionsX", "Subdivisões em X"],
@@ -269,7 +283,9 @@ function SlabFields({
         />
       ))}
       <p className="help">
-        {2 * slab.divisionsX * slab.divisionsY} triângulos DKT
+        {slab.formulation === "qdkt"
+          ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
+          : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
       </p>
       <h4>
         Pressão uniforme <span>{pattern.name}</span>

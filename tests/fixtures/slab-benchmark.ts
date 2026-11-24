@@ -24,6 +24,7 @@ export function slabBenchmarkProject() {
     { x: 0, y: 0, z: 3 },
     { x: lengthX, y: lengthY, z: 3 },
   );
+  slab.formulation = "dkt";
   slab.thickness = thickness;
   Object.assign(project.materials.find(({ id }) => id === slab.materialId)!, {
     E,

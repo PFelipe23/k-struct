@@ -54,7 +54,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(5);
+    expect(p.schemaVersion).toBe(6);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -133,7 +133,7 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 6 })),
+      parseProject(JSON.stringify({ ...p, schemaVersion: 7 })),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),
@@ -167,6 +167,34 @@ describe("projeto versionado e edição", () => {
 });
 
 describe("laje retangular isolada", () => {
+  it("migra os dois formatos v5 e mantém a cota livre e as pressões por padrão", () => {
+    const original = slabBenchmarkProject();
+    const { formulation, ...triangle } = original.slabs[0];
+    const v5 = { ...original, schemaVersion: 5, slabs: [triangle] };
+    expect(parseProject(JSON.stringify(v5))).toEqual(original);
+    const { levelId, divisionsX, divisionsY, ...geometry } = triangle;
+    const quadV5 = {
+      ...v5,
+      slabs: [{ ...geometry, z: 1.25, nx: divisionsX, ny: divisionsY }],
+      loadPatterns: original.loadPatterns.map(({ pressure, ...pattern }) => ({
+        ...pattern,
+        pressures: pressure.map(({ slabId, pz }) => ({ slabId, qz: pz })),
+      })),
+    };
+    const imported = parseProject(JSON.stringify(quadV5));
+    const [panel] = imported.slabs;
+    expect(panel.formulation).toBe("qdkt");
+    expect(
+      imported.guides.z.find((level) => level.id === panel.levelId)?.position,
+    ).toBe(1.25);
+    expect(imported.loadPatterns).toEqual(original.loadPatterns);
+    expect(parseProject(serializeProject(imported))).toEqual(imported);
+    expect(exportOofem(imported, "EL").deck).toContain(
+      "qdktplate 1 nodes 4 11 10 1 2",
+    );
+    panel.supports.xMin = false;
+    expect(analysisErrors(imported).join(" ")).toMatch(/quatro bordas/);
+  });
   it("persiste a laje, referências e pressão e exclui a carga dependente", () => {
     const p = slabBenchmarkProject();
     const [slab] = p.slabs;
@@ -323,7 +351,10 @@ describe("pré-validação e contrato do adaptador", () => {
     const input = exportOofem(beamExample(), "EL");
     expect(() => parseOofemOutput("incomplete", input)).toThrow(/incompleta/);
     expect(() =>
-      parseOofemOutput("Output for time 1\nFinishing analysis", input),
+      parseOofemOutput(
+        "Output for time 1\nFinishing analysis on: 2026-11-24",
+        input,
+      ),
     ).toThrow(/ausentes/);
   });
   it("impede cargas ponderadas não finitas apenas no caso que as aplica", () => {

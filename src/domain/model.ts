@@ -168,7 +168,7 @@ const slabSchema = z
   })
   .strict();
 const slabPressureSchema = z.object({ slabId: id, pz: finite }).strict();
-export const projectSchema = envelopeSchema.extend({
+const triangleProjectV5 = envelopeSchema.extend({
   schemaVersion: z.literal(5),
   slabs: z.array(slabSchema).max(1),
   loadPatterns: z
@@ -179,6 +179,40 @@ export const projectSchema = envelopeSchema.extend({
     )
     .min(1)
     .max(100),
+});
+
+const quadProjectV5 = triangleProjectV5.extend({
+  slabs: z
+    .array(
+      slabSchema
+        .omit({ levelId: true, divisionsX: true, divisionsY: true })
+        .extend({
+          z: finite,
+          nx: slabDivisions,
+          ny: slabDivisions,
+        }),
+    )
+    .max(1),
+  loadPatterns: z
+    .array(
+      patternSchema.extend({
+        pressures: z
+          .array(z.object({ slabId: id, qz: finite }).strict())
+          .max(1),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export const projectSchema = triangleProjectV5.extend({
+  schemaVersion: z.literal(6),
+  // A v5 panel could have a free elevation in addition to 40 named levels.
+  guides: spatialSchema.shape.guides.extend({
+    z: z.array(guideSchema).min(1).max(41),
+  }),
+  slabs: z
+    .array(slabSchema.extend({ formulation: z.enum(["dkt", "qdkt"]) }))
+    .max(1),
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -238,7 +272,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: uid(),
     name: "Projeto sem título",
     units: "N-m-kg-s",
@@ -362,13 +396,57 @@ export function parseProject(source: string): Project {
       const v3 = combinationSchema.safeParse(value);
       if (v3.success)
         value = { ...v3.data, schemaVersion: 4, resultEnvelopes: [] };
+    } else if (value.schemaVersion === 5) {
+      const triangle = triangleProjectV5.safeParse(value);
+      if (triangle.success) {
+        value = {
+          ...triangle.data,
+          schemaVersion: 6,
+          slabs: triangle.data.slabs.map((slab) => ({
+            ...slab,
+            formulation: "dkt",
+          })),
+        };
+      } else {
+        const quad = quadProjectV5.safeParse(value);
+        if (quad.success) {
+          const { guides, loadPatterns, slabs } = quad.data;
+          const panels = slabs.map(({ z, nx, ny, ...slab }) => {
+            let level = guides.z.find(
+              (item) => Math.abs(item.position - z) < tolerance,
+            );
+            if (!level) {
+              let id = "slab-level";
+              while (guides.z.some((item) => item.id === id)) id += "-";
+              level = { id, name: "Cota da laje", position: z };
+              guides.z.push(level);
+            }
+            return {
+              ...slab,
+              levelId: level.id,
+              divisionsX: nx,
+              divisionsY: ny,
+              formulation: "qdkt",
+            };
+          });
+          value = {
+            ...quad.data,
+            schemaVersion: 6,
+            slabs: panels,
+            loadPatterns: loadPatterns.map(({ pressures, ...pattern }) => ({
+              ...pattern,
+              pressure: pressures.map(({ slabId, qz }) => ({ slabId, pz: qz })),
+            })),
+          };
+        }
+      }
     }
   }
   const v4 = envelopeSchema.safeParse(value);
   if (v4.success) {
     value = {
       ...v4.data,
-      schemaVersion: 5,
+      schemaVersion: 6,
       slabs: [],
       loadPatterns: v4.data.loadPatterns.map((pattern) => ({
         ...pattern,
@@ -379,7 +457,7 @@ export function parseProject(source: string): Project {
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 5, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 6, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -531,7 +609,14 @@ export function analysisErrors(p: Project): string[] {
       errors.push(
         "Analise a laje isolada em um projeto sem nós ou barras lançados.",
       );
-    if (Object.values(slab.supports).filter(Boolean).length < 2)
+    if (
+      slab.formulation === "qdkt" &&
+      !Object.values(slab.supports).every(Boolean)
+    )
+      errors.push(
+        `${slab.name}: a análise QDKT exige apoio simples nas quatro bordas.`,
+      );
+    else if (Object.values(slab.supports).filter(Boolean).length < 2)
       errors.push(
         `${slab.name}: aplique apoio simples em pelo menos duas bordas para impedir movimento de corpo rígido.`,
       );
