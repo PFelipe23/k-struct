@@ -10,6 +10,7 @@ import {
   type Project,
 } from "../src/domain/model";
 import { meshSlab } from "../src/domain/slab";
+import { parseSlabOutput } from "../src/solver/slab";
 import { historyReducer } from "../src/domain/history";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
 import {
@@ -210,6 +211,55 @@ describe("laje retangular isolada", () => {
     expect(p.loadPatterns[0].pressure).toEqual([]);
   });
 
+  it("recupera exatamente campos lineares de momentos nos vértices DKT", () => {
+    const project = slabBenchmarkProject();
+    project.loadPatterns[0].pressure = [];
+    Object.assign(project.slabs[0], { divisionsX: 2, divisionsY: 2 });
+    const input = exportOofem(project, "EL").slab!;
+    const { nodes, elements } = input.mesh;
+    const mx = (x: number, y: number) => 7 + 2 * x - 3 * y;
+    const my = (x: number, y: number) => -4 + 5 * x + y;
+    const coordinates = [
+      [1 / 6, 1 / 6],
+      [2 / 3, 1 / 6],
+      [1 / 6, 2 / 3],
+    ];
+    const raw = elements
+      .map((element) => {
+        const [a, b, c] = element.nodes.map((id) => nodes[id - 1]);
+        const stresses = coordinates.map(([l1, l2], i) => {
+          const l3 = 1 - l1 - l2;
+          const x = l1 * a.x + l2 * b.x + l3 * c.x;
+          const y = l1 * a.y + l2 * b.y + l3 * c.y;
+          return ` GP 1.${i + 1} :
+  stresses 0 0 0 ${-mx(x, y)} ${-my(x, y)} 0 0 0`;
+        });
+        return [
+          `element ${element.number} (${element.number}):`,
+          ...stresses,
+        ].join("\n");
+      })
+      .join("\n");
+    const dofs = new Map(
+      nodes.map((node) => [
+        node.number,
+        new Map([
+          [3, 0],
+          [4, 0],
+          [5, 0],
+        ]),
+      ]),
+    );
+    const reactions = new Map<string, number>();
+    for (const node of nodes)
+      for (const dof of node.restraints)
+        reactions.set(`${node.number}:${dof}`, 0);
+    const result = parseSlabOutput(raw, input, dofs, reactions);
+    for (const { number, x, y } of nodes) {
+      expect(result.nodes[number - 1].mx).toBeCloseTo(mx(x, y), 11);
+      expect(result.nodes[number - 1].my).toBeCloseTo(my(x, y), 11);
+    }
+  });
   it("gera triângulos numerados no sentido anti-horário, com bordas e GL coerentes", () => {
     const p = slabBenchmarkProject();
     const [slab] = p.slabs;

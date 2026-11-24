@@ -264,9 +264,9 @@ export function parseSlabOutput(
           node.my += weight * gp[i].my;
         }
       } else {
-        // Invert the triangular barycentric interpolation.
-        node.mx += 2.5 * gp[vertex].mx - 1.5 * mx;
-        node.my += 2.5 * gp[vertex].my - 1.5 * my;
+        // At the nearest Gauss point Mgp = (Mvertex + Mmean) / 2.
+        node.mx += 2 * gp[vertex].mx - mx;
+        node.my += 2 * gp[vertex].my - my;
       }
       contributions[id - 1]++;
     }
