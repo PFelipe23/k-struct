@@ -40,6 +40,12 @@ O [workflow de pacotes](https://github.com/ricardocorsini/k-struct/actions/workf
 
 Os testes do runner exercitam cancelamento, tempo limite e persistência de registros. O Playwright verifica as ações de cancelar, recuperar o histórico e consultar o diagnóstico usando a fronteira IPC simulada, enquanto os testes dos pacotes executam o OOFEM real.
 
+## Diagnóstico de duplicidades
+
+A varredura compara a distância euclidiana em XYZ com a tolerância informada em metros. A união só é válida quando cada par do conjunto está dentro da tolerância e todos os IDs removidos apontam diretamente ao sobrevivente. A suíte confere cotas distintas, cadeias de vizinhos, barras invertidas, barras nulas criadas pela união, sobreposições parciais e transferências por padrão e grupo.
+
+No teste com OOFEM 3.0, o modelo de entrada contém duas barras de sentidos opostos entre os mesmos apoios e uma carga de −10 kN/m em cada barra. O diagnóstico conserva a barra invertida. Ao escolher a carga de uma origem, a reação é de 30 kN por apoio. Ao escolher a soma, passa a 60 kN. O Playwright verifica o destaque no modelo, conflitos de cargas e apoios, cancelamento, desfazer e nova varredura.
+
 ## Divisão e união de uma viga carregada
 
 O benchmark resolve a viga biapoiada de 6 m, divide a barra a 2 m do nó inicial e volta a uni-la com a seleção invertida. Os trechos de 2 e 4 m mantêm −10 kN/m em Z, correspondentes a −20 e −40 kN. O OOFEM 3.0 é executado nas três geometrias. O teste compara as reações de 30 kN em cada apoio e, na mesma abscissa global de 3 m, o momento de 45 kN·m e a flecha de −8,4375 mm.
