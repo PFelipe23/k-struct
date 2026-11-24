@@ -288,11 +288,13 @@ export default function SpatialView({
       applyPalette,
     };
     return () => {
-      savedCamera.current = {
-        modelKey: state.current!.modelKey,
-        eye: camera.position.clone(),
-        target: controls.target.clone(),
-      };
+      if (measured) {
+        savedCamera.current = {
+          modelKey: state.current!.modelKey,
+          eye: camera.position.clone(),
+          target: controls.target.clone(),
+        };
+      }
       state.current = null;
       controls.removeEventListener("change", render);
       overlay.domElement.remove();

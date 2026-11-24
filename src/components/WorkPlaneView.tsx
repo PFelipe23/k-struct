@@ -153,6 +153,7 @@ export default function WorkPlaneView({
     return () => resize.disconnect();
   }, []);
 
+  const cameraBeforeFit = useRef(camera);
   const fit = () => {
     const us = [
       ...project.nodes.map((n) => n[axisU]),
@@ -184,6 +185,7 @@ export default function WorkPlaneView({
     });
   };
   useEffect(() => {
+    cameraBeforeFit.current = camera;
     const previous = savedCamera.current;
     if (
       previous &&
@@ -319,11 +321,9 @@ export default function WorkPlaneView({
     />
   );
   useEffect(() => {
-    savedCamera.current = {
-      projectId: project.id,
-      kind: plane.kind,
-      ...camera,
-    };
+    // A project or plane change schedules a new framing. Only cache it after it has been applied.
+    if (camera !== cameraBeforeFit.current)
+      savedCamera.current = { projectId: project.id, kind: plane.kind, ...camera };
   }, [camera, project.id, plane.kind, savedCamera]);
   const heading = plane.kind === "XY" ? "Planta XY" : `Elevação ${plane.kind}`;
 

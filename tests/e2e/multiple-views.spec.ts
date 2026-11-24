@@ -123,7 +123,14 @@ test("planta, elevação e perspectiva mantêm câmera, camadas e seleção", as
   await button(perspective, "Cargas").click();
   await plan.focus();
   await page.mouse.move(2, 2);
+  await button(perspective, "Nomes dos objetos").click();
+  await button(perspective, "Aproximar perspectiva").click();
+  await button(perspective, "Aproximar perspectiva").click();
+  await page.locator(".explorer summary").filter({hasText: /^Nós/}).click();
+  await button(page.locator(".explorer"), "B3").scrollIntoViewIfNeeded();
+  await plan.focus();
   await page.screenshot({ path: info.outputPath("ks09-tres-vistas.png") });
+  await button(perspective, "Nomes dos objetos").click();
   await layout.selectOption("planes");
   await expect(canvas).toHaveCount(0);
   await layout.selectOption("triple");
