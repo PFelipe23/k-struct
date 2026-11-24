@@ -5,6 +5,7 @@ import { Maximize } from "lucide-react";
 import { interpolate, type Point3 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
+import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
 
 interface SceneState {
@@ -13,29 +14,53 @@ interface SceneState {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   model: THREE.Group;
+  materials: ReturnType<typeof createModelMaterials>;
   render: () => void;
   fit: () => void;
+  applyPalette: () => void;
 }
-function disposeModel(group: THREE.Group) {
-  group.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    mesh.geometry?.dispose();
-    if (mesh.material)
-      for (const m of Array.isArray(mesh.material)
-        ? mesh.material
-        : [mesh.material])
-        m.dispose();
-  });
+function createModelMaterials() {
+  return {
+    member: new THREE.LineBasicMaterial(),
+    selectedMember: new THREE.LineBasicMaterial(),
+    deformed: new THREE.LineBasicMaterial(),
+    node: new THREE.MeshStandardMaterial(),
+    selectedNode: new THREE.MeshStandardMaterial(),
+    support: new THREE.MeshStandardMaterial({ wireframe: true }),
+  };
+}
+
+function clearModel(group: THREE.Group) {
+  group.traverse((object) => (object as THREE.Mesh).geometry?.dispose());
   group.clear();
 }
+
+function recolorGrid(grid: THREE.GridHelper, regular: string, center: string) {
+  const colors = grid.geometry.getAttribute("color");
+  const vertices = grid.geometry.getAttribute("position");
+  const regularColor = new THREE.Color(regular);
+  const centerColor = new THREE.Color(center);
+  for (let i = 0; i < vertices.count; i += 2) {
+    const onAxis =
+      (vertices.getX(i) === 0 && vertices.getX(i + 1) === 0) ||
+      (vertices.getZ(i) === 0 && vertices.getZ(i + 1) === 0);
+    const { r, g, b } = onAxis ? centerColor : regularColor;
+    colors.setXYZ(i, r, g, b);
+    colors.setXYZ(i + 1, r, g, b);
+  }
+  colors.needsUpdate = true;
+}
+
 const scenePoint = (p: Point3) => new THREE.Vector3(p.x, p.z, -p.y);
 
 export default function SpatialView({
+  theme,
   project,
   selection,
   result,
   onSelect,
 }: {
+  theme: Theme;
   project: Project;
   selection: SelectedObject[];
   result: StructuralResult | null;
@@ -74,22 +99,40 @@ export default function SpatialView({
       "Vista espacial da estrutura",
     );
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#101824");
+    const background = new THREE.Color();
+    scene.background = background;
     const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100000);
     camera.position.set(10, 7, 11);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = false;
     controls.target.set(3, 0, 0);
     const model = new THREE.Group();
+    const materials = createModelMaterials();
     scene.add(model);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x38404f, 3));
-    const grid = new THREE.GridHelper(30, 30, 0x405269, 0x243043);
+    const light = new THREE.HemisphereLight(0xffffff, 0x000000, 3);
+    scene.add(light);
+    const grid = new THREE.GridHelper(30, 30);
     grid.position.y = -0.025;
     scene.add(grid);
     const axes = new THREE.AxesHelper(1.5);
     axes.rotation.x = -Math.PI / 2;
     scene.add(axes);
     const render = () => renderer.render(scene, camera);
+    const applyPalette = () => {
+      const style = getComputedStyle(el);
+      const color = (name: string) => style.getPropertyValue(name).trim();
+      background.set(color("--scene-background"));
+      light.groundColor.set(color("--scene-light-ground"));
+      recolorGrid(grid, color("--scene-grid"), color("--scene-grid-center"));
+      axes.setColors(color("--axis-x"), color("--axis-y"), color("--axis-z"));
+      materials.member.color.set(color("--geometry-member"));
+      materials.selectedMember.color.set(color("--geometry-selected"));
+      materials.deformed.color.set(color("--geometry-deformed"));
+      materials.node.color.set(color("--scene-node"));
+      materials.selectedNode.color.set(color("--geometry-selected"));
+      materials.support.color.set(color("--geometry-support"));
+      render();
+    };
     const fit = () => {
       const box = new THREE.Box3().setFromObject(model),
         center = new THREE.Vector3(3, 1, 0),
@@ -156,16 +199,25 @@ export default function SpatialView({
     el.addEventListener("pointerdown", pointerDown);
     el.addEventListener("pointerup", pointerUp);
     controls.update();
-    state.current = { renderer, scene, camera, controls, model, render, fit };
+    state.current = {
+      renderer,
+      scene,
+      camera,
+      controls,
+      model,
+      materials,
+      render,
+      fit,
+      applyPalette,
+    };
     return () => {
       state.current = null;
       resize.disconnect();
       controls.dispose();
-      disposeModel(model);
-      grid.geometry.dispose();
-      (grid.material as THREE.Material).dispose();
-      axes.geometry.dispose();
-      (axes.material as THREE.Material).dispose();
+      clearModel(model);
+      for (const material of Object.values(materials)) material.dispose();
+      grid.dispose();
+      axes.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       el.removeEventListener("pointerdown", pointerDown);
@@ -175,7 +227,7 @@ export default function SpatialView({
   useEffect(() => {
     const s = state.current;
     if (!s) return;
-    disposeModel(s.model);
+    clearModel(s.model);
     const nodes = new Map(project.nodes.map((n) => [n.id, n]));
     const selectedIds = new Set(
       selection.map((item) => `${item.kind}:${item.id}`),
@@ -188,9 +240,9 @@ export default function SpatialView({
           scenePoint(a),
           scenePoint(b),
         ]),
-        new THREE.LineBasicMaterial({
-          color: selectedIds.has(`member:${m.id}`) ? "#d2b8ff" : "#91b2d5",
-        }),
+        selectedIds.has(`member:${m.id}`)
+          ? s.materials.selectedMember
+          : s.materials.member,
       );
       line.userData.selection = { kind: "member", id: m.id };
       s.model.add(line);
@@ -207,7 +259,7 @@ export default function SpatialView({
         s.model.add(
           new THREE.Line(
             new THREE.BufferGeometry().setFromPoints(positions),
-            new THREE.LineBasicMaterial({ color: "#67d6c0" }),
+            s.materials.deformed,
           ),
         );
       }
@@ -216,9 +268,7 @@ export default function SpatialView({
       const selected = selectedIds.has(`node:${n.id}`);
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(selected ? 0.095 : 0.06, 12, 8),
-        new THREE.MeshStandardMaterial({
-          color: selected ? "#dab9ff" : "#cadbed",
-        }),
+        selected ? s.materials.selectedNode : s.materials.node,
       );
       sphere.position.set(n.x, n.z, -n.y);
       sphere.userData.selection = { kind: "node", id: n.id };
@@ -226,7 +276,7 @@ export default function SpatialView({
       if (Object.values(n.restraints).some(Boolean)) {
         const support = new THREE.Mesh(
           new THREE.ConeGeometry(0.16, 0.22, 4),
-          new THREE.MeshStandardMaterial({ color: "#4b9b8e", wireframe: true }),
+          s.materials.support,
         );
         support.position.set(n.x, n.z - 0.13, -n.y);
         s.model.add(support);
@@ -234,6 +284,9 @@ export default function SpatialView({
     }
     s.render();
   }, [project, selection, result, deformationScale]);
+  useEffect(() => {
+    state.current?.applyPalette();
+  }, [theme]);
   useEffect(() => {
     state.current?.fit();
   }, [project.id]);

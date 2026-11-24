@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import {
@@ -6,6 +6,7 @@ import {
   parseProject,
   serializeProject,
 } from "../../src/domain/model";
+import { twoSpanBeam } from "../fixtures/two-span-beam";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
 // OOFEM benchmark, not an alternative solver or a fallback in the application.
@@ -13,7 +14,10 @@ const output = readFileSync(
   new URL("../fixtures/beam-oofem.txt", import.meta.url),
   "utf8",
 );
-async function bridge(page: import("@playwright/test").Page, delayed = false) {
+async function bridge(
+  page: Page,
+  { delayed = false, solverOutput = output } = {},
+) {
   await page.addInitScript(
     ({ output, delayed }) => {
       type InvokeArgs = {
@@ -110,7 +114,7 @@ async function bridge(page: import("@playwright/test").Page, delayed = false) {
         },
       };
     },
-    { output, delayed },
+    { output: solverOutput, delayed },
   );
 }
 
@@ -155,6 +159,199 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   await expect(page.getByRole("cell", { name: "45", exact: true })).toHaveCount(
     0,
   );
+});
+
+test("tabela plana valida, cancela e aplica coordenadas em um único passo", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  const display = page.getByLabel("Visualização dos resultados");
+  await expect(display).toHaveValue("m");
+
+  const beam = page
+    .getByRole("application", { name: "Área de lançamento XZ" })
+    .locator('line[data-member-id]');
+  const beamSpan = () =>
+    beam.evaluate((line) => ({
+      x: Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")),
+      z: Number(line.getAttribute("y1")) - Number(line.getAttribute("y2")),
+    }));
+  const originalSpan = await beamSpan();
+  const dialog = page.getByRole("dialog", { name: "Tabela de nós" });
+  const apply = dialog.getByRole("button", { name: "Aplicar", exact: true });
+  const x1 = dialog.getByLabel("X de N1", { exact: true });
+  const z2 = dialog.getByLabel("Z de N2", { exact: true });
+  await button("Tabela de nós").click();
+  await expect(dialog.getByRole("columnheader")).toHaveText([
+    "Nó",
+    "X (m)",
+    "Z (m)",
+  ]);
+  await x1.fill("0,0");
+  await apply.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(display).toHaveValue("m");
+  await expect(button("Desfazer")).toBeDisabled();
+
+  await button("Tabela de nós").click();
+  await x1.fill("-1,25");
+  await z2.fill("");
+  await apply.click();
+  await expect(x1).toHaveValue("-1,25");
+  await expect(x1).toHaveAttribute("aria-invalid", "false");
+  await expect(z2).toBeFocused();
+  await expect(z2).toHaveAttribute("aria-invalid", "true");
+  await expect(z2).toHaveAccessibleDescription("Preencha a coordenada.");
+  await z2.fill("1e999");
+  await apply.click();
+  await expect(z2).toHaveAccessibleDescription("Informe um número finito.");
+  await dialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect.poll(beamSpan).toEqual(originalSpan);
+  await expect(display).toHaveValue("m");
+  await expect(button("Desfazer")).toBeDisabled();
+
+  await button("Tabela de nós").click();
+  await expect(x1).toHaveValue("0");
+  await expect(z2).toHaveValue("0");
+  await x1.fill("-1,25");
+  await z2.fill("2.5");
+  await apply.click();
+  await expect(display).toHaveValue("model");
+  await expect(page.getByRole("status")).toContainText("Clique em Analisar");
+  const editedSpan = await beamSpan();
+  expect(editedSpan.x).toBeGreaterThan(originalSpan.x);
+  expect(editedSpan.z).toBeGreaterThan(originalSpan.z);
+  await button("Desfazer").click();
+  await expect.poll(beamSpan).toEqual(originalSpan);
+  await expect(button("Desfazer")).toBeDisabled();
+  await button("Refazer").click();
+  await expect.poll(beamSpan).toEqual(editedSpan);
+
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const path = (await (await download).path())!;
+  const saved = parseProject(await readFile(path, "utf8"));
+  expect(saved.nodes).toMatchObject([
+    { id: "A", x: -1.25, y: 0, z: 0 },
+    { id: "B", x: 6, y: 0, z: 2.5 },
+  ]);
+  expect(saved.members).toEqual(beamExample().members);
+  await button("Novo projeto").click();
+  await page.locator('input[type="file"]').setInputFiles(path);
+  await button("Tabela de nós").click();
+  await expect(x1).toHaveValue("-1.25");
+  await expect(z2).toHaveValue("2.5");
+});
+
+test("tema alterna pelo teclado, preserva as vistas e retorna após recarregar", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1100, height: 720 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const root = page.locator("html");
+  const meta = page.locator('meta[name="theme-color"]');
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await expect(root).toHaveCSS("color-scheme", "dark");
+  await expect(meta).toHaveAttribute("content", "#101522");
+
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  const display = page.getByLabel("Visualização dos resultados");
+  await display.selectOption("deformed");
+  await button("Aumentar zoom").click();
+  const drawing = page.getByRole("application", {
+    name: "Área de lançamento XZ",
+  });
+  const deformation = drawing.locator("polyline");
+  const points = (await deformation.getAttribute("points"))!;
+  await expect(deformation).toHaveCSS("stroke", "rgb(103, 214, 192)");
+
+  const canvas = page.locator(".three-container canvas");
+  const initialCamera = await canvas.screenshot();
+  const bounds = (await canvas.boundingBox())!;
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width * 0.7,
+    bounds.y + bounds.height * 0.4,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  const darkScene = await canvas.screenshot();
+  expect(darkScene.equals(initialCamera)).toBe(false);
+
+  const theme = page.getByRole("combobox", { name: "Tema", exact: true });
+  await button("Exibição").press("Enter");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+  await expect(theme).toBeFocused();
+  await expect(theme).toHaveCSS("outline-style", "solid");
+  await expect(theme).toHaveValue("dark");
+  await page.keyboard.press("End");
+  await expect(theme).toHaveValue("light");
+  await expect(theme).toBeInViewport();
+  await expect(theme).toHaveCSS("outline-color", "rgb(96, 51, 152)");
+  await expect(button("Analisar")).toBeInViewport();
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await expect(meta).toHaveAttribute("content", "#eff3f8");
+  await expect(page.locator(".viewport.elevation")).toHaveCSS(
+    "background-color",
+    "rgb(245, 248, 252)",
+  );
+  await expect(deformation).toHaveCSS("stroke", "rgb(0, 105, 95)");
+  await expect(deformation).toHaveAttribute("points", points);
+  await expect(
+    page.getByRole("heading", { name: "B1", exact: true }),
+  ).toBeVisible();
+  await expect(display).toHaveValue("deformed");
+
+  const lightScene = await canvas.screenshot();
+  const backgroundPixel = await page.evaluate(async (data) => {
+    const response = await fetch(`data:image/png;base64,${data}`);
+    const image = await createImageBitmap(await response.blob());
+    const context = new OffscreenCanvas(image.width, image.height).getContext(
+      "2d",
+    )!;
+    context.drawImage(image, 0, 0);
+    image.close();
+    return Array.from(context.getImageData(4, 4, 1, 1).data);
+  }, lightScene.toString("base64"));
+  expect(backgroundPixel).toEqual([237, 243, 250, 255]);
+  await page.keyboard.press("Home");
+  await expect(theme).toHaveValue("dark");
+  await expect(root).toHaveCSS("color-scheme", "dark");
+  expect((await canvas.screenshot()).equals(darkScene)).toBe(true);
+
+  await page.keyboard.press("End");
+  await expect(theme).toHaveValue("light");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await button("Exibição").click();
+  await expect(theme).toHaveValue("light");
+
+  await page.evaluate(() => localStorage.setItem("kstruct.theme", "inválido"));
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "dark");
 });
 
 test("combinação linear lista casos pendentes, consulta resultados e preserva a composição", async ({
@@ -259,10 +456,122 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   );
 
   await page.locator('input[type="file"]').setInputFiles(file);
+  await expect(picker).toHaveValue("EL");
   await picker.selectOption(combo);
   await button("Mensagens").click();
   await expect(status).toContainText("1,8 × Permanente − 0,3 × Variável");
   await expect(status).toContainText("Permanente, Variável");
+});
+
+test("filtro de esforços acompanha caso e combinação e limita as linhas do CSV", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const solverOutput = readFileSync(
+    new URL("../fixtures/two-span-beam-oofem.txt", import.meta.url),
+    "utf8",
+  );
+  await bridge(page, { solverOutput });
+  const project = twoSpanBeam();
+  const combination = {
+    id: "C1",
+    name: "Combinação de teste",
+    type: "linear" as const,
+    factors: [{ caseId: "EL", factor: 2 }],
+  };
+  project.resultCombinations = [combination];
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "dois-vaos.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(project)),
+  });
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Esforços").click();
+  const filter = page.getByRole("combobox", { name: "Barra em Esforços" });
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator("option")).toHaveText([
+    "Todas as barras",
+    "B1",
+    "B2",
+  ]);
+  await button("Analisar").click();
+  const table = page.getByRole("table");
+  const memberCells = table.locator("tbody td:first-child");
+  const stationCells = table.locator("tbody td:nth-child(2)");
+  await expect(table.getByRole("columnheader")).toHaveText([
+    "Barra",
+    "x/L",
+    "N (kN)",
+    "V (kN)",
+    "M (kN·m)",
+  ]);
+  await expect(memberCells).toHaveText(["B1", "B1", "B1", "B2", "B2", "B2"]);
+
+  await filter.selectOption({ label: "B2" });
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await expect(stationCells).toHaveText(["0", "0,5", "1"]);
+  const middleMoment = table.locator("tbody td:last-child").nth(1);
+  await expect(middleMoment).toHaveText("5,625");
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const exportCsv = async () => {
+    const waiting = page.waitForEvent("download");
+    await button("CSV").click();
+    const path = (await (await waiting).path())!;
+    const [header, ...rows] = (await readFile(path, "utf8")).split("\n");
+    expect(rows.map((row) => row.split(";").slice(0, 2))).toEqual([
+      ['"B2"', "0"],
+      ['"B2"', "0.5"],
+      ['"B2"', "1"],
+    ]);
+    return { header, rows };
+  };
+  const caseCsv = await exportCsv();
+  const columns = '\uFEFF"Barra";"x/L";"N (kN)";"V (kN)";"M (kN·m)"';
+  expect(caseCsv.header).toBe(`${columns};"Caso";"ID do caso"`);
+  for (const row of caseCsv.rows)
+    expect(row).toMatch(/;"EL · Estática linear";"EL"$/);
+  expect(caseCsv.rows[1]).toContain(";0.5;0;5.625;5.625;");
+
+  const picker = page.getByLabel("Caso, combinação ou envelope", {
+    exact: true,
+  });
+  await picker.selectOption(`combination:${combination.id}`);
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await expect(stationCells).toHaveText(["0", "0,5", "1"]);
+  await expect(middleMoment).toHaveText("11,25");
+  const combinationCsv = await exportCsv();
+  expect(combinationCsv.header).toBe(
+    `${columns};"Combinação";"ID da combinação";"Parcelas (ID do caso e fator)"`,
+  );
+  for (const row of combinationCsv.rows)
+    expect(row).toMatch(
+      /;"Combinação de teste";"C1";"\[\{""caseId"":""EL"",""factor"":2\}\]"$/,
+    );
+  expect(combinationCsv.rows[1]).toContain(";0.5;0;11.25;11.25;");
+
+  await picker.selectOption("EL");
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B2", exact: true })
+    .click();
+  await button("Excluir").click();
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator("option")).toHaveText(["Todas as barras", "B1"]);
+  await expect(table).toHaveCount(0);
+  await expect(button("CSV")).toHaveCount(0);
+  await expect(
+    page.getByText("Execute uma análise para consultar os esforços do caso"),
+  ).toBeVisible();
+  await button("Desfazer").click();
+  await expect(filter.locator("option")).toHaveCount(3);
+  await expect(filter).toHaveValue("");
 });
 
 test("envelope consulta os dois extremos por estação e exporta as combinações governantes", async ({
@@ -359,6 +668,19 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
     });
   await page.mouse.click(middle.x, middle.y);
   await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
+  const maximum = plot.locator(".envelope-max-line polyline");
+  const minimum = plot.locator(".envelope-min-line polyline");
+  await expect(maximum).toHaveCSS("stroke", "rgb(130, 220, 230)");
+  await expect(minimum).toHaveCSS("stroke", "rgb(242, 174, 122)");
+  await button("Exibição").click();
+  await page
+    .getByRole("combobox", { name: "Tema", exact: true })
+    .selectOption("light");
+  await expect(maximum).toHaveCSS("stroke", "rgb(0, 101, 119)");
+  await expect(minimum).toHaveCSS("stroke", "rgb(145, 63, 18)");
+  await expect(region.getByLabel("Barra do envelope")).toHaveValue("V1");
+  await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
+  await expect(picker).toHaveValue(envelopeOption);
   const max = table.getByRole("row", { name: /Máximo/ });
   const min = table.getByRole("row", { name: /Mínimo/ });
   await expect(max).toContainText("Flexão positiva");
@@ -415,7 +737,7 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
 test("resposta antiga é descartada quando o modelo muda durante a execução", async ({
   page,
 }) => {
-  await bridge(page, true);
+  await bridge(page, { delayed: true });
   await page.goto("/");
   await page.getByRole("button", { name: /Viga de referência/ }).click();
   await page.getByRole("button", { name: "Analisar", exact: true }).click();
@@ -440,7 +762,7 @@ test("resposta antiga é descartada quando o modelo muda durante a execução", 
 test("cancelamento não publica resultados e o log é recuperado ao reabrir", async ({
   page,
 }) => {
-  await bridge(page, true);
+  await bridge(page, { delayed: true });
   await page.goto("/");
   await page.getByRole("button", { name: /Viga de referência/ }).click();
   await page.getByRole("button", { name: "Analisar", exact: true }).click();

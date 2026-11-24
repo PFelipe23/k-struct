@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import {
+  beamExample,
+  parseProject,
+  serializeProject,
+} from "../../src/domain/model";
 
 test("viga de referência: propriedades, undo, salvar e reabrir", async ({
   page,
@@ -90,6 +95,70 @@ test("lançamento a partir do vazio e seleção sincronizada", async ({
   await expect(
     page.locator(".explorer").getByRole("button", { name: "B1", exact: true }),
   ).toBeVisible();
+});
+
+test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const project = beamExample();
+  project.mode = "spatial";
+  await page.setViewportSize({ width: 1100, height: 720 });
+  await page.goto("/");
+  const file = page.locator('input[type="file"]');
+  await file.setInputFiles({
+    name: "viga-espacial.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(project)),
+  });
+  const beam = page
+    .getByRole("application", { name: "Área de lançamento XY" })
+    .locator('line[data-member-id]');
+  const startY = (await beam.getAttribute("y1"))!;
+  const endY = (await beam.getAttribute("y2"))!;
+  const openTable = page.getByRole("button", {
+    name: "Tabela de nós",
+    exact: true,
+  });
+  const dialog = page.getByRole("dialog", { name: "Tabela de nós" });
+  await openTable.click();
+  await expect(dialog.getByRole("columnheader")).toHaveText([
+    "Nó",
+    "X (m)",
+    "Y (m)",
+    "Z (m)",
+  ]);
+  await expect(dialog.getByRole("rowheader")).toHaveText(["N1", "N2"]);
+  const y1 = dialog.getByLabel("Y de N1", { exact: true });
+  const y2 = dialog.getByLabel("Y de N2", { exact: true });
+  await y1.fill("-0,75");
+  await y2.fill("2.25");
+  await dialog.getByRole("button", { name: "Aplicar", exact: true }).click();
+  await expect(beam).not.toHaveAttribute("y1", startY);
+  await expect(beam).not.toHaveAttribute("y2", endY);
+
+  const download = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Salvar projeto", exact: true })
+    .click();
+  const path = (await (await download).path())!;
+  const saved = parseProject(await readFile(path, "utf8"));
+  expect(saved.mode).toBe("spatial");
+  expect(saved.nodes).toMatchObject([
+    { id: "A", x: 0, y: -0.75, z: 0 },
+    { id: "B", x: 6, y: 2.25, z: 0 },
+  ]);
+  expect(saved.members).toEqual(project.members);
+  await page.getByRole("button", { name: "Novo projeto", exact: true }).click();
+  await file.setInputFiles(path);
+  await openTable.click();
+  await expect(y1).toHaveValue("-0.75");
+  await expect(y2).toHaveValue("2.25");
+  await y2.fill("10");
+  await y2.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await openTable.click();
+  await expect(y2).toHaveValue("2.25");
 });
 
 test("layout desktop, arte local e vista espacial", async ({ page }) => {
