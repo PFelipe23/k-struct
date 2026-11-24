@@ -159,6 +159,10 @@ test("pórtico espacial assimétrico lançado do vazio, salvo e conferido com a 
   expect(model.guides.z[1].position).toBe(2.8);
 
   await page.getByRole("button", { name: "Novo projeto", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await page.locator("input[type=file]").setInputFiles(savedPath!);
   await expect(page.locator(".model-count")).toHaveText("9 nós · 11 barras");
   await expect(

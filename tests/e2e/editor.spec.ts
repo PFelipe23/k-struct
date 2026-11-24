@@ -40,6 +40,10 @@ test("viga de referência: propriedades, undo, salvar e reabrir", async ({
   expect(saved.members).toHaveLength(1);
   expect(saved.loadPatterns[0].uniform[0].qz).toBe(-10000);
   await page.getByRole("button", { name: "Novo projeto", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await page.locator("input[type=file]").setInputFiles(path!);
   await expect(page.getByLabel("Nome do projeto")).toHaveValue(
     "Viga biapoiada · 6 m",
@@ -103,7 +107,9 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
   test.setTimeout(60_000);
   const project = beamExample();
   project.mode = "spatial";
-  await page.addInitScript(() => localStorage.setItem("kstruct.theme", "light"));
+  await page.addInitScript(() =>
+    localStorage.setItem("kstruct.theme", "light"),
+  );
   await page.setViewportSize({ width: 1100, height: 720 });
   await page.goto("/");
   const file = page.locator('input[type="file"]');
@@ -115,7 +121,7 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   const beam = page
     .getByRole("application", { name: "Área de lançamento XY" })
-    .locator('line[data-member-id]');
+    .locator("line[data-member-id]");
   const startY = (await beam.getAttribute("y1"))!;
   const endY = (await beam.getAttribute("y2"))!;
   const openTable = page.getByRole("button", {
@@ -152,6 +158,10 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
   ]);
   expect(saved.members).toEqual(project.members);
   await page.getByRole("button", { name: "Novo projeto", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await file.setInputFiles(path);
   await openTable.click();
   await expect(y1).toHaveValue("-0.75");

@@ -176,7 +176,7 @@ test("tabela plana valida, cancela e aplica coordenadas em um único passo", asy
 
   const beam = page
     .getByRole("application", { name: "Área de lançamento XZ" })
-    .locator('line[data-member-id]');
+    .locator("line[data-member-id]");
   const beamSpan = () =>
     beam.evaluate((line) => ({
       x: Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")),
@@ -244,6 +244,10 @@ test("tabela plana valida, cancela e aplica coordenadas em um único passo", asy
   ]);
   expect(saved.members).toEqual(beamExample().members);
   await button("Novo projeto").click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await page.locator('input[type="file"]').setInputFiles(path);
   await button("Tabela de nós").click();
   await expect(x1).toHaveValue("-1.25");

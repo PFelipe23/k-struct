@@ -97,6 +97,10 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
   });
 
   await button(page, "Novo projeto").click();
+  await page
+    .getByRole("dialog", { name: "Novo projeto" })
+    .getByRole("button", { name: "Criar projeto", exact: true })
+    .click();
   await file.setInputFiles(path);
   await expect(casePicker).toHaveValue(vertical.id);
   await expect(casePicker.locator("option")).toHaveCount(2);
@@ -188,7 +192,17 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
       "Análise concluída · Vertical",
     );
     await diagram.selectOption("my");
-    const verticalPoints = (await polygon.getAttribute("points"))!;
+    // Expanding the results pane can translate the viewport while the section forces stay the same.
+    const diagramShape = () =>
+      polygon.evaluate((element) => {
+        const points = (element as SVGPolygonElement).points;
+        const origin = points.getItem(0);
+        return Array.from(points, (point) => [
+          Math.round((point.x - origin.x) * 1000),
+          Math.round((point.y - origin.y) * 1000),
+        ]);
+      });
+    const verticalShape = await diagramShape();
     await casePicker.selectOption(lateral.id);
     await expect(diagram).toHaveValue("model");
     await button(page, "Analisar").click();
@@ -196,10 +210,10 @@ test("pórtico com casos vertical e vento Y salvos e consultados separadamente",
       "Análise concluída · Vento lateral",
     );
     await diagram.selectOption("my");
-    await expect(polygon).not.toHaveAttribute("points", verticalPoints);
+    await expect.poll(diagramShape).not.toEqual(verticalShape);
     await casePicker.selectOption(vertical.id);
     await expect(diagram).toHaveValue("my");
-    await expect(polygon).toHaveAttribute("points", verticalPoints);
+    await expect.poll(diagramShape).toEqual(verticalShape);
     await expect(page.locator(".result-case-name")).toHaveText("Vertical");
     expect(
       await page.evaluate(() => sessionStorage.getItem("e2e-case-runs")),

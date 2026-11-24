@@ -76,6 +76,7 @@ import {
   ReplicateDialog,
   WorkPlaneControls,
 } from "./components/LaunchTools";
+import NewProjectDialog from "./components/NewProjectDialog";
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
 import NodeTable from "./components/NodeTable";
@@ -145,7 +146,7 @@ export default function App() {
   const [guideId, setGuide] = useState(slab?.levelId ?? "");
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
-    "guides" | "replicate" | "nodes" | null
+    "guides" | "replicate" | "nodes" | "new-project" | null
   >(null);
   const kind = spatial ? preferredPlane : "XZ";
   const planeGuides = p.guides[planeCoordinates[kind][2]];
@@ -441,6 +442,7 @@ export default function App() {
     invalidateResults();
     current.current = project;
     dispatch({ type: "reset", project });
+    setLaunchDialog(null);
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
     setPending(null);
     setPlane("XY");
@@ -500,12 +502,18 @@ export default function App() {
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (loadEditor || launchDialog === "nodes") return;
+      if (
+        loadEditor ||
+        launchDialog === "nodes" ||
+        settings ||
+        confirmation ||
+        showRunHistory
+      )
+        return;
       if (launchDialog) {
         if (e.key === "Escape") setLaunchDialog(null);
         return;
       }
-      if (settings || confirmation || showRunHistory) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         (e.target as HTMLElement).blur();
@@ -700,9 +708,7 @@ export default function App() {
           <button
             title="Novo projeto"
             aria-label="Novo projeto"
-            onClick={() =>
-              protect("Criar um novo projeto", () => replace(createProject()))
-            }
+            onClick={() => setLaunchDialog("new-project")}
           >
             <FilePlus2 size={17} />
           </button>
@@ -1544,6 +1550,14 @@ export default function App() {
           }}
           onApply={replicateSelection}
           onClose={() => setLaunchDialog(null)}
+        />
+      )}
+      {launchDialog === "new-project" && (
+        <NewProjectDialog
+          onClose={() => setLaunchDialog(null)}
+          onCreate={(project) =>
+            protect("Substituir o projeto atual", () => replace(project))
+          }
         />
       )}
       {confirmation && (
