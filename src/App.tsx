@@ -39,6 +39,7 @@ import {
   beamExample,
   createProject,
   projectSchema,
+  projectFileLimit,
   referenceErrors,
   parseProject,
   removeSelection,
@@ -81,6 +82,8 @@ import NewProjectDialog from "./components/NewProjectDialog";
 import SpatialView, { type SpatialCamera } from "./components/SpatialView";
 import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
+import SelectionDialog from "./components/SelectionDialog";
+import { combineSelection } from "./domain/selection";
 import NodeTable from "./components/NodeTable";
 import Results from "./components/Results";
 import SlabResults, {
@@ -130,6 +133,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v7") ??
       localStorage.getItem("kstruct.draft.v6") ??
       localStorage.getItem("kstruct.draft.v5") ??
       localStorage.getItem("kstruct.draft.v4") ??
@@ -191,7 +195,7 @@ export default function App() {
   const validRoll = Number.isFinite(roll) && Math.abs(roll) <= 360;
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
-    "guides" | "replicate" | "nodes" | "new-project" | null
+    "guides" | "replicate" | "nodes" | "new-project" | "selection" | null
   >(null);
   const {
     plane,
@@ -367,7 +371,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v6", serialized);
+      localStorage.setItem("kstruct.draft.v7", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -583,6 +587,7 @@ export default function App() {
       if (
         loadEditor ||
         launchDialog === "nodes" ||
+        launchDialog === "selection" ||
         settings ||
         confirmation ||
         showRunHistory
@@ -1380,6 +1385,16 @@ export default function App() {
                 {slab && " · 1 laje"}
               </span>
             </div>
+            <button
+              className="selection-trigger"
+              onClick={() => {
+                setPending(null);
+                setTool("select");
+                setLaunchDialog("selection");
+              }}
+            >
+              Seleção e grupos
+            </button>
             <select
               aria-label="Visualização dos resultados"
               value={showSlabMap ? display : visibleDisplay}
@@ -1507,6 +1522,15 @@ export default function App() {
                       : null
                   }
                   patternId={patternId}
+                  onWindow={(objects, additive) =>
+                    setSelection((previous) =>
+                      combineSelection(
+                        previous,
+                        objects,
+                        additive ? "add" : "replace",
+                      ),
+                    )
+                  }
                   onSpan={placeMember}
                   pending={active ? pending : null}
                   onPoint={onPoint}
@@ -1660,7 +1684,7 @@ export default function App() {
           const f = e.target.files?.[0];
           if (f) {
             try {
-              if (f.size > 5_000_000)
+              if (f.size > projectFileLimit)
                 throw new Error("Arquivo maior que 5 MB.");
               replace(parseProject(await f.text()));
             } catch (e) {
@@ -1725,6 +1749,15 @@ export default function App() {
             setMessage("Definições de carga aplicadas.");
             return null;
           }}
+        />
+      )}
+      {launchDialog === "selection" && (
+        <SelectionDialog
+          project={p}
+          selection={selection}
+          edit={edit}
+          onSelect={setSelection}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "nodes" && (

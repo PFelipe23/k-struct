@@ -623,6 +623,20 @@ button.primary {
   font-size: 9px;
   margin-left: 8px;
 }
+
+.selection-trigger { white-space: nowrap; font-size: 11px; padding: 4px 8px; border-color: var(--line); }
+.selection-window { color: var(--accent); }
+.selection-window[data-mode="crossing"] { color: var(--green); }
+.selection-window rect { stroke: currentColor; fill: currentColor; fill-opacity: .14; }
+.selection-window[data-mode="crossing"] rect { stroke-dasharray: 5 3; }
+.selection-window text { fill: currentColor; font-size: 11px; paint-order: stroke; stroke: var(--surface-view); stroke-width: 3px; }
+.selection-dialog fieldset { margin: 10px 0; padding: 12px; border: 1px solid var(--line); }
+.selection-dialog legend { color: var(--text); padding-inline: 5px; }
+.selection-dialog label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
+.selection-dialog select { min-width: 0; width: 100%; }
+.selection-dialog button { border-color: var(--line); padding: 5px 10px; }
+.selection-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.selection-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .model-bar select {
   font-size: 10px;
   border: 0;

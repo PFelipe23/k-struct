@@ -28,6 +28,8 @@ import type {
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
+import SelectionWindow from "./SelectionWindow";
+import { objectsInWindow } from "../domain/selection";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 
@@ -49,6 +51,7 @@ interface Props {
   selection: SelectedObject[];
   tool: Tool;
   quick: boolean;
+  onWindow: (objects: SelectedObject[], additive: boolean) => void;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
@@ -85,6 +88,7 @@ export default function WorkPlaneView({
   selection,
   tool: activeTool,
   quick,
+  onWindow,
   onSpan,
   result,
   envelope,
@@ -875,6 +879,22 @@ export default function WorkPlaneView({
               pointerEvents="none"
             />
           ))}
+        <SelectionWindow
+          target={ref}
+          enabled={activeTool === "select" && !quick}
+          plane={plane}
+          projectId={project.id}
+          onApply={(a, b, additive) => {
+            const projectPoint = (pixel: { x: number; y: number }) => ({
+              u: (pixel.x - sx(0)) / camera.scale,
+              v: (sy(0) - pixel.y) / camera.scale,
+            });
+            onWindow(
+              objectsInWindow(project, plane, projectPoint(a), projectPoint(b)),
+              additive,
+            );
+          }}
+        />
       </svg>
       {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
         <div className="empty-canvas">
