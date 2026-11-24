@@ -60,6 +60,8 @@ No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolh
 
 Em **Modelo** → **Tabela de nós**, edite as coordenadas em metros de vários nós em um único passo. A tabela mostra X e Z no modelo plano e X, Y e Z no espacial. Use vírgula ou ponto para decimais e corrija as células destacadas antes de clicar em **Aplicar**. **Cancelar** descarta o rascunho. **Desfazer** e **Refazer** atuam sobre o lote inteiro. Após aplicar uma alteração, analise novamente para atualizar os resultados.
 
+Em **Exibição → Tema**, escolha **Claro** ou **Escuro**. A primeira abertura usa o tema escuro. A escolha é guardada nas preferências locais e vale para a interface e as duas vistas, inclusive durante a consulta de resultados.
+
 ### Padrões, casos, combinações e envelopes
 
 Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.

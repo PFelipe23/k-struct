@@ -217,7 +217,7 @@ export default function WorkPlaneView({
       y1={y - dy}
       x2={x}
       y2={y}
-      stroke="#e7b45c"
+      stroke="var(--geometry-load)"
       strokeWidth="1.4"
       markerEnd="url(#load-arrow)"
     />
@@ -329,7 +329,7 @@ export default function WorkPlaneView({
             refY="3.5"
             orient="auto"
           >
-            <path d="M0 0 L7 3.5 L0 7" fill="#e7b45c" />
+            <path d="M0 0 L7 3.5 L0 7" fill="var(--geometry-load)" />
           </marker>
         </defs>
         <g className="grid">
@@ -458,7 +458,9 @@ export default function WorkPlaneView({
                 y1={sy(v)}
                 x2={sx(u + du)}
                 y2={sy(v + dv)}
-                stroke={active ? "#d2b8ff" : "#8ca8cb"}
+                stroke={
+                  active ? "var(--geometry-selected)" : "var(--geometry-member)"
+                }
                 strokeWidth={active ? 4 : 2.5}
               />
               <line
@@ -521,15 +523,15 @@ export default function WorkPlaneView({
                   <polyline
                     points={diagram}
                     fill="none"
-                    stroke="#67d6c0"
+                    stroke="var(--geometry-deformed)"
                     strokeWidth="2"
                     pointerEvents="none"
                   />
                 ) : (
                   <polygon
                     points={`${sx(u)},${sy(v)} ${diagram} ${sx(u + du)},${sy(v + dv)}`}
-                    fill="#a98ae92b"
-                    stroke="#bd9af9"
+                    fill="var(--geometry-result-fill)"
+                    stroke="var(--geometry-result)"
                     strokeWidth="1.6"
                     pointerEvents="none"
                   />
@@ -607,12 +609,15 @@ export default function WorkPlaneView({
               {fixed && (
                 <path
                   d={`M${x - 11} ${y + 7}h22m-20 0l-4 6m12-6l-4 6m12-6l-4 6`}
-                  stroke="#67c7b1"
+                  stroke="var(--geometry-support)"
                   fill="none"
                 />
               )}
               {!fixed && hasSupport && (
-                <g stroke="#67c7b1" fill="#111b27">
+                <g
+                  stroke="var(--geometry-support)"
+                  fill="var(--geometry-node-fill)"
+                >
                   <path d={`M${x} ${y + 4}l-9 14h18z`} />
                   {!r[dofU] && <path d={`M${x - 11} ${y + 22}h22`} />}
                 </g>
@@ -622,8 +627,14 @@ export default function WorkPlaneView({
                 cx={x}
                 cy={y}
                 r={active ? 5.5 : 3.5}
-                fill={active ? "#dbc4ff" : "#101a29"}
-                stroke={active ? "#dbc4ff" : "#a9c0dd"}
+                fill={
+                  active
+                    ? "var(--geometry-selected)"
+                    : "var(--geometry-node-fill)"
+                }
+                stroke={
+                  active ? "var(--geometry-selected)" : "var(--geometry-node)"
+                }
                 strokeWidth="1.8"
               />
               {labels && (
@@ -659,14 +670,14 @@ export default function WorkPlaneView({
           <g pointerEvents="none">
             <path
               d={`M${sx(cursor.u) - 8} ${sy(cursor.v)}h16m-8-8v16`}
-              stroke="#e3c7ff"
+              stroke="var(--geometry-selected)"
             />
             <rect
               x={sx(cursor.u) - 4}
               y={sy(cursor.v) - 4}
               width="8"
               height="8"
-              stroke="#e3c7ff"
+              stroke="var(--geometry-selected)"
               fill="none"
             />
           </g>
@@ -677,7 +688,7 @@ export default function WorkPlaneView({
             y1={sy(pending[axisV])}
             x2={sx(cursor.u)}
             y2={sy(cursor.v)}
-            stroke="#cfb5f8"
+            stroke="var(--geometry-selected)"
             strokeDasharray="6 4"
             pointerEvents="none"
           />
