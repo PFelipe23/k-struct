@@ -40,6 +40,12 @@ O [workflow de pacotes](https://github.com/ricardocorsini/k-struct/actions/workf
 
 Os testes do runner exercitam cancelamento, tempo limite e persistência de registros. O Playwright verifica as ações de cancelar, recuperar o histórico e consultar o diagnóstico usando a fronteira IPC simulada, enquanto os testes dos pacotes executam o OOFEM real.
 
+## Divisão e união de uma viga carregada
+
+O benchmark resolve a viga biapoiada de 6 m, divide a barra a 2 m do nó inicial e volta a uni-la com a seleção invertida. Os trechos de 2 e 4 m mantêm −10 kN/m em Z, correspondentes a −20 e −40 kN. O OOFEM 3.0 é executado nas três geometrias. O teste compara as reações de 30 kN em cada apoio e, na mesma abscissa global de 3 m, o momento de 45 kN·m e a flecha de −8,4375 mm.
+
+Um caso de edição separado usa a ponta j livre, para poder aparar até X = 4 m e prolongar até X = 6 m. O teste de interface verifica as resultantes de −40 kN e −60 kN e reabre o modelo salvo entre as operações.
+
 ## Reflexão de uma viga espacial
 
 O teste de integração monta dois balanços independentes de 2 m no mesmo projeto. O inicial parte de (2, 1, 0) na direção +X e tem seção de 14 × 32 cm girada em 27°. A cópia é produzida pelo comando de espelho no plano YZ, incluindo engaste, carga distribuída, força e momento de ponta. O teste verifica por equilíbrio as reações na raiz do balanço inicial. No referencial global elas são (−1360, −540, 3500) N e (−150, −6170, −1250) N·m.
