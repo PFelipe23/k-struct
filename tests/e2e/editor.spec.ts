@@ -103,6 +103,7 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
   test.setTimeout(60_000);
   const project = beamExample();
   project.mode = "spatial";
+  await page.addInitScript(() => localStorage.setItem("kstruct.theme", "light"));
   await page.setViewportSize({ width: 1100, height: 720 });
   await page.goto("/");
   const file = page.locator('input[type="file"]');
@@ -111,6 +112,7 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
     mimeType: "application/json",
     buffer: Buffer.from(serializeProject(project)),
   });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   const beam = page
     .getByRole("application", { name: "Área de lançamento XY" })
     .locator('line[data-member-id]');
