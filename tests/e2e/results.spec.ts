@@ -176,7 +176,7 @@ test("tabela plana valida, cancela e aplica coordenadas em um único passo", asy
 
   const beam = page
     .getByRole("application", { name: "Área de lançamento XZ" })
-    .locator('line[stroke="#8ca8cb"]');
+    .locator('line[data-member-id]');
   const beamSpan = () =>
     beam.evaluate((line) => ({
       x: Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")),

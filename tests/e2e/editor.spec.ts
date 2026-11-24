@@ -113,7 +113,7 @@ test("tabela espacial edita Y e preserva as ligações ao salvar e reabrir", asy
   });
   const beam = page
     .getByRole("application", { name: "Área de lançamento XY" })
-    .locator('line[stroke="#8ca8cb"]');
+    .locator('line[data-member-id]');
   const startY = (await beam.getAttribute("y1"))!;
   const endY = (await beam.getAttribute("y2"))!;
   const openTable = page.getByRole("button", {
