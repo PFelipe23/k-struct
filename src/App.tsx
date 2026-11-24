@@ -28,6 +28,7 @@ import {
   GitBranch,
   History,
   ListChecks,
+  Table2,
   Square,
   PanelLeft,
   PanelRight,
@@ -70,6 +71,7 @@ import {
 } from "./components/LaunchTools";
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
+import NodeTable from "./components/NodeTable";
 import Results from "./components/Results";
 import EnvelopeResults from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
@@ -126,7 +128,7 @@ export default function App() {
   const [guideId, setGuide] = useState("");
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
-    "guides" | "replicate" | null
+    "guides" | "replicate" | "nodes" | null
   >(null);
   const kind = spatial ? preferredPlane : "XZ";
   const planeGuides = p.guides[planeCoordinates[kind][2]];
@@ -450,7 +452,7 @@ export default function App() {
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (loadEditor) return;
+      if (loadEditor || launchDialog === "nodes") return;
       if (launchDialog) {
         if (e.key === "Escape") setLaunchDialog(null);
         return;
@@ -759,6 +761,13 @@ export default function App() {
                 >
                   <Trash2 size={19} />
                   <span>Excluir</span>
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={() => setLaunchDialog("nodes")}
+                >
+                  <Table2 size={21} />
+                  <span>Tabela de nós</span>
                 </button>
               </div>
               <small>LANÇAMENTO</small>
@@ -1320,6 +1329,25 @@ export default function App() {
             setDisplay("model");
             setMessage("Definições de carga aplicadas.");
             return null;
+          }}
+        />
+      )}
+      {launchDialog === "nodes" && (
+        <NodeTable
+          project={p}
+          onClose={() => setLaunchDialog(null)}
+          onApply={(changes) => {
+            const problem = edit((project) => {
+              for (const node of project.nodes) {
+                const position = changes.get(node.id);
+                if (position) Object.assign(node, position);
+              }
+            });
+            if (!problem)
+              setMessage(
+                "Coordenadas atualizadas. Clique em Analisar para calcular o caso.",
+              );
+            return problem;
           }}
         />
       )}
