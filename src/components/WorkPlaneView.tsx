@@ -2,6 +2,8 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useId,
+  type RefObject,
   useRef,
   useState,
   type MouseEvent,
@@ -25,8 +27,17 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
+import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
+
+export type PlaneCamera = {
+  projectId: string;
+  kind: WorkPlane["kind"];
+  u: number;
+  v: number;
+  scale: number;
+};
 
 export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
@@ -48,6 +59,9 @@ interface Props {
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
+  active: boolean;
+  savedCamera: RefObject<PlaneCamera | null>;
+  onActivate: () => void;
   pending: Point3 | null;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -60,6 +74,11 @@ export const additiveSelection = (e: {
 }) => e.ctrlKey || e.metaKey || e.shiftKey;
 
 export default function WorkPlaneView({
+  active,
+  onActivate,
+  savedCamera,
+  layers,
+  setLayers,
   project,
   plane,
   orthogonal,
@@ -75,7 +94,7 @@ export default function WorkPlaneView({
   pending,
   onPoint,
   onSelect,
-}: Props) {
+}: Props & LayerControls) {
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 700, height: 460 });
   const [camera, setCamera] = useState({ u: 3, v: 1.5, scale: 65 });
@@ -93,7 +112,8 @@ export default function WorkPlaneView({
     setSpanPointer(null);
     if (quick) setCursor(null);
   }, [quick, plane.kind, plane.offset, project.id]);
-  const [labels, setLabels] = useState(true);
+  const { labels } = layers;
+  const markerId = useId();
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
   const uGuides = spatial || quick ? project.guides[axisU] : [];
@@ -133,6 +153,7 @@ export default function WorkPlaneView({
     return () => resize.disconnect();
   }, []);
 
+  const cameraBeforeFit = useRef(camera);
   const fit = () => {
     const us = [
       ...project.nodes.map((n) => n[axisU]),
@@ -148,21 +169,31 @@ export default function WorkPlaneView({
       maxU = Math.max(6, ...us);
     const minV = Math.min(0, ...vs),
       maxV = Math.max(0, ...vs);
+    const bounds = ref.current?.getBoundingClientRect() ?? size;
     setCamera({
       u: (minU + maxU) / 2,
       v: (minV + maxV) / 2,
       scale: Math.max(
         10,
         Math.min(
-          (size.width - 105) / Math.max(6, maxU - minU),
-          (size.height - 120) / Math.max(3, maxV - minV),
+          (bounds.width - 105) / Math.max(6, maxU - minU),
+          (bounds.height - Math.min(120, bounds.height * 0.35)) /
+            Math.max(3, maxV - minV),
           100,
         ),
       ),
     });
   };
   useEffect(() => {
-    fit();
+    cameraBeforeFit.current = camera;
+    const previous = savedCamera.current;
+    if (
+      previous &&
+      previous.projectId === project.id &&
+      previous.kind === plane.kind
+    )
+      setCamera({ u: previous.u, v: previous.v, scale: previous.scale });
+    else fit();
     setCursor(null);
   }, [project.id, plane.kind]);
   useEffect(() => setCursor(null), [plane.offset]);
@@ -286,17 +317,32 @@ export default function WorkPlaneView({
       y2={y}
       stroke="var(--geometry-load)"
       strokeWidth="1.4"
-      markerEnd="url(#load-arrow)"
+      markerEnd={`url(#${markerId})`}
     />
   );
+  useEffect(() => {
+    // A project or plane change schedules a new framing. Only cache it after it has been applied.
+    if (camera !== cameraBeforeFit.current)
+      savedCamera.current = { projectId: project.id, kind: plane.kind, ...camera };
+  }, [camera, project.id, plane.kind, savedCamera]);
   const heading = plane.kind === "XY" ? "Planta XY" : `Elevação ${plane.kind}`;
 
   return (
-    <section className="viewport elevation">
+    <section
+      className="viewport elevation"
+      tabIndex={0}
+      aria-label={heading}
+      data-active={active}
+      onPointerDownCapture={onActivate}
+      onFocusCapture={onActivate}
+    >
       <div className="view-heading">
         <span>
           <i className="view-dot" />
-          {heading}
+          {heading}{" "}
+          <small>
+            {normal.toUpperCase()} = {plane.offset} m
+          </small>
         </span>
         <div className="view-actions">
           <button
@@ -324,13 +370,7 @@ export default function WorkPlaneView({
           >
             <Maximize size={14} />
           </button>
-          <button
-            className={labels ? "selected" : ""}
-            title="Nomes dos objetos"
-            onClick={() => setLabels((v) => !v)}
-          >
-            ID
-          </button>
+          <ViewLayers layers={layers} setLayers={setLayers} />
         </div>
       </div>
       <svg
@@ -411,7 +451,7 @@ export default function WorkPlaneView({
       >
         <defs>
           <marker
-            id="load-arrow"
+            id={markerId}
             markerWidth="7"
             markerHeight="7"
             refX="6"
@@ -421,7 +461,7 @@ export default function WorkPlaneView({
             <path d="M0 0 L7 3.5 L0 7" fill="var(--geometry-load)" />
           </marker>
         </defs>
-        <g className="grid">
+        <g className="grid" visibility={layers.grid ? "visible" : "hidden"}>
           {grid(camera.u, size.width).map((u) => (
             <g key={u}>
               <line
@@ -451,7 +491,11 @@ export default function WorkPlaneView({
             </g>
           ))}
         </g>
-        <g className="work-guides" aria-hidden="true">
+        <g
+          className="work-guides"
+          aria-hidden="true"
+          visibility={layers.grid ? "visible" : "hidden"}
+        >
           {uGuides.map((g) => (
             <g key={g.id}>
               <line
@@ -506,8 +550,10 @@ export default function WorkPlaneView({
             labels={labels}
             map={slabMap}
             pressure={
-              patterns.pressure.find(({ slabId }) => slabId === slab.id)?.pz ??
-              0
+              layers.loads
+                ? (patterns.pressure.find(({ slabId }) => slabId === slab.id)
+                    ?.pz ?? 0)
+                : 0
             }
             onClick={selectSlab}
           />
@@ -609,34 +655,36 @@ export default function WorkPlaneView({
                   {m.name}
                 </text>
               )}
-              {display === "model" && components.some(Boolean) && (
-                <g className="load-shape">
-                  {norm > 0 &&
-                    Array.from({ length: 9 }, (_, i) =>
-                      arrow(
-                        sx(u + (du * i) / 8),
-                        sy(v + (dv * i) / 8),
-                        (qu / norm) * 34,
-                        (-qv / norm) * 34,
-                        String(i),
-                      ),
-                    )}
-                  <text
-                    x={sx(u + du / 2)}
-                    y={sy(v + dv / 2) - (qv <= 0 ? 45 : -55)}
-                    textAnchor="middle"
-                  >
-                    {components
-                      .flatMap((q, i) =>
-                        q
-                          ? [`q${coordinates[i].toUpperCase()} ${q / 1000}`]
-                          : [],
-                      )
-                      .join(" · ")}{" "}
-                    kN/m
-                  </text>
-                </g>
-              )}
+              {layers.loads &&
+                display === "model" &&
+                components.some(Boolean) && (
+                  <g className="load-shape">
+                    {norm > 0 &&
+                      Array.from({ length: 9 }, (_, i) =>
+                        arrow(
+                          sx(u + (du * i) / 8),
+                          sy(v + (dv * i) / 8),
+                          (qu / norm) * 34,
+                          (-qv / norm) * 34,
+                          String(i),
+                        ),
+                      )}
+                    <text
+                      x={sx(u + du / 2)}
+                      y={sy(v + dv / 2) - (qv <= 0 ? 45 : -55)}
+                      textAnchor="middle"
+                    >
+                      {components
+                        .flatMap((q, i) =>
+                          q
+                            ? [`q${coordinates[i].toUpperCase()} ${q / 1000}`]
+                            : [],
+                        )
+                        .join(" · ")}{" "}
+                      kN/m
+                    </text>
+                  </g>
+                )}
               {diagram &&
                 (display === "deformed" ? (
                   <polyline
@@ -761,23 +809,25 @@ export default function WorkPlaneView({
                   {n.name}
                 </text>
               )}
-              {display === "model" && (norm > 0 || fn !== 0) && (
-                <g className="load-shape">
-                  {norm > 0 &&
-                    arrow(x, y, (fu / norm) * 50, (-fv / norm) * 50, "nodal")}
-                  <text x={x + 12} y={y - (norm > 0 ? 52 : 28)}>
-                    {coordinates
-                      .flatMap((k) =>
-                        force(k)
-                          ? [`F${k.toUpperCase()} ${force(k) / 1000}`]
-                          : [],
-                      )
-                      .join(" · ")}{" "}
-                    kN
-                  </text>
-                </g>
-              )}
-              {display === "model" && moments.length > 0 && (
+              {layers.loads &&
+                display === "model" &&
+                (norm > 0 || fn !== 0) && (
+                  <g className="load-shape">
+                    {norm > 0 &&
+                      arrow(x, y, (fu / norm) * 50, (-fv / norm) * 50, "nodal")}
+                    <text x={x + 12} y={y - (norm > 0 ? 52 : 28)}>
+                      {coordinates
+                        .flatMap((k) =>
+                          force(k)
+                            ? [`F${k.toUpperCase()} ${force(k) / 1000}`]
+                            : [],
+                        )
+                        .join(" · ")}{" "}
+                      kN
+                    </text>
+                  </g>
+                )}
+              {layers.loads && display === "model" && moments.length > 0 && (
                 <text x={x + 16} y={y + 35} className="moment-label">
                   {moments.join(" · ")} kN·m
                 </text>

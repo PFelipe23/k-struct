@@ -1,14 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { Maximize } from "lucide-react";
+import {
+  CSS2DObject,
+  CSS2DRenderer,
+} from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { ViewLayers, type LayerControls } from "./ViewLayers";
+import { formatResult } from "./resultFormatting";
+import { Maximize, Plus, Minus } from "lucide-react";
 import { interpolate, type Point3 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
 import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
 
+export type SpatialCamera = {
+  modelKey: string;
+  eye: THREE.Vector3;
+  target: THREE.Vector3;
+};
 interface SceneState {
+  grid: THREE.GridHelper;
+  modelKey: string;
+  restoreOrFit: () => void;
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -55,13 +69,52 @@ function recolorGrid(grid: THREE.GridHelper, regular: string, center: string) {
 
 const scenePoint = (p: Point3) => new THREE.Vector3(p.x, p.z, -p.y);
 
+function annotate(
+  model: THREE.Group,
+  at: THREE.Vector3,
+  lines: string[],
+  selected = false,
+) {
+  if (!lines.length) return;
+  const element = document.createElement("span");
+  element.className = selected ? "scene-label selected" : "scene-label";
+  element.textContent = lines.join("\n");
+  const label = new CSS2DObject(element);
+  label.position.copy(at);
+  label.center.set(0, 1);
+  model.add(label);
+}
+
+function loadComponents<T>(
+  loads: T[],
+  keys: (keyof T & string)[],
+  unit: string,
+) {
+  return keys.flatMap((key) => {
+    const value = loads.reduce((sum, load) => sum + Number(load[key]), 0);
+    return value
+      ? [`${key.toUpperCase()} ${formatResult(value / 1000)} ${unit}`]
+      : [];
+  });
+}
+
 export default function SpatialView({
+  active,
+  onActivate,
+  layers,
+  setLayers,
+  savedCamera,
+  patternId,
   theme,
   project,
   selection,
   result,
   onSelect,
-}: {
+}: LayerControls & {
+  active: boolean;
+  onActivate: () => void;
+  savedCamera: RefObject<SpatialCamera | null>;
+  patternId: string;
   theme: Theme;
   project: Project;
   selection: SelectedObject[];
@@ -96,6 +149,9 @@ export default function SpatialView({
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     el.appendChild(renderer.domElement);
+    const overlay = new CSS2DRenderer();
+    overlay.domElement.className = "scene-annotations";
+    el.appendChild(overlay.domElement);
     renderer.domElement.setAttribute(
       "aria-label",
       "Vista espacial da estrutura",
@@ -119,7 +175,10 @@ export default function SpatialView({
     const axes = new THREE.AxesHelper(1.5);
     axes.rotation.x = -Math.PI / 2;
     scene.add(axes);
-    const render = () => renderer.render(scene, camera);
+    const render = () => {
+      renderer.render(scene, camera);
+      overlay.render(scene, camera);
+    };
     const applyPalette = () => {
       const style = getComputedStyle(el);
       const color = (name: string) => style.getPropertyValue(name).trim();
@@ -162,16 +221,27 @@ export default function SpatialView({
       controls.update();
       render();
     };
+    const restoreOrFit = () => {
+      const previous = savedCamera.current;
+      if (!previous || previous.modelKey !== state.current?.modelKey)
+        return fit();
+      camera.position.copy(previous.eye);
+      controls.target.copy(previous.target);
+      controls.update();
+      render();
+    };
     controls.addEventListener("change", render);
     let measured = false;
     const resize = new ResizeObserver(() => {
       const { width, height } = el.getBoundingClientRect();
+      if (!width || !height) return;
       renderer.setSize(width, height);
+      overlay.setSize(width, height);
       camera.aspect = width / Math.max(1, height);
       camera.updateProjectionMatrix();
       if (!measured) {
         measured = true;
-        fit();
+        restoreOrFit();
       } else render();
     });
     resize.observe(el);
@@ -204,6 +274,9 @@ export default function SpatialView({
     el.addEventListener("pointerup", pointerUp);
     controls.update();
     state.current = {
+      grid,
+      modelKey: "",
+      restoreOrFit,
       renderer,
       scene,
       camera,
@@ -215,7 +288,16 @@ export default function SpatialView({
       applyPalette,
     };
     return () => {
+      if (measured) {
+        savedCamera.current = {
+          modelKey: state.current!.modelKey,
+          eye: camera.position.clone(),
+          target: controls.target.clone(),
+        };
+      }
       state.current = null;
+      controls.removeEventListener("change", render);
+      overlay.domElement.remove();
       resize.disconnect();
       controls.dispose();
       clearModel(model);
@@ -223,6 +305,7 @@ export default function SpatialView({
       grid.dispose();
       axes.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
       renderer.domElement.remove();
       el.removeEventListener("pointerdown", pointerDown);
       el.removeEventListener("pointerup", pointerUp);
@@ -236,6 +319,7 @@ export default function SpatialView({
     const selectedIds = new Set(
       selection.map((item) => `${item.kind}:${item.id}`),
     );
+    const pattern = project.loadPatterns.find(({ id }) => id === patternId);
     for (const slab of project.slabs) {
       const z = project.guides.z.find(
         ({ id }) => id === slab.levelId,
@@ -255,6 +339,18 @@ export default function SpatialView({
       );
       surface.userData.selection = { kind: "slab", id: slab.id };
       s.model.add(surface);
+      const pressure =
+        layers.loads &&
+        pattern?.pressure.find((load) => load.slabId === slab.id)?.pz;
+      annotate(
+        s.model,
+        surface.position,
+        [
+          ...(layers.labels ? [slab.name] : []),
+          ...(pressure ? [`PZ ${formatResult(pressure / 1000)} kN/m²`] : []),
+        ],
+        selectedIds.has(`slab:${slab.id}`),
+      );
     }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
@@ -270,6 +366,18 @@ export default function SpatialView({
       );
       line.userData.selection = { kind: "member", id: m.id };
       s.model.add(line);
+      const loads = layers.loads
+        ? (pattern?.uniform.filter((load) => load.memberId === m.id) ?? [])
+        : [];
+      annotate(
+        s.model,
+        scenePoint(interpolate(a, b, 0.5)),
+        [
+          ...(layers.labels ? [m.name] : []),
+          ...loadComponents(loads, ["qx", "qy", "qz"], "kN/m"),
+        ],
+        selectedIds.has(`member:${m.id}`),
+      );
       const stations = result?.members[m.id];
       if (stations) {
         const positions = stations.map((v) => {
@@ -297,6 +405,19 @@ export default function SpatialView({
       sphere.position.set(n.x, n.z, -n.y);
       sphere.userData.selection = { kind: "node", id: n.id };
       s.model.add(sphere);
+      const loads = layers.loads
+        ? (pattern?.nodal.filter((load) => load.nodeId === n.id) ?? [])
+        : [];
+      annotate(
+        s.model,
+        sphere.position,
+        [
+          ...(layers.labels ? [n.name] : []),
+          ...loadComponents(loads, ["fx", "fy", "fz"], "kN"),
+          ...loadComponents(loads, ["mx", "my", "mz"], "kN·m"),
+        ],
+        selected,
+      );
       if (Object.values(n.restraints).some(Boolean)) {
         const support = new THREE.Mesh(
           new THREE.ConeGeometry(0.16, 0.22, 4),
@@ -307,27 +428,80 @@ export default function SpatialView({
       }
     }
     s.render();
-  }, [project, selection, result, deformationScale]);
+  }, [
+    project,
+    selection,
+    result,
+    deformationScale,
+    patternId,
+    layers.labels,
+    layers.loads,
+  ]);
+  useEffect(() => {
+    const s = state.current;
+    if (s) {
+      s.grid.visible = layers.grid;
+      s.render();
+    }
+  }, [layers.grid]);
   useEffect(() => {
     state.current?.applyPalette();
   }, [theme]);
   useEffect(() => {
-    state.current?.fit();
+    const s = state.current;
+    if (s) {
+      s.modelKey = JSON.stringify([project.id, project.slabs[0]?.id]);
+      s.restoreOrFit();
+    }
   }, [project.id, project.slabs[0]?.id]);
+  const zoom = (factor: number) => {
+    const s = state.current;
+    if (!s) return;
+    s.camera.position
+      .sub(s.controls.target)
+      .multiplyScalar(factor)
+      .add(s.controls.target);
+    s.controls.update();
+    s.render();
+  };
   return (
-    <section className="viewport spatial">
+    <section
+      className="viewport spatial"
+      aria-label="Perspectiva 3D"
+      tabIndex={0}
+      data-active={active}
+      onFocusCapture={onActivate}
+      onPointerDownCapture={onActivate}
+    >
       <div className="view-heading">
         <span>
           <i className="view-dot mint" />
           Perspectiva 3D <small>{result ? "DEFORMADA" : "MODELO"}</small>
         </span>
-        <button
-          title="Enquadrar vista 3D"
-          aria-label="Enquadrar vista 3D"
-          onClick={() => state.current?.fit()}
-        >
-          <Maximize size={14} />
-        </button>
+        <div className="view-actions">
+          <button
+            aria-label="Afastar perspectiva"
+            title="Afastar perspectiva"
+            onClick={() => zoom(1.2)}
+          >
+            <Minus size={14} />
+          </button>
+          <button
+            aria-label="Aproximar perspectiva"
+            title="Aproximar perspectiva"
+            onClick={() => zoom(1 / 1.2)}
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            title="Enquadrar vista 3D"
+            aria-label="Enquadrar vista 3D"
+            onClick={() => state.current?.fit()}
+          >
+            <Maximize size={14} />
+          </button>
+          <ViewLayers layers={layers} setLayers={setLayers} />
+        </div>
       </div>
       <div ref={container} className="three-container" />
       {error && (

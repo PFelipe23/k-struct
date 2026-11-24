@@ -9,6 +9,8 @@ import {
 import { nextName, uid, type Project } from "../domain/model";
 
 type PlaneControlsProps = {
+  inactive: boolean;
+  kinds: PlaneKind[];
   kind: PlaneKind;
   guideId: string;
   guides: Project["guides"][Coordinate];
@@ -30,6 +32,8 @@ const coordinateName = {
 };
 
 export function WorkPlaneControls({
+  inactive,
+  kinds,
   kind,
   guideId,
   guides,
@@ -45,7 +49,11 @@ export function WorkPlaneControls({
 }: PlaneControlsProps) {
   const activeLabel = coordinateName[kind];
   return (
-    <div className="plane-tools">
+    <fieldset
+      className="plane-tools"
+      aria-label="Controles do plano ativo"
+      disabled={inactive}
+    >
       <label>
         <span>Plano</span>
         <select
@@ -53,9 +61,11 @@ export function WorkPlaneControls({
           value={kind}
           onChange={(e) => onPlane(e.target.value as PlaneKind)}
         >
-          <option value="XY">Planta XY</option>
-          <option value="XZ">Elevação XZ</option>
-          <option value="YZ">Elevação YZ</option>
+          {kinds.map((k) => (
+            <option key={k} value={k}>
+              {k === "XY" ? "Planta" : "Elevação"} {k}
+            </option>
+          ))}
         </select>
       </label>
       <select
@@ -101,7 +111,7 @@ export function WorkPlaneControls({
       >
         <Waypoints size={14} /> Conectar interseções
       </button>
-    </div>
+    </fieldset>
   );
 }
 

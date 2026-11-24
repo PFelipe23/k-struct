@@ -33,7 +33,6 @@ import {
   Square,
   PanelLeft,
   PanelRight,
-  Columns2,
 } from "lucide-react";
 import {
   addPoint,
@@ -70,6 +69,7 @@ import WorkPlaneView, {
   additiveSelection,
   type Display,
   type Tool,
+  type PlaneCamera,
 } from "./components/WorkPlaneView";
 import {
   GuideEditor,
@@ -78,7 +78,8 @@ import {
 } from "./components/LaunchTools";
 import { parseNumberInput } from "./components/numberInput";
 import NewProjectDialog from "./components/NewProjectDialog";
-import SpatialView from "./components/SpatialView";
+import SpatialView, { type SpatialCamera } from "./components/SpatialView";
+import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
 import NodeTable from "./components/NodeTable";
 import Results from "./components/Results";
@@ -117,6 +118,15 @@ import {
   type RunLog,
 } from "./solver/desktop";
 
+type PlanePanel = "primary" | "elevation";
+type Panel = PlanePanel | "perspective";
+type Layout = "single" | "dual" | "planes" | "triple";
+type PlaneChoice = { kind: PlaneKind; guideId: string };
+const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
+  primary: { kind: "XY", guideId: levelId },
+  elevation: { kind: "XZ", guideId: "" },
+});
+
 const initial = () => {
   try {
     const cached =
@@ -143,8 +153,33 @@ export default function App() {
   const slab = p.slabs[0];
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
-  const [preferredPlane, setPlane] = useState<PlaneKind>("XY");
-  const [guideId, setGuide] = useState(slab?.levelId ?? "");
+  const [layout, setLayout] = useState<Layout>("dual");
+  const [activePanel, setActivePanel] = useState<Panel>("primary");
+  const [planes, setPlanes] = useState(() => initialPlanes(slab?.levelId));
+  const primaryLayers = useViewLayers();
+  const elevationLayers = useViewLayers();
+  const [perspectiveLayers, setPerspectiveLayers] = useViewLayers(false);
+  const primaryCamera = useRef<PlaneCamera | null>(null);
+  const elevationCamera = useRef<PlaneCamera | null>(null);
+  const perspectiveCamera = useRef<SpatialCamera | null>(null);
+  const splitPlanes = spatial && (layout === "triple" || layout === "planes");
+  const perspective = layout === "dual" || layout === "triple";
+  const planePanel = activePanel === "elevation" ? "elevation" : "primary";
+  function viewPlane(panel: PlanePanel) {
+    const choice = planes[panel];
+    const kind = !spatial
+      ? "XZ"
+      : splitPlanes && panel === "primary"
+        ? "XY"
+        : choice.kind;
+    const guides = p.guides[planeCoordinates[kind][2]];
+    const guide = guides.find((g) => g.id === choice.guideId) ?? guides[0];
+    return {
+      plane: { kind, offset: spatial ? guide.position : 0 } satisfies WorkPlane,
+      guides,
+      guide,
+    };
+  }
   const [memberMode, setMemberMode] = useState<"single" | "chain" | "span">(
     "single",
   );
@@ -158,11 +193,11 @@ export default function App() {
   const [launchDialog, setLaunchDialog] = useState<
     "guides" | "replicate" | "nodes" | "new-project" | null
   >(null);
-  const kind = spatial ? preferredPlane : "XZ";
-  const planeGuides = p.guides[planeCoordinates[kind][2]];
-  const activeGuide =
-    planeGuides.find((g) => g.id === guideId) ?? planeGuides[0];
-  const plane: WorkPlane = { kind, offset: spatial ? activeGuide.position : 0 };
+  const {
+    plane,
+    guides: planeGuides,
+    guide: activeGuide,
+  } = viewPlane(planePanel);
   const [pending, setPending] = useState<Point3 | null>(null),
     [display, setDisplay] = useState<Display | SlabDisplay>("model");
   const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
@@ -185,8 +220,7 @@ export default function App() {
   const [tab, setTab] = useState("Modelo"),
     [settings, setSettings] = useState(false),
     [left, setLeft] = useState(true),
-    [right, setRight] = useState(true),
-    [dual, setDual] = useState(true);
+    [right, setRight] = useState(true);
   const [theme, setTheme] = useState(readTheme);
   useLayoutEffect(() => applyTheme(theme), [theme]);
   const [executable, setExecutable] = useState(() => {
@@ -427,16 +461,43 @@ export default function App() {
           : [...selected, object];
       });
   }, []);
+  const activatePanel = (panel: Panel) => {
+    if (panel === activePanel) return;
+    setActivePanel(panel);
+    setPending(null);
+    if (
+      tool === "slab" &&
+      (panel === "perspective" || viewPlane(panel).plane.kind !== "XY")
+    )
+      setTool("select");
+  };
+  const changeLayout = (next: Layout) => {
+    setLayout(next);
+    setPending(null);
+    setActivePanel("primary");
+    if (tool === "slab") setTool("select");
+    if (next === "planes" || next === "triple")
+      setPlanes((v) =>
+        v.primary.kind === "XY"
+          ? v
+          : { ...v, primary: { kind: "XY", guideId: "" } },
+      );
+  };
   const changeTool = (t: Tool) => {
     if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
+    if (t !== "select" && activePanel === "perspective")
+      activatePanel("primary");
     setTool(t);
     setPending(null);
     setDisplay("model");
   };
   const showDisplay = (value: Display | SlabDisplay) => {
     if (slab && isSlabDisplay(value)) {
-      setPlane("XY");
-      setGuide(slab.levelId);
+      setActivePanel("primary");
+      setPlanes((v) => ({
+        ...v,
+        primary: { kind: "XY", guideId: slab.levelId },
+      }));
       setTool("select");
       setPending(null);
     }
@@ -457,8 +518,13 @@ export default function App() {
     setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
     setPending(null);
-    setPlane("XY");
-    setGuide(project.slabs[0]?.levelId ?? "");
+    setActivePanel("primary");
+    setPlanes(initialPlanes(project.slabs[0]?.levelId));
+    if (
+      project.mode === "planar" &&
+      (layout === "triple" || layout === "planes")
+    )
+      setLayout("dual");
     setCaseId(project.analysisCases[0].id);
     setDerivedChoice(null);
     setForceMemberId("");
@@ -537,7 +603,11 @@ export default function App() {
         setSelection([]);
         return;
       }
-      if ((e.target as HTMLElement).closest("input,textarea,select,button"))
+      if (
+        (e.target as HTMLElement).closest(
+          "input,textarea,select,button:not(.view-actions button)",
+        )
+      )
         return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -550,6 +620,11 @@ export default function App() {
         setSelection([]);
       }
       if (!e.ctrlKey && !e.metaKey) {
+        if (
+          activePanel === "perspective" &&
+          ["b", "n", "l"].includes(e.key.toLowerCase())
+        )
+          return;
         if (e.key.toLowerCase() === "b") changeTool("member");
         if (e.key.toLowerCase() === "n") changeTool("node");
         if (e.key.toLowerCase() === "l") changeTool("slab");
@@ -1060,13 +1135,24 @@ export default function App() {
                   <PanelRight />
                   <span>Propriedades</span>
                 </button>
-                <button
-                  className={`tool-button ${dual ? "active" : ""}`}
-                  onClick={() => setDual((v) => !v)}
-                >
-                  <Columns2 />
-                  <span>Duas vistas</span>
-                </button>
+                <label>
+                  Arranjo de vistas
+                  <select
+                    value={layout}
+                    onChange={(e) => changeLayout(e.target.value as Layout)}
+                  >
+                    <option value="single">Plano de trabalho</option>
+                    <option value="dual">Plano + perspectiva</option>
+                    {spatial && (
+                      <option value="planes">Planta + elevação</option>
+                    )}
+                    {spatial && (
+                      <option value="triple">
+                        Planta + elevação + perspectiva
+                      </option>
+                    )}
+                  </select>
+                </label>
               </div>
               <small>ÁREA DE TRABALHO</small>
             </div>
@@ -1284,7 +1370,11 @@ export default function App() {
           <div className="model-bar">
             <div>
               <span className="status-dot" />
-              {spatial ? "Modelo espacial" : "Modelo estrutural"}{" "}
+              <span aria-label="Vista ativa">
+                {activePanel === "perspective"
+                  ? "Perspectiva 3D"
+                  : `${plane.kind === "XY" ? "Planta" : "Elevação"} ${plane.kind} · ${planeCoordinates[plane.kind][2].toUpperCase()} = ${plane.offset} m`}
+              </span>
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
                 {slab && " · 1 laje"}
@@ -1332,6 +1422,14 @@ export default function App() {
           </div>
           {spatial && (
             <WorkPlaneControls
+              inactive={activePanel === "perspective"}
+              kinds={
+                splitPlanes
+                  ? planePanel === "primary"
+                    ? ["XY"]
+                    : ["XZ", "YZ"]
+                  : ["XY", "XZ", "YZ"]
+              }
               kind={plane.kind}
               guideId={activeGuide.id}
               guides={planeGuides}
@@ -1343,12 +1441,17 @@ export default function App() {
               }
               onPlane={(kind) => {
                 setPending(null);
-                setPlane(kind);
-                setGuide("");
+                setPlanes((v) => ({
+                  ...v,
+                  [planePanel]: { kind, guideId: "" },
+                }));
                 if (tool === "slab") changeTool("select");
               }}
               onGuide={(id) => {
-                setGuide(id);
+                setPlanes((v) => ({
+                  ...v,
+                  [planePanel]: { kind: plane.kind, guideId: id },
+                }));
                 setPending(null);
               }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
@@ -1361,34 +1464,64 @@ export default function App() {
               connect={connect}
             />
           )}
-          <div className={`viewports ${dual ? "dual" : "single"}`}>
-            <WorkPlaneView
-              project={p}
-              plane={plane}
-              orthogonal={orthogonal}
-              selection={selection}
-              tool={tool}
-              quick={tool === "member" && memberMode === "span"}
-              result={result}
-              envelope={
-                showEnvelope && envelopeResult && section
-                  ? {
-                      result: envelopeResult,
-                      section,
-                      onSection: inspectSection,
-                    }
-                  : null
-              }
-              display={visibleDisplay}
-              slabMap={showSlabMap}
-              patternId={patternId}
-              onSpan={placeMember}
-              pending={pending}
-              onPoint={onPoint}
-              onSelect={selectObject}
-            />
-            {dual && (
+          <div className={`viewports ${layout}`}>
+            {(
+              (splitPlanes
+                ? ["primary", "elevation"]
+                : ["primary"]) as PlanePanel[]
+            ).map((panel) => {
+              const view = viewPlane(panel);
+              const active = panel === activePanel;
+              const [layers, setLayers] =
+                panel === "primary" ? primaryLayers : elevationLayers;
+              return (
+                <WorkPlaneView
+                  key={panel}
+                  layers={layers}
+                  setLayers={setLayers}
+                  savedCamera={
+                    panel === "primary" ? primaryCamera : elevationCamera
+                  }
+                  active={active}
+                  onActivate={() => activatePanel(panel)}
+                  project={p}
+                  plane={view.plane}
+                  orthogonal={orthogonal}
+                  selection={selection}
+                  tool={active ? tool : "select"}
+                  quick={active && tool === "member" && memberMode === "span"}
+                  result={result}
+                  envelope={
+                    showEnvelope && envelopeResult && section
+                      ? {
+                          result: envelopeResult,
+                          section,
+                          onSection: inspectSection,
+                        }
+                      : null
+                  }
+                  display={visibleDisplay}
+                  slabMap={
+                    view.plane.kind === "XY" && view.guide.id === slab?.levelId
+                      ? slabMap
+                      : null
+                  }
+                  patternId={patternId}
+                  onSpan={placeMember}
+                  pending={active ? pending : null}
+                  onPoint={onPoint}
+                  onSelect={selectObject}
+                />
+              );
+            })}
+            {perspective && (
               <SpatialView
+                layers={perspectiveLayers}
+                setLayers={setPerspectiveLayers}
+                savedCamera={perspectiveCamera}
+                active={activePanel === "perspective"}
+                onActivate={() => activatePanel("perspective")}
+                patternId={patternId}
                 theme={theme}
                 project={p}
                 selection={selection}
