@@ -1367,7 +1367,8 @@ export default function App() {
               plane={plane}
               orthogonal={orthogonal}
               selection={selection}
-              tool={tool === "member" && memberMode === "span" ? "span" : tool}
+              tool={tool}
+              quick={tool === "member" && memberMode === "span"}
               result={result}
               envelope={
                 showEnvelope && envelopeResult && section

@@ -36,7 +36,8 @@ interface Props {
   plane: WorkPlane;
   orthogonal: boolean;
   selection: SelectedObject[];
-  tool: Tool | "span";
+  tool: Tool;
+  quick: boolean;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
@@ -63,7 +64,8 @@ export default function WorkPlaneView({
   plane,
   orthogonal,
   selection,
-  tool,
+  tool: activeTool,
+  quick,
   onSpan,
   result,
   envelope,
@@ -85,7 +87,8 @@ export default function WorkPlaneView({
     x: number;
     y: number;
   } | null>(null);
-  const quick = tool === "span";
+  // The span picker handles its own hits and does not request point placement.
+  const tool = quick ? "select" : activeTool;
   useEffect(() => {
     setSpanPointer(null);
     if (quick) setCursor(null);
@@ -332,7 +335,7 @@ export default function WorkPlaneView({
       </div>
       <svg
         ref={ref}
-        className={`drawing drawing-${tool}`}
+        className={`drawing drawing-${quick ? "span" : tool}`}
         aria-label={`Área de lançamento ${plane.kind}`}
         role="application"
         tabIndex={0}
