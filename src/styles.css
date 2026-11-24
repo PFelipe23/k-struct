@@ -2049,3 +2049,10 @@ button.primary {
     grid-template-columns: 1fr;
   }
 }
+
+.member-edit { position: fixed; }
+.member-edit table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.member-edit :is(caption, th, td) { text-align: left; padding: 4px; }
+.member-edit caption { font-weight: 600; color: var(--text-strong); }
+.member-edit td { border-top: 1px solid var(--line); }
+.member-edit .transform-summary { max-height: 56vh; overflow: auto; }

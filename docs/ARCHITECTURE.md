@@ -60,6 +60,12 @@ Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interf
 - O parser exige término, passo único, deslocamentos e esforços completos, reações dos vínculos e equilíbrio global. Erros não geram resultados parciais.
 - **Conectar interseções** subdivide cruzamentos reais e barras com nós internos, preservando a intensidade das cargas distribuídas em cada trecho. A operação é uma edição única no histórico. Nós no interior de uma barra bloqueiam a análise até a subdivisão. Cruzamentos sem nó compartilhado são barras independentes.
 
+### Edição das barras físicas
+
+Dividir mantém o ID da barra no trecho que parte de i e copia para cada trecho as cargas uniformes de cada padrão. Grupos que continham a peça passam a conter os trechos. Unir exige nós compartilhados por ID em uma cadeia colinear, seção, orientação física e intensidades globais compatíveis em cada padrão. A primeira barra da cadeia na ordem do projeto conserva ID e sentido independentemente da ordem de seleção. Os grupos passam a referenciar essa barra uma única vez. Os nós intermediários removidos saem dos grupos.
+
+Aparar e prolongar verificam a ponta antes de alterar sua posição. Um apoio, carga nodal ou barra externa incidente bloqueia a remoção ou o deslocamento desse nó. Se já existe um nó no destino, a ligação e os grupos usam seu ID. Barras que passam pelo interior do ponto de corte são subdivididas no mesmo nó. Uma referência por barra usa a interseção em XYZ com o segmento escolhido. As quatro operações editam o modelo físico. A malha do OOFEM continua derivada na exportação.
+
 ## Referências técnicas do adaptador
 
 - [OOFEM Beam2d 3.0](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/Beams/beam2d.C)

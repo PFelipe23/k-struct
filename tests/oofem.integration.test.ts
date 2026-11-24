@@ -11,6 +11,7 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
 import { addMember } from "../src/domain/editing";
 import { origin } from "../src/domain/geometry";
@@ -201,6 +202,33 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const middle = r.members.V1.find((s) => s.t === 0.5)!;
     expect(middle.uz).toBeCloseTo(-0.0084375, 8);
     expect(middle.m).toBeCloseTo(45000, 1);
+  });
+  it("viga de 6 m íntegra, dividida em 2 + 4 m e reunida conserva reações, flecha e momento", () => {
+    const original = beamExample(),
+      split = planMemberEdit(original, {
+        kind: "split",
+        id: "V1",
+        reference: { kind: "distance", metres: 2 },
+      });
+    const joined = planMemberEdit(split.project, {
+      kind: "join",
+      ids: [...split.after].reverse(),
+    });
+    for (const [p, middleId, t] of [
+      [original, "V1", 0.5],
+      [split.project, split.after[1], 0.25],
+      [joined.project, "V1", 0.5],
+    ] as const) {
+      const result = solve(p);
+      for (const id of ["A", "B"])
+        expect(result.reactions.find((r) => r.nodeId === id)!.fz).toBeCloseTo(
+          30000,
+          1,
+        );
+      const atMidspan = result.members[middleId].find((s) => s.t === t)!;
+      expect(atMidspan.m).toBeCloseTo(45000, 1);
+      expect(atMidspan.uz).toBeCloseTo(-0.0084375, 8);
+    }
   });
   it("duplicar a carga duplica deslocamentos e esforços", () => {
     const p = beamExample();

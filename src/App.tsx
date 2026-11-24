@@ -33,6 +33,7 @@ import {
   Square,
   PanelLeft,
   PanelRight,
+  Scissors,
 } from "lucide-react";
 import {
   addPoint,
@@ -75,6 +76,8 @@ import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
+import MemberEditDialog from "./components/MemberEditDialog";
+import type { MemberEdit } from "./domain/memberOperations";
 import type { TransformPlan } from "./domain/transform";
 import { combineSelection } from "./domain/selection";
 import NodeTable from "./components/NodeTable";
@@ -188,7 +191,13 @@ export default function App() {
   const validRoll = Number.isFinite(roll) && Math.abs(roll) <= 360;
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
-    "guides" | "replicate" | "nodes" | "new-project" | "selection" | null
+    | "guides"
+    | "replicate"
+    | "member-edit"
+    | "nodes"
+    | "new-project"
+    | "selection"
+    | null
   >(null);
   const {
     plane,
@@ -706,18 +715,24 @@ export default function App() {
         : "Nenhuma interseção ou nó interno pendente de conexão.",
     );
   };
-  const applyTransform = (plan: TransformPlan) => {
-    if (!plan.ready || current.current !== plan.source)
+  const applyGeometry = (plan: TransformPlan | MemberEdit) => {
+    if (("ready" in plan && !plan.ready) || current.current !== plan.source)
       return "O modelo mudou. Reabra a prévia para confirmar.";
     const error = edit((draft) => {
       draft.nodes = plan.project.nodes;
       draft.members = plan.project.members;
       draft.loadPatterns = plan.project.loadPatterns;
+      draft.selectionGroups = plan.project.selectionGroups;
     });
     if (!error) {
       changeTool("select");
-      setSelection(plan.selected);
-      setMessage("Transformação aplicada à seleção.");
+      if ("note" in plan) {
+        setSelection(plan.selected.map((id) => ({ kind: "member", id })));
+        setMessage(plan.note);
+      } else {
+        setSelection(plan.selected);
+        setMessage("Transformação aplicada à seleção.");
+      }
     }
     return error;
   };
@@ -948,6 +963,18 @@ export default function App() {
                 >
                   <Trash2 size={19} />
                   <span>Excluir</span>
+                </button>
+                <button
+                  className="tool-button"
+                  disabled={
+                    !selection.length ||
+                    selection.some((obj) => obj.kind !== "member")
+                  }
+                  onClick={() => setLaunchDialog("member-edit")}
+                  title="Dividir, unir, aparar ou prolongar barras selecionadas"
+                >
+                  <Scissors size={20} />
+                  <span>Editar barras</span>
                 </button>
                 <button
                   className="tool-button"
@@ -1795,6 +1822,15 @@ export default function App() {
           }
         />
       )}
+      {launchDialog === "member-edit" && (
+        <MemberEditDialog
+          project={p}
+          ids={selection.map((s) => s.id)}
+          plane={plane.kind}
+          onClose={() => setLaunchDialog(null)}
+          onApply={applyGeometry}
+        />
+      )}
       {launchDialog === "replicate" && (
         <TransformDialog
           project={p}
@@ -1811,7 +1847,7 @@ export default function App() {
                     plane.offset) - plane.offset
                 : 0,
           }}
-          onApply={applyTransform}
+          onApply={applyGeometry}
           onClose={() => setLaunchDialog(null)}
         />
       )}

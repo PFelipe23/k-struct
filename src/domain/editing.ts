@@ -1,3 +1,4 @@
+import { selectionKey } from "./selection";
 import {
   add,
   cross,
@@ -152,10 +153,8 @@ export function connectIntersections(p: Project) {
       }
     }
   }
-  const split = new Map<string, string[]>();
-  let barCount = p.members.length;
-  const usedNames = [...p.members];
-  p.members = segments.flatMap(({ m, a, b }) => {
+  const cuts = new Map<string, string[]>();
+  for (const { m, a, b } of segments) {
     const interior = p.nodes
       .flatMap((n) => {
         if (n.id === a.id || n.id === b.id) return [];
@@ -163,13 +162,31 @@ export function connectIntersections(p: Project) {
         return t === null ? [] : [{ id: n.id, t }];
       })
       .sort((x, y) => x.t - y.t);
-    if (!interior.length) return [m];
+    if (interior.length)
+      cuts.set(
+        m.id,
+        interior.map((n) => n.id),
+      );
+  }
+  splitMembers(p, cuts);
+  return { joints: p.nodes.length - initialNodes, divided: cuts.size };
+}
+
+// Cut nodes are ordered from i to j. The first span inherits the physical member ID.
+export function splitMembers(p: Project, cuts: Map<string, string[]>) {
+  const split = new Map<string, string[]>();
+  let barCount = p.members.length;
+  const usedNames = [...p.members];
+  p.members = p.members.flatMap((m) => {
+    const interior = cuts.get(m.id);
+    if (!interior?.length) return [m];
+
     barCount += interior.length;
     if (barCount > 1000)
       throw new Error(
         "A conexão de interseções ultrapassa o limite de 1.000 barras.",
       );
-    const joints = [a.id, ...interior.map((n) => n.id), b.id];
+    const joints = [m.start, ...interior, m.end];
     const children = joints.slice(0, -1).map((start, i) => {
       const child = { ...m, start, end: joints[i + 1] };
       if (i > 0) {
@@ -193,5 +210,23 @@ export function connectIntersections(p: Project) {
       })),
     );
   }
-  return { joints: p.nodes.length - initialNodes, divided: split.size };
+  remapGroups(p, "member", split);
+  return split;
+}
+
+export function remapGroups(
+  p: Project,
+  kind: "member" | "node",
+  replacements: Map<string, string[]>,
+) {
+  for (const group of p.selectionGroups) {
+    const mapped = group.objects.flatMap((obj) =>
+      obj.kind === kind && replacements.has(obj.id)
+        ? replacements.get(obj.id)!.map((id) => ({ kind, id }))
+        : [obj],
+    );
+    group.objects = [
+      ...new Map(mapped.map((obj) => [selectionKey(obj), obj])).values(),
+    ];
+  }
 }
