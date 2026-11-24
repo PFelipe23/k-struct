@@ -7,6 +7,7 @@ import {
   parseProject,
   removeSelection,
   serializeProject,
+  type Project,
 } from "../src/domain/model";
 import { historyReducer } from "../src/domain/history";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
@@ -16,6 +17,17 @@ import {
   replicate,
 } from "../src/domain/editing";
 import { nodalLoad, uniformLoad } from "../src/domain/model";
+import { meshSlab } from "../src/domain/slab";
+import { exportAnalysis } from "../src/solver/analysis";
+import { plateProject } from "./fixtures/plate-benchmark";
+
+function frameV4({ slabs, loadPatterns, ...project }: Project) {
+  return {
+    ...project,
+    schemaVersion: 4,
+    loadPatterns: loadPatterns.map(({ pressures, ...pattern }) => pattern),
+  };
+}
 
 describe("projeto versionado e edição", () => {
   it("salva e reabre sem alterar IDs, unidades ou cargas", () => {
@@ -24,7 +36,7 @@ describe("projeto versionado e edição", () => {
   });
   it("migra o arquivo gerado pela versão 0.2 com o contrato plano original", () => {
     const { mode, guides, resultCombinations, resultEnvelopes, ...current } =
-      beamExample();
+      frameV4(beamExample());
     const legacy = {
       ...current,
       schemaVersion: 1,
@@ -44,7 +56,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(4);
+    expect(p.schemaVersion).toBe(5);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -59,7 +71,7 @@ describe("projeto versionado e edição", () => {
   it("migra o esquema v2 preservando os casos e inicia a lista de combinações vazia", () => {
     const project = createProject("spatial");
     project.analysisCases[0].factors[0].factor = -0.75;
-    const { resultCombinations, resultEnvelopes, ...old } = project;
+    const { resultCombinations, resultEnvelopes, ...old } = frameV4(project);
     expect(parseProject(JSON.stringify({ ...old, schemaVersion: 2 }))).toEqual(
       project,
     );
@@ -72,7 +84,7 @@ describe("projeto versionado e edição", () => {
       type: "linear",
       factors: [{ caseId: "EL", factor: 1 }],
     });
-    const { resultEnvelopes, ...old } = project;
+    const { resultEnvelopes, ...old } = frameV4(project);
     expect(parseProject(JSON.stringify({ ...old, schemaVersion: 3 }))).toEqual(
       project,
     );
@@ -117,7 +129,7 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 5 })),
+      parseProject(JSON.stringify({ ...p, schemaVersion: 6 })),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),
@@ -147,6 +159,65 @@ describe("projeto versionado e edição", () => {
     const first = addPoint(p, point);
     expect(addPoint(p, point).id).toBe(first.id);
     expect(p.nodes).toHaveLength(1);
+  });
+});
+
+describe("laje retangular isolada", () => {
+  it("migra v4 e preserva os dados de laje no esquema v5", () => {
+    const frame = beamExample();
+    expect(parseProject(JSON.stringify(frameV4(frame)))).toEqual(frame);
+    const project = plateProject(8, 6);
+    expect(parseProject(serializeProject(project))).toEqual(project);
+    const [slab] = project.slabs;
+    removeSelection(project, [{ kind: "slab", id: slab.id }]);
+    expect(project.slabs).toEqual([]);
+    expect(project.loadPatterns[0].pressures).toEqual([]);
+  });
+
+  it("mantém a ordem da malha, suas bordas e os fatores de pressão", () => {
+    const project = plateProject(8, 6);
+    const [slab] = project.slabs;
+    const mesh = meshSlab(slab);
+    expect(meshSlab(slab)).toEqual(mesh);
+    expect(mesh.center).toBe(32);
+    expect(mesh.cells[0]).toMatchObject({
+      slabId: slab.id,
+      vertices: [11, 10, 1, 2],
+    });
+    expect(mesh.edges.xMin).toEqual([1, 10, 19, 28, 37, 46, 55]);
+    project.loadPatterns.push({
+      id: "Q",
+      name: "Pressão variável",
+      nodal: [],
+      uniform: [],
+      pressures: [{ slabId: slab.id, qz: -2000 }],
+    });
+    project.analysisCases[0].factors.push({ patternId: "Q", factor: -0.5 });
+    expect(exportAnalysis(project, "EL")).toMatchObject({
+      kind: "slab",
+      appliedZ: -48000,
+      slabId: slab.id,
+      caseId: "EL",
+    });
+  });
+
+  it("recusa apoios incompletos, modelo misto e malha ou geometria inválida", () => {
+    const project = plateProject(8, 6);
+    const [slab] = project.slabs;
+    slab.supports.xMin = false;
+    expect(() => exportAnalysis(project, "EL")).toThrow(/quatro bordas/);
+    slab.supports.xMin = true;
+    project.nodes = beamExample().nodes;
+    expect(() => exportAnalysis(project, "EL")).toThrow(/sem nós ou barras/);
+    project.nodes = [];
+    slab.lengthX = 1e-9;
+    expect(() => exportAnalysis(project, "EL")).toThrow(/tamanho válido/);
+    slab.lengthX = 4;
+    slab.thickness = 0;
+    expect(() => serializeProject(project)).toThrow();
+    slab.thickness = 0.1;
+    slab.nx = 7;
+    expect(() => serializeProject(project)).toThrow();
   });
 });
 

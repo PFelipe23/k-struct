@@ -11,6 +11,7 @@ import {
   type WorkPlane,
 } from "../domain/geometry";
 import type { Project, SelectedObject, Selection } from "../domain/model";
+import { slabCorners } from "../domain/slab";
 import type { MemberForceComponent } from "../solver/combinations";
 import type {
   EnvelopeSection,
@@ -18,7 +19,7 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 
-export type Tool = "select" | "node" | "member";
+export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
 interface Props {
@@ -90,12 +91,15 @@ export default function WorkPlaneView({
   }, []);
 
   const fit = () => {
+    const corners = project.slabs.flatMap(slabCorners);
     const us = [
       ...project.nodes.map((n) => n[axisU]),
+      ...corners.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
     ];
     const vs = [
       ...project.nodes.map((n) => n[axisV]),
+      ...corners.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
     ];
     const minU = Math.min(0, ...us),
@@ -118,7 +122,7 @@ export default function WorkPlaneView({
   useEffect(() => {
     fit();
     setCursor(null);
-  }, [project.id, plane.kind]);
+  }, [project.id, plane.kind, project.slabs.length]);
   useEffect(() => setCursor(null), [plane.offset]);
 
   const sx = (u: number) => size.width / 2 + (u - camera.u) * camera.scale;
@@ -135,6 +139,7 @@ export default function WorkPlaneView({
       -(event.clientY - rect.top - size.height / 2) / camera.scale + camera.v;
     const aligned =
       pending &&
+      tool === "member" &&
       spatial &&
       orthogonal !== event.shiftKey &&
       onPlane(pending, plane);
@@ -394,6 +399,39 @@ export default function WorkPlaneView({
             </g>
           ))}
         </g>
+        {project.slabs.map((slab) => {
+          const corners = slabCorners(slab);
+          const offsets = corners.map((point) => point[normal]);
+          if (
+            plane.offset < Math.min(...offsets) - tolerance ||
+            plane.offset > Math.max(...offsets) + tolerance
+          )
+            return null;
+          const active = selected.has(`slab:${slab.id}`);
+          return (
+            <polygon
+              key={slab.id}
+              className="slab-outline"
+              data-slab-id={slab.id}
+              points={corners
+                .map((point) => `${sx(point[axisU])},${sy(point[axisV])}`)
+                .join(" ")}
+              fill={active ? "#ae8bd944" : "#6bbcaf38"}
+              stroke={active ? "#d2b8ff" : "#82c8ba"}
+              strokeWidth="2"
+              onClick={(event) => {
+                if (tool !== "select") return;
+                event.stopPropagation();
+                onSelect(
+                  { kind: "slab", id: slab.id },
+                  additiveSelection(event),
+                );
+              }}
+            >
+              <title>{slab.name} · Laje retangular</title>
+            </polygon>
+          );
+        })}
         {bars.map((m) => {
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
@@ -671,19 +709,32 @@ export default function WorkPlaneView({
             />
           </g>
         )}
-        {pending && cursor && (
-          <line
-            x1={sx(pending[axisU])}
-            y1={sy(pending[axisV])}
-            x2={sx(cursor.u)}
-            y2={sy(cursor.v)}
-            stroke="#cfb5f8"
-            strokeDasharray="6 4"
-            pointerEvents="none"
-          />
-        )}
+        {pending &&
+          cursor &&
+          (tool === "slab" ? (
+            <rect
+              x={Math.min(sx(pending[axisU]), sx(cursor.u))}
+              y={Math.min(sy(pending[axisV]), sy(cursor.v))}
+              width={Math.abs(sx(pending[axisU]) - sx(cursor.u))}
+              height={Math.abs(sy(pending[axisV]) - sy(cursor.v))}
+              fill="#ae8bd922"
+              stroke="#cfb5f8"
+              strokeDasharray="6 4"
+              pointerEvents="none"
+            />
+          ) : (
+            <line
+              x1={sx(pending[axisU])}
+              y1={sy(pending[axisV])}
+              x2={sx(cursor.u)}
+              y2={sy(cursor.v)}
+              stroke="#cfb5f8"
+              strokeDasharray="6 4"
+              pointerEvents="none"
+            />
+          ))}
       </svg>
-      {!project.nodes.length && (
+      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
         <div className="empty-canvas">
           <h2>Lance a primeira barra</h2>
           <p>

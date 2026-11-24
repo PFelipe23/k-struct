@@ -255,6 +255,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       id: "P",
       name: "Compressão",
       uniform: [],
+      pressures: [],
       nodal: [
         {
           nodeId: c.id,
@@ -347,6 +348,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         name: "Ações nodais",
         nodal: secondary,
         uniform: [],
+        pressures: [],
       });
       const factors = (g: number, w: number) => [
         { patternId: permanent.id, factor: g },

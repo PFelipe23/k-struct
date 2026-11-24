@@ -76,7 +76,7 @@ O caso usa uma placa isolada no plano XY, de 4,00 m em X por 3,00 m em Y, com 0,
 
 O elemento `qdktplate` é o quadrilátero de quatro nós da teoria discreta de Kirchhoff (QDKT). A relação entre o vão menor e a espessura é 30, adequada ao caso de placa delgada. A formulação elimina a deformação por cisalhamento transversal, como a solução de Kirchhoff–Love usada na referência. O domínio `2dMindlinPlate` declara os três graus de liberdade por nó. A formulação de flexão vem do registro `qdktplate` e usa quatro pontos de Gauss. [Manual da tag v3.0](https://github.com/oofem/oofem/blob/v3.0/doc/elementlibmanual/elementlibmanual.tex#L842) · [Registro e implementação do QDKT](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/Plates/qdkt.C#L56)
 
-Cada célula retangular da grade é um elemento. O gerador numera nós e elementos em linhas, primeiro em X e depois em Y. Em cada célula, os vértices são nordeste, noroeste, sudoeste e sudeste, em sentido anti-horário visto de +Z. Suas coordenadas naturais são `(+1,+1)`, `(-1,+1)`, `(-1,-1)` e `(+1,-1)`. `ConstantSurfaceLoad` usa eixos globais (`csType 0`) e `dofs 3 3 4 5 components 3 -5000 0 0`. O conjunto `elementboundaries` contém o par `(ID do elemento, face 1)` para cada célula, de modo que a carga seja integrada sobre toda a área. [Gerador da entrada](../tests/fixtures/plate-benchmark.ts)
+Cada célula retangular da grade é um elemento. O gerador numera nós e elementos em linhas, primeiro em X e depois em Y. Em cada célula, os vértices são nordeste, noroeste, sudoeste e sudeste, em sentido anti-horário visto de +Z. Suas coordenadas naturais são `(+1,+1)`, `(-1,+1)`, `(-1,-1)` e `(+1,-1)`. `ConstantSurfaceLoad` usa eixos globais (`csType 0`) e `dofs 3 3 4 5 components 3 -5000 0 0`. O conjunto `elementboundaries` contém o par `(ID do elemento, face 1)` para cada célula, de modo que a carga seja integrada sobre toda a área. [Gerador da entrada](../src/solver/slab.ts)
 
 | Borda           | Graus de liberdade prescritos | Rotação livre |
 | --------------- | ----------------------------- | ------------- |
@@ -91,7 +91,7 @@ O cálculo de Navier resolve `D ∇⁴w = pz`, com `D = Eh³/[12(1 − ν²)]`. 
 
 O ponto de consulta é sempre o nó em (2,00 m, 1,50 m, 0), comum aos quatro elementos adjacentes. A flecha vem da linha `dof 3 d` do nó, em metros, com Z positivo para cima. O equilíbrio usa as linhas `Node … iDof 3 reaction` dos nós das bordas, em newtons.
 
-Para a issue #10, associe cada bloco `element <rótulo> (<número interno>)` ao ID da célula usando o rótulo. Em cada linha `stresses` dos pontos `GP 1.1` a `GP 1.4`, leia as colunas 4 e 5, contando a partir do primeiro número. Elas contêm os momentos de flexão por unidade de largura, em N·m/m, nas seções de normais X e Y. Inverta os sinais de ambas as colunas para obter Mx e My positivos em flexão sagente. Os pontos naturais, na ordem da saída, são `(-g,-g)`, `(-g,+g)`, `(+g,-g)` e `(+g,+g)`, com `g = 1/√3`. Para recuperar os momentos no nó central, extrapole bilinearmente os quatro valores de cada célula até seu vértice central `(ξ, η)` e faça a média das quatro estimativas. Para cada ponto de sinais `(sx, sy)`, o peso da extrapolação é `(1 + sx ξ/g)(1 + sy η/g)/4`. [Ordem dos pontos e quadratura](https://github.com/oofem/oofem/blob/v3.0/src/core/gaussintegrationrule.C#L102)
+O adaptador associa cada bloco `element <rótulo> (<número interno>)` ao ID da célula pelo rótulo. Em cada linha `stresses` dos pontos `GP 1.1` a `GP 1.4`, leia as colunas 4 e 5, contando a partir do primeiro número. Elas contêm os momentos de flexão por unidade de largura, em N·m/m, nas seções de normais X e Y. Inverta os sinais de ambas as colunas para obter Mx e My positivos em flexão sagente. Os pontos naturais, na ordem da saída, são `(-g,-g)`, `(-g,+g)`, `(+g,-g)` e `(+g,+g)`, com `g = 1/√3`. Para recuperar os momentos no nó central, extrapole bilinearmente os quatro valores de cada célula até seu vértice central `(ξ, η)` e faça a média das quatro estimativas. Para cada ponto de sinais `(sx, sy)`, o peso da extrapolação é `(1 + sx ξ/g)(1 + sy η/g)/4`. [Ordem dos pontos e quadratura](https://github.com/oofem/oofem/blob/v3.0/src/core/gaussintegrationrule.C#L102)
 
 ### Resultados e reprodução
 
@@ -113,6 +113,12 @@ OOFEM_BIN="$PWD/.oofem-dist/build/bin/oofem" npm test -- tests/plate.integration
 ```
 
 No Windows, use o caminho absoluto do `oofem.exe` em `OOFEM_BIN`. A regressão integra `npm run check` e é explicitamente ignorada se `OOFEM_BIN` estiver ausente.
+
+### Conferência no KStruct
+
+O teste do benchmark usa o mesmo gerador e parser do aplicativo. A execução com OOFEM 3.0 reproduziu os valores da tabela nas três malhas. No Playwright, o painel é lançado na planta de um pavimento a 3 m, salvo, reaberto e exportado. A verificação com `OOFEM_BIN` executa a entrada exportada nas malhas 8 × 6 e 32 × 24 e retorna a saída real pela fronteira IPC simulada. Confere também os mapas, o descarte dos resultados após refinamento e o histórico. [Teste de interface](../tests/e2e/slab.spec.ts)
+
+O mapa mostra um valor por célula. Uz é a média dos quatro deslocamentos nodais e Mx e My são as médias dos quatro pontos de Gauss. A consulta central usa o deslocamento nodal e os momentos recuperados no vértice central, conforme o procedimento acima. O refinamento permite comparar os resultados com a solução de Navier.
 
 ## Ainda não validado nesta etapa
 

@@ -143,15 +143,17 @@ export default function Results({
             ["reactions", "Reações"],
             ["displacements", "Deslocamentos"],
             ["forces", "Esforços"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={tab === key ? "active" : ""}
-              onClick={() => setTab(key)}
-            >
-              {key === "log" && <Terminal size={13} />} {label}
-            </button>
-          ))}
+          ]
+            .filter(([key]) => !project.slabs.length || key === "log")
+            .map(([key, label]) => (
+              <button
+                key={key}
+                className={tab === key ? "active" : ""}
+                onClick={() => setTab(key)}
+              >
+                {key === "log" && <Terminal size={13} />} {label}
+              </button>
+            ))}
         </div>
         <div className="result-actions">
           {openRunHistory && tab === "log" && (

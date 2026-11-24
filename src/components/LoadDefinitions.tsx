@@ -107,7 +107,13 @@ export default function LoadDefinitions({
     const id = uid();
     setPatterns([
       ...patterns,
-      { id, name: nextName("Padrão ", patterns), nodal: [], uniform: [] },
+      {
+        id,
+        name: nextName("Padrão ", patterns),
+        nodal: [],
+        uniform: [],
+        pressures: [],
+      },
     ]);
     setPatternId(id);
     setError("");
@@ -305,19 +311,24 @@ export default function LoadDefinitions({
               ["combinations", "Combinações lineares"],
               ["envelopes", "Envelopes"],
             ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={page === key}
-              onClick={() => {
-                setPage(key);
-                setError("");
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          )
+            .filter(
+              ([key]) =>
+                !project.slabs.length || key === "patterns" || key === "cases",
+            )
+            .map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={page === key}
+                onClick={() => {
+                  setPage(key);
+                  setError("");
+                }}
+              >
+                {label}
+              </button>
+            ))}
         </div>
         {page === "patterns" ? (
           <div className="load-definition-fields">

@@ -6,8 +6,8 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v4, migração v1 a v3, geometria, validação e histórico      | `src/domain`                 |
-| Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
+| Domínio           | Formato v5, migração v1 a v4, geometria, validação e histórico        | `src/domain`                 |
+| Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver`                 |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
 | Ponte desktop     | Abrir/salvar, configuração do motor e IPC                           | `src/solver/desktop.ts`      |
@@ -19,11 +19,13 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v4 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. O modo `spatial` usa UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia.
+O esquema v5 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, laje, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras no modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. Projetos v1 a v4 recebem a lista de lajes e as pressões de cada padrão vazias.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
 IDs do projeto são persistentes. IDs numéricos do OOFEM são reconstruídos a cada exportação. Uma barra é dividida em oito elementos por padrão. Nós intermediários da análise não aparecem como objetos editáveis. A propriedade `segmentsPerMember` aceita de 2 a 32 segmentos. Versões futuras precisam avaliar convergência e melhorar a amostragem dos diagramas.
+
+O painel retangular tem ID próprio, origem XYZ, dimensões, referência de material, espessura, subdivisões e apoios. O lançamento em planta copia a cota do pavimento ativo. As pressões por padrão referenciam o ID do painel e a edição ou exclusão participa do mesmo histórico do projeto. `meshSlab` gera nós, células associadas ao painel e conjuntos de borda determinísticos. `exportAnalysis` seleciona o adaptador e encaminha o arquivo pela mesma ponte desktop, com resultados de laje associados ao caso, ao ID do painel e à sua malha.
 
 O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. A combinação linear armazena IDs de casos estáticos e os respectivos fatores. O envelope guarda os IDs das combinações incluídas, na ordem escolhida. O editor aplica as mudanças de padrões, casos, combinações e envelopes em uma única edição. Antes de excluir um padrão, caso ou combinação, retire suas referências das definições que o utilizam.
 

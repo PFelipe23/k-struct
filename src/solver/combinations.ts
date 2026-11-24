@@ -56,6 +56,8 @@ export function requireAvailableCases(
   factors: readonly ResultCombination["factors"][number][],
   caseResults: ReadonlyMap<string, AnalysisResult>,
 ): void {
+  if (project.slabs.length)
+    throw new Error("Consulte os casos estáticos da laje individualmente.");
   const pending = new Set(
     factors
       .filter(

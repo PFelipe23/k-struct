@@ -110,6 +110,8 @@ function rectangleTorsion(width: number, height: number) {
 
 export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const p = projectSchema.parse(project);
+  if (p.slabs.length)
+    throw new Error("Use a análise QDKT para projetos com laje.");
   const errors = analysisErrors(p);
   if (errors.length) throw new Error(errors.join("\n"));
   const analysisCase = p.analysisCases.find((c) => c.id === caseId);

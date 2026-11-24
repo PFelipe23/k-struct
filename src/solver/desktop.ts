@@ -2,7 +2,7 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { parseProject, serializeProject, type Project } from "../domain/model";
-import { exportOofem } from "./oofem";
+import { exportAnalysis } from "./analysis";
 
 export type EngineOrigin = "bundled" | "custom" | "environment" | "path";
 export const engineOriginLabel: Record<EngineOrigin, string> = {
@@ -76,7 +76,7 @@ export async function analyze(
   runId: string,
   onStarted: () => void,
 ) {
-  const input = exportOofem(p, caseId);
+  const input = exportAnalysis(p, caseId);
   if (!desktop())
     throw new Error(
       "Execute o KStruct desktop para usar o OOFEM instalado neste computador. No navegador, você pode editar e exportar o modelo.",

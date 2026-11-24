@@ -34,9 +34,12 @@ A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python.
 ## Contrato de análise
 
 - Um passo de `StaticStructural`. O modelo plano usa `Beam2d` no domínio `2dBeam`. O espacial usa `Beam3d` no domínio `3dShell`, com seis graus de liberdade por nó.
+- A laje isolada usa `qdktplate` no domínio `2dMindlinPlate`. A malha é exportada com origem no canto de menor X e Y e eixos locais paralelos aos globais. O caso estático soma as pressões em Z dos padrões pelos fatores cadastrados. O adaptador aplica `ConstantSurfaceLoad` e verifica a resultante vertical antes de disponibilizar os mapas.
 - Barras retangulares elásticas com ligações rígidas e cargas uniformes e nodais. O peso próprio é atribuído como carga.
 - `beamShearCoeff = 1e18` aproxima a hipótese de Euler–Bernoulli.
 - `Beam3d` usa inércias Iy/Iz e a constante de torção de Saint-Venant calculada pela série para uma seção retangular maciça.
 - Uma execução ativa por vez, com diretório temporário, prazo de 60 s e limite de 32 MB por arquivo de saída.
 - Cancelar termina o processo e preserva as mensagens disponíveis no histórico. O histórico inclui origem e versão do motor, data, duração, estado e a parte final de stdout e stderr quando o limite do log é atingido.
 - Resultados de uma execução cancelada, incompleta ou de um modelo já alterado ficam fora das vistas e tabelas de resultados.
+
+O procedimento, as condições de apoio e a leitura de flecha e momentos da laje estão no benchmark QDKT. [Validação da placa simplesmente apoiada](VALIDATION.md#placa-retangular-simplesmente-apoiada)

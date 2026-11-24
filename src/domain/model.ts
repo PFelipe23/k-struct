@@ -136,7 +136,7 @@ const combinationSchema = spatialSchema.extend({
     )
     .max(100),
 });
-export const projectSchema = combinationSchema.extend({
+const envelopeSchema = combinationSchema.extend({
   schemaVersion: z.literal(4),
   resultEnvelopes: z
     .array(
@@ -147,15 +147,44 @@ export const projectSchema = combinationSchema.extend({
     .max(100),
 });
 
+const subdivisions = finite.int().min(2).max(32).multipleOf(2);
+const slabSchema = z
+  .object({
+    id,
+    name: text,
+    x: finite,
+    y: finite,
+    z: finite,
+    lengthX: finite.positive(),
+    lengthY: finite.positive(),
+    materialId: id,
+    thickness: finite.positive(),
+    nx: subdivisions,
+    ny: subdivisions,
+    supports: z
+      .object({ xMin: flag, xMax: flag, yMin: flag, yMax: flag })
+      .strict(),
+  })
+  .strict();
+const slabPatternSchema = patternSchema.extend({
+  pressures: z.array(z.object({ slabId: id, qz: finite }).strict()).max(1),
+});
+export const projectSchema = envelopeSchema.extend({
+  schemaVersion: z.literal(5),
+  slabs: z.array(slabSchema).max(1),
+  loadPatterns: z.array(slabPatternSchema).min(1).max(100),
+});
+
 export type Project = z.infer<typeof projectSchema>;
 export type AnalysisCase = Project["analysisCases"][number];
 export type ResultCombination = Project["resultCombinations"][number];
 export type ResultEnvelope = Project["resultEnvelopes"][number];
 export type StructuralNode = Project["nodes"][number];
 export type Member = Project["members"][number];
+export type Slab = Project["slabs"][number];
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
 export type UniformLoad = Project["loadPatterns"][number]["uniform"][number];
-export type SelectedObject = { kind: "node" | "member"; id: string };
+export type SelectedObject = { kind: "node" | "member" | "slab"; id: string };
 export type Selection = SelectedObject | null;
 export const uid = () => crypto.randomUUID();
 export const free = () => ({
@@ -202,7 +231,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: uid(),
     name: "Projeto sem título",
     units: "N-m-kg-s",
@@ -210,6 +239,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
     guides: defaultGuides(),
     nodes: [],
     members: [],
+    slabs: [],
     materials: [
       { id: "steel", name: "Material M1", E: 2e11, nu: 0.3, density: 7850 },
     ],
@@ -223,7 +253,13 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
       },
     ],
     loadPatterns: [
-      { id: "G", name: "Carga permanente", nodal: [], uniform: [] },
+      {
+        id: "G",
+        name: "Carga permanente",
+        nodal: [],
+        uniform: [],
+        pressures: [],
+      },
     ],
     analysisCases: [
       {
@@ -321,10 +357,21 @@ export function parseProject(source: string): Project {
         value = { ...v3.data, schemaVersion: 4, resultEnvelopes: [] };
     }
   }
+  const v4 = envelopeSchema.safeParse(value);
+  if (v4.success)
+    value = {
+      ...v4.data,
+      schemaVersion: 5,
+      slabs: [],
+      loadPatterns: v4.data.loadPatterns.map((pattern) => ({
+        ...pattern,
+        pressures: [],
+      })),
+    };
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct versão 1, 2, 3 ou 4, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 5 com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -336,6 +383,7 @@ export function referenceErrors(p: Project): string[] {
   for (const list of [
     p.nodes,
     p.members,
+    p.slabs,
     p.materials,
     p.sections,
     p.loadPatterns,
@@ -369,11 +417,22 @@ export function referenceErrors(p: Project): string[] {
   for (const s of p.sections)
     if (!p.materials.some((m) => m.id === s.materialId))
       errors.push(`${s.name}: material inexistente.`);
+  if (p.mode === "planar" && p.slabs.length)
+    errors.push("Lajes exigem um projeto espacial.");
+  for (const slab of p.slabs)
+    if (!p.materials.some(({ id }) => id === slab.materialId))
+      errors.push(`${slab.name}: material inexistente.`);
   for (const pat of p.loadPatterns) {
     if (pat.nodal.some((l) => !nodes.has(l.nodeId)))
       errors.push(`${pat.name}: carga em nó inexistente.`);
     if (pat.uniform.some((l) => !p.members.some((m) => m.id === l.memberId)))
       errors.push(`${pat.name}: carga em barra inexistente.`);
+    if (
+      pat.pressures.some(
+        ({ slabId }) => !p.slabs.some(({ id }) => id === slabId),
+      )
+    )
+      errors.push(`${pat.name}: pressão em laje inexistente.`);
   }
   for (const c of p.analysisCases)
     if (
@@ -435,6 +494,34 @@ function rank(rows: number[][], columns: number): number {
 export function analysisErrors(p: Project): string[] {
   const errors = referenceErrors(p);
   if (errors.length) return errors;
+  if (p.slabs.length) {
+    const [slab] = p.slabs;
+    if (p.nodes.length || p.members.length)
+      errors.push(
+        "Para analisar a laje isolada, use um projeto sem nós ou barras estruturais.",
+      );
+    if (!Object.values(slab.supports).every(Boolean))
+      errors.push(
+        "Para analisar a laje, defina apoio simples nas quatro bordas.",
+      );
+    for (const [start, size, count] of [
+      [slab.x, slab.lengthX, slab.nx],
+      [slab.y, slab.lengthY, slab.ny],
+    ]) {
+      const end = start + size;
+      const step = size / count;
+      if (
+        step < tolerance ||
+        !Number.isFinite(end) ||
+        start + step <= start ||
+        end - step >= end
+      )
+        errors.push(
+          "As dimensões e a malha da laje devem formar células de tamanho válido.",
+        );
+    }
+    return [...new Set(errors)];
+  }
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
   if (!p.members.length)
     errors.push("Lance pelo menos uma barra para analisar.");
@@ -558,6 +645,10 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   const bars = new Set(
     selection.filter((s) => s.kind === "member").map((s) => s.id),
   );
+  const slabs = new Set(
+    selection.filter((s) => s.kind === "slab").map((s) => s.id),
+  );
+  p.slabs = p.slabs.filter(({ id }) => !slabs.has(id));
   p.members = p.members.filter((m) => {
     if (nodes.has(m.start) || nodes.has(m.end)) bars.add(m.id);
     return !bars.has(m.id);
@@ -566,5 +657,6 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   for (const pat of p.loadPatterns) {
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
+    pat.pressures = pat.pressures.filter(({ slabId }) => !slabs.has(slabId));
   }
 }

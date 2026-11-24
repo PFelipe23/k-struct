@@ -180,6 +180,37 @@ export default function SpatialView({
     const selectedIds = new Set(
       selection.map((item) => `${item.kind}:${item.id}`),
     );
+    for (const slab of project.slabs) {
+      const selected = selectedIds.has(`slab:${slab.id}`);
+      const geometry = new THREE.PlaneGeometry(slab.lengthX, slab.lengthY);
+      const panel = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color: selected ? "#b394e1" : "#82c8ba",
+          transparent: true,
+          opacity: 0.48,
+          side: THREE.DoubleSide,
+        }),
+      );
+      panel.rotation.x = -Math.PI / 2;
+      panel.position.copy(
+        scenePoint({
+          x: slab.x + slab.lengthX / 2,
+          y: slab.y + slab.lengthY / 2,
+          z: slab.z,
+        }),
+      );
+      panel.userData.selection = { kind: "slab", id: slab.id };
+      panel.add(
+        new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry),
+          new THREE.LineBasicMaterial({
+            color: selected ? "#dab9ff" : "#82c8ba",
+          }),
+        ),
+      );
+      s.model.add(panel);
+    }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
@@ -236,7 +267,7 @@ export default function SpatialView({
   }, [project, selection, result, deformationScale]);
   useEffect(() => {
     state.current?.fit();
-  }, [project.id]);
+  }, [project.id, project.slabs.length]);
   return (
     <section className="viewport spatial">
       <div className="view-heading">

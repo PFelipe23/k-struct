@@ -14,9 +14,10 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Selecionar, replicar por deslocamento e conectar interseções em 3D. As cópias levam geometria, seção e orientação, com nós novos sem apoios nem cargas.
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
-- Salvar e reabrir `.kstruct.json` no esquema v4, com migração dos projetos v1 a v3 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v5, com migração dos projetos v1 a v4 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
+- Analisar uma laje retangular isolada com `qdktplate` e consultar mapas de flecha e momentos por unidade de largura.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
 
 No navegador, use o editor e a exportação de entrada. O botão **Analisar** executa o solver nativo na aplicação desktop.
@@ -55,6 +56,15 @@ A compilação dos pacotes prepara o OOFEM a partir do commit fixado da versão 
 5. Para começar do zero, use **Novo projeto** para XZ ou **Novo pórtico espacial** para XYZ. Ative **Barra** (`B`) e marque duas extremidades. Defina apoios e cargas antes de analisar.
 
 No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolha o pavimento para lançar vigas em planta e alterne para uma elevação para lançar pilares. **Orto** alinha a segunda extremidade no plano. Segure `Shift` para inverter o modo durante o clique. Use `Ctrl` ou `Shift` para montar uma seleção e **Replicar** para copiar a geometria até outro pavimento. Use **Conectar interseções** onde as barras precisam compartilhar nós.
+
+### Laje retangular isolada
+
+1. Abra **Novo pórtico espacial**, selecione a **Planta XY** e escolha o **Pavimento ativo**. Em **Modelo**, ative **Laje** e marque dois cantos opostos. O painel é lançado na cota do pavimento selecionado.
+2. Selecione a laje na planta, na perspectiva ou no explorador. Em **Propriedades**, ajuste dimensões e cota em m, espessura em cm, material e subdivisões pares. Para reproduzir o benchmark, use 4 × 3 m, 10 cm, E = 30 GPa, ν = 0,20 e densidade de 2.500 kg/m³. Mantenha as quatro bordas simplesmente apoiadas.
+3. Com o padrão permanente ativo, informe **−5 kN/m²** em **Pressão uniforme Z**. No desktop, selecione o caso **EL** e clique em **Analisar**. Em **Visualização dos resultados**, alterne entre os mapas de **Flecha Uz**, **Momento Mx** e **Momento My**. A consulta mostra os valores no centro e a soma das reações de apoio.
+4. Refaça a análise ao alterar a malha. A partir de 8 × 6, use 16 × 12 e 32 × 24 para repetir a comparação do benchmark. [Valores de referência](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada)
+
+A análise da laje usa um painel isolado em um projeto espacial. Combinações e envelopes são consultados em projetos de barras.
 
 ### Padrões, casos, combinações e envelopes
 

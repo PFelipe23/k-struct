@@ -202,8 +202,9 @@ export default function Inspector({
         {selection.length > 1 && (
           <>
             <p className="help">
-              {selectedNodes.size} nós · {selection.length - selectedNodes.size}{" "}
-              barras
+              {selectedNodes.size} nós ·{" "}
+              {selection.filter(({ kind }) => kind === "member").length} barras
+              {selection.some(({ kind }) => kind === "slab") && " · 1 laje"}
             </p>
             {selectedNodes.size > 0 && supportPresets}
           </>

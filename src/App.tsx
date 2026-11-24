@@ -28,6 +28,7 @@ import {
   GitBranch,
   History,
   ListChecks,
+  SquareDashed,
   Square,
   PanelLeft,
   PanelRight,
@@ -49,6 +50,7 @@ import {
   type Selection,
 } from "./domain/model";
 import { addMember, connectIntersections, replicate } from "./domain/editing";
+import { addSlab } from "./domain/slab";
 import {
   onPlane,
   origin,
@@ -70,6 +72,11 @@ import {
 } from "./components/LaunchTools";
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
+import SlabInspector from "./components/SlabInspector";
+import SlabResults, {
+  slabComponents,
+  type SlabComponent,
+} from "./components/SlabResults";
 import Results from "./components/Results";
 import EnvelopeResults from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
@@ -85,10 +92,10 @@ import {
   type MemberEnvelopeResult,
 } from "./solver/envelopes";
 import {
-  exportOofem,
-  parseOofemOutput,
-  type AnalysisResult,
-} from "./solver/oofem";
+  exportAnalysis,
+  parseAnalysisOutput,
+  type CaseResult,
+} from "./solver/analysis";
 import {
   analyze,
   cancelAnalysis,
@@ -102,6 +109,7 @@ import {
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v5") ??
       localStorage.getItem("kstruct.draft.v4") ??
       localStorage.getItem("kstruct.draft.v3") ??
       localStorage.getItem("kstruct.draft.v2") ??
@@ -120,6 +128,7 @@ export default function App() {
   }));
   const p = history.current;
   const spatial = p.mode === "spatial";
+  const hasSlab = p.slabs.length > 0;
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
   const [preferredPlane, setPlane] = useState<PlaneKind>("XY");
@@ -135,7 +144,8 @@ export default function App() {
   const plane: WorkPlane = { kind, offset: spatial ? activeGuide.position : 0 };
   const [pending, setPending] = useState<Point3 | null>(null),
     [display, setDisplay] = useState<Display>("model");
-  const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
+  const [slabDisplay, setSlabDisplay] = useState<SlabComponent | "model">("uz");
+  const [caseResults, setCaseResults] = useState<Map<string, CaseResult>>(
     () => new Map(),
   );
   const modelRevision = useRef(0);
@@ -175,7 +185,7 @@ export default function App() {
   const [calculatedEnvelope, setCalculatedEnvelope] = useState<{
     project: Project;
     envelope: ResultEnvelope;
-    cases: ReadonlyMap<string, AnalysisResult>;
+    cases: ReadonlyMap<string, CaseResult>;
     result: MemberEnvelopeResult | null;
     problem: string;
   } | null>(null);
@@ -183,11 +193,11 @@ export default function App() {
     p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
   const caseId = analysisCase.id;
   const combination =
-    derivedChoice?.kind === "combination"
+    !hasSlab && derivedChoice?.kind === "combination"
       ? p.resultCombinations.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const envelope =
-    derivedChoice?.kind === "envelope"
+    !hasSlab && derivedChoice?.kind === "envelope"
       ? p.resultEnvelopes.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const derived = combination ?? envelope;
@@ -195,6 +205,13 @@ export default function App() {
     p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
     p.loadPatterns[0].id;
   const caseResult = caseResults.get(caseId) ?? null;
+  const slabResult = caseResult?.slab;
+  const selectedSlab = p.slabs.find(
+    ({ id }) =>
+      selection.length === 1 &&
+      selection[0].kind === "slab" &&
+      selection[0].id === id,
+  );
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -269,7 +286,7 @@ export default function App() {
   const result = envelope ? null : combined ? combined.result : caseResult;
   const visibleDisplay = showEnvelope
     ? envelopeComponent
-    : result
+    : result && !slabResult
       ? display
       : "model";
   const defaultDiagram = spatial ? "deformed" : "m";
@@ -287,7 +304,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v4", serialized);
+      localStorage.setItem("kstruct.draft.v5", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -493,18 +510,25 @@ export default function App() {
       if (!error) selectObject({ kind: "node", id });
       return;
     }
-    if (tool !== "member") return;
+    if (tool !== "member" && (tool !== "slab" || kind !== "XY")) return;
     if (!pending) {
       setPending(point);
       return;
     }
     let id = "";
     const error = edit((p) => {
-      id = addMember(p, pending, point).id;
+      id =
+        tool === "slab"
+          ? addSlab(p, pending, point, patternId)
+          : addMember(p, pending, point).id;
     });
     if (!error) {
-      selectObject({ kind: "member", id });
+      selectObject({ kind: tool, id });
       setPending(null);
+      if (tool === "slab") {
+        setDerivedChoice(null);
+        changeTool("select");
+      }
     }
   };
   const selectPlane = () => {
@@ -514,6 +538,9 @@ export default function App() {
     changeTool("select");
     setSelection([
       ...Array.from(ids, (id) => ({ kind: "node" as const, id })),
+      ...p.slabs
+        .filter((slab) => kind === "XY" && onPlane(slab, plane))
+        .map(({ id }) => ({ kind: "slab" as const, id })),
       ...p.members
         .filter((m) => ids.has(m.start) && ids.has(m.end))
         .map((m) => ({ kind: "member" as const, id: m.id })),
@@ -592,11 +619,12 @@ export default function App() {
         setMessage(`${execution.log.summary.message}${historyNotice}`);
         return;
       }
-      const completed = parseOofemOutput(execution.output, input);
+      const completed = parseAnalysisOutput(execution.output, input);
       setCaseResults((results) =>
         new Map(results).set(completed.caseId, completed),
       );
       setDisplay(defaultDiagram);
+      if (completed.slab) setSlabDisplay("uz");
       setMessage(
         `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. Consulte reações, deslocamentos e esforços.${historyNotice}`,
       );
@@ -622,7 +650,7 @@ export default function App() {
   };
   const exportDeck = async () => {
     try {
-      if (await exportFile("analysis.in", exportOofem(p, caseId).deck))
+      if (await exportFile("analysis.in", exportAnalysis(p, caseId).deck))
         setMessage("Entrada OOFEM exportada em unidades SI (N, m, kg, s).");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -752,6 +780,16 @@ export default function App() {
                     <kbd>{shortcut}</kbd>
                   </button>
                 ))}
+                {spatial && (
+                  <button
+                    className={`tool-button ${tool === "slab" ? "active" : ""}`}
+                    disabled={hasSlab || kind !== "XY"}
+                    onClick={() => changeTool("slab")}
+                    title="Lançar uma laje na planta XY do pavimento ativo"
+                  >
+                    <SquareDashed size={21} /> <span>Laje</span>
+                  </button>
+                )}
                 <button
                   className="tool-button"
                   disabled={!selection.length}
@@ -854,15 +892,21 @@ export default function App() {
             )}
             <div className="analysis-description">
               <b>
-                {spatial
-                  ? "Estática linear espacial"
-                  : "Estática linear no plano XZ"}
+                {hasSlab
+                  ? "Estática linear · Laje isolada"
+                  : spatial
+                    ? "Estática linear espacial"
+                    : "Estática linear no plano XZ"}
               </b>
               <span>
-                Euler–Bernoulli · {p.mesh.segmentsPerMember} elementos por barra
+                {hasSlab
+                  ? "QDKT · Placa delgada"
+                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} elementos por barra`}
               </span>
               <span>
-                Peso próprio aplicado manualmente como carga distribuída
+                {hasSlab
+                  ? "Pressão uniforme em Z"
+                  : "Peso próprio aplicado manualmente como carga distribuída"}
               </span>
             </div>
           </>
@@ -917,7 +961,7 @@ export default function App() {
                   </option>
                 ))}
               </optgroup>
-              {p.resultCombinations.length > 0 && (
+              {!hasSlab && p.resultCombinations.length > 0 && (
                 <optgroup label="Combinações lineares">
                   {p.resultCombinations.map((item) => (
                     <option key={item.id} value={`combination:${item.id}`}>
@@ -926,7 +970,7 @@ export default function App() {
                   ))}
                 </optgroup>
               )}
-              {p.resultEnvelopes.length > 0 && (
+              {!hasSlab && p.resultEnvelopes.length > 0 && (
                 <optgroup label="Envelopes">
                   {p.resultEnvelopes.map((item) => (
                     <option key={item.id} value={`envelope:${item.id}`}>
@@ -1031,6 +1075,25 @@ export default function App() {
                   </p>
                 ))}
               </details>
+              {hasSlab && (
+                <details open>
+                  <summary>
+                    Lajes <span>{p.slabs.length}</span>
+                  </summary>
+                  {p.slabs.map((slab) => (
+                    <button
+                      key={slab.id}
+                      className={isSelected("slab", slab.id) ? "selected" : ""}
+                      aria-pressed={isSelected("slab", slab.id)}
+                      onClick={() =>
+                        selectObject({ kind: "slab", id: slab.id })
+                      }
+                    >
+                      <SquareDashed size={13} /> {slab.name}
+                    </button>
+                  ))}
+                </details>
+              )}
               <details>
                 <summary>
                   Casos de análise <span>{p.analysisCases.length}</span>
@@ -1070,37 +1133,53 @@ export default function App() {
               {spatial ? "Modelo espacial" : "Modelo estrutural"}{" "}
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
+                {hasSlab && " · 1 laje"}
               </span>
             </div>
-            <select
-              aria-label="Visualização dos resultados"
-              value={visibleDisplay}
-              onChange={(e) => setDisplay(e.target.value as Display)}
-            >
-              {!showEnvelope && (
+            {slabResult ? (
+              <select
+                aria-label="Visualização dos resultados"
+                value={slabDisplay}
+                onChange={(event) =>
+                  setSlabDisplay(event.target.value as SlabComponent | "model")
+                }
+              >
                 <option value="model">Geometria e cargas</option>
-              )}
-              {result && <option value="deformed">Deformada ampliada</option>}
-              {(result || showEnvelope) && (
-                <>
-                  {spatial ? (
-                    <>
-                      <option value="my">Momento fletor My</option>
-                      <option value="mz">Momento fletor Mz</option>
-                      <option value="mx">Torção Mx</option>
-                      <option value="vy">Cortante Vy</option>
-                      <option value="vz">Cortante Vz</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="m">Momento fletor M</option>
-                      <option value="v">Cortante V</option>
-                    </>
-                  )}
-                  <option value="n">Normal N</option>
-                </>
-              )}
-            </select>
+                <option value="uz">{slabComponents.uz.label}</option>
+                <option value="mx">{slabComponents.mx.label}</option>
+                <option value="my">{slabComponents.my.label}</option>
+              </select>
+            ) : (
+              <select
+                aria-label="Visualização dos resultados"
+                value={visibleDisplay}
+                onChange={(e) => setDisplay(e.target.value as Display)}
+              >
+                {!showEnvelope && (
+                  <option value="model">Geometria e cargas</option>
+                )}
+                {result && <option value="deformed">Deformada ampliada</option>}
+                {(result || showEnvelope) && (
+                  <>
+                    {spatial ? (
+                      <>
+                        <option value="my">Momento fletor My</option>
+                        <option value="mz">Momento fletor Mz</option>
+                        <option value="mx">Torção Mx</option>
+                        <option value="vy">Cortante Vy</option>
+                        <option value="vz">Cortante Vz</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="m">Momento fletor M</option>
+                        <option value="v">Cortante V</option>
+                      </>
+                    )}
+                    <option value="n">Normal N</option>
+                  </>
+                )}
+              </select>
+            )}
           </div>
           {spatial && (
             <WorkPlaneControls
@@ -1108,12 +1187,16 @@ export default function App() {
               guideId={activeGuide.id}
               guides={planeGuides}
               orthogonal={orthogonal}
-              selected={selection.length}
+              selected={selection.filter(({ kind }) => kind !== "slab").length}
               onPlane={(kind) => {
                 setPlane(kind);
                 setGuide("");
+                if (tool === "slab") changeTool("select");
               }}
-              onGuide={setGuide}
+              onGuide={(id) => {
+                setGuide(id);
+                if (tool === "slab") setPending(null);
+              }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
               editGuides={() => setLaunchDialog("guides")}
               selectPlane={selectPlane}
@@ -1121,38 +1204,47 @@ export default function App() {
               connect={connect}
             />
           )}
-          <div className={`viewports ${dual ? "dual" : "single"}`}>
-            <WorkPlaneView
-              project={p}
-              plane={plane}
-              orthogonal={orthogonal}
-              selection={selection}
-              tool={tool}
-              result={result}
-              envelope={
-                showEnvelope && envelopeResult && section
-                  ? {
-                      result: envelopeResult,
-                      section,
-                      onSection: inspectSection,
-                    }
-                  : null
-              }
-              display={visibleDisplay}
-              patternId={patternId}
-              pending={pending}
-              onPoint={onPoint}
-              onSelect={selectObject}
+          {slabResult && slabDisplay !== "model" ? (
+            <SlabResults
+              result={slabResult}
+              slabName={p.slabs[0].name}
+              caseName={analysisCase.name}
+              component={slabDisplay}
             />
-            {dual && (
-              <SpatialView
+          ) : (
+            <div className={`viewports ${dual ? "dual" : "single"}`}>
+              <WorkPlaneView
                 project={p}
+                plane={plane}
+                orthogonal={orthogonal}
                 selection={selection}
-                result={visibleDisplay === "deformed" ? result : null}
+                tool={tool}
+                result={result}
+                envelope={
+                  showEnvelope && envelopeResult && section
+                    ? {
+                        result: envelopeResult,
+                        section,
+                        onSection: inspectSection,
+                      }
+                    : null
+                }
+                display={visibleDisplay}
+                patternId={patternId}
+                pending={pending}
+                onPoint={onPoint}
                 onSelect={selectObject}
               />
-            )}
-          </div>
+              {dual && (
+                <SpatialView
+                  project={p}
+                  selection={selection}
+                  result={visibleDisplay === "deformed" ? result : null}
+                  onSelect={selectObject}
+                />
+              )}
+            </div>
+          )}
           {showEnvelope ? (
             <div className="diagram-caption envelope-legend">
               <span className="envelope-max-label">Máximo</span>
@@ -1186,6 +1278,7 @@ export default function App() {
             />
           ) : (
             <Results
+              key={hasSlab ? "slab" : "frame"}
               project={p}
               view={
                 combination && combined
@@ -1209,14 +1302,22 @@ export default function App() {
             />
           )}
         </main>
-        {right && (
-          <Inspector
-            project={p}
-            selection={selection}
-            patternId={patternId}
-            edit={edit}
-          />
-        )}
+        {right &&
+          (selectedSlab ? (
+            <SlabInspector
+              project={p}
+              slab={selectedSlab}
+              patternId={patternId}
+              edit={edit}
+            />
+          ) : (
+            <Inspector
+              project={p}
+              selection={selection}
+              patternId={patternId}
+              edit={edit}
+            />
+          ))}
       </div>
       <footer className="status-bar">
         <span>
@@ -1232,15 +1333,19 @@ export default function App() {
                 : "Modelo em edição"}
         </span>
         <span>
-          {pending
-            ? "Marque a segunda extremidade · Esc para cancelar"
-            : tool === "member"
-              ? "Marque a primeira extremidade da barra"
-              : tool === "node"
-                ? "Clique na malha para inserir um nó"
-                : selection.length > 1
-                  ? `${selection.length} objetos selecionados`
-                  : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+          {tool === "slab"
+            ? pending
+              ? "Marque o canto oposto · Esc para cancelar"
+              : "Marque o primeiro canto da laje"
+            : pending
+              ? "Marque a segunda extremidade · Esc para cancelar"
+              : tool === "member"
+                ? "Marque a primeira extremidade da barra"
+                : tool === "node"
+                  ? "Clique na malha para inserir um nó"
+                  : selection.length > 1
+                    ? `${selection.length} objetos selecionados`
+                    : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           kN · m · rad <i /> {desktop() ? "Desktop" : "Navegador · edição"}{" "}
