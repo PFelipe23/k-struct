@@ -19,6 +19,7 @@ import {
   type Slab,
 } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
+import BatchAssignPanel from "./BatchAssignPanel";
 
 export function NumberField({
   label,
@@ -318,7 +319,7 @@ export default function Inspector({
   project: Project;
   selection: SelectedObject[];
   patternId: string;
-  edit: (fn: (p: Project) => void) => void;
+  edit: (fn: (p: Project) => void) => string | null | void;
 }) {
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
@@ -432,6 +433,12 @@ export default function Inspector({
               {selection.some(({ kind }) => kind === "slab") && " · 1 laje"}
             </p>
             {selectedNodes.size > 0 && supportPresets}
+            <BatchAssignPanel
+              project={p}
+              selection={selection}
+              patternId={patternId}
+              edit={edit}
+            />
           </>
         )}
         {!selection.length && (
