@@ -4,19 +4,24 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type MouseEvent,
 } from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
+  normalizeCoord,
   onPlane,
+  parseDecimalInput,
   planeCoordinates,
   planePoint,
+  relativePointOnPlane,
   tolerance,
   type Coordinate,
   type Point3,
   type WorkPlane,
 } from "../domain/geometry";
+import { resolveWorkPlaneSnap, type SnapCandidate } from "../domain/snap";
 import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { MemberForceComponent } from "../solver/combinations";
 import type {
@@ -29,7 +34,6 @@ import type { SlabMap } from "./SlabResults";
 
 export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
-type UV = { u: number; v: number };
 interface Props {
   project: Project;
   plane: WorkPlane;
@@ -74,7 +78,15 @@ export default function WorkPlaneView({
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 700, height: 460 });
   const [camera, setCamera] = useState({ u: 3, v: 1.5, scale: 65 });
-  const [cursor, setCursor] = useState<UV | null>(null);
+  const [cursor, setCursor] = useState<SnapCandidate | null>(null);
+  const [lastNodeAnchor, setLastNodeAnchor] = useState<Point3 | null>(null);
+  const [deltaU, setDeltaU] = useState("");
+  const [deltaV, setDeltaV] = useState("");
+  const [relativeError, setRelativeError] = useState("");
+  const [relativeInvalid, setRelativeInvalid] = useState({
+    u: false,
+    v: false,
+  });
   const pan = useRef<{ x: number; y: number; u: number; v: number } | null>(
     null,
   );
@@ -150,7 +162,22 @@ export default function WorkPlaneView({
     fit();
     setCursor(null);
   }, [project.id, plane.kind]);
-  useEffect(() => setCursor(null), [plane.offset]);
+  useEffect(() => {
+    setCursor(null);
+    setLastNodeAnchor(null);
+    setDeltaU("");
+    setDeltaV("");
+    setRelativeError("");
+    setRelativeInvalid({ u: false, v: false });
+  }, [project.id, plane.kind, plane.offset, tool]);
+
+  const snapAnchor =
+    tool === "member" && pending && onPlane(pending, plane)
+      ? pending
+      : tool === "node" && lastNodeAnchor && onPlane(lastNodeAnchor, plane)
+        ? lastNodeAnchor
+        : null;
+  const relativeAnchor = snapAnchor ?? planePoint(0, 0, plane);
 
   const sx = useCallback(
     (u: number) => size.width / 2 + (u - camera.u) * camera.scale,
@@ -160,51 +187,110 @@ export default function WorkPlaneView({
     (v: number) => size.height / 2 - (v - camera.v) * camera.scale,
     [size.height, camera],
   );
-  const point = (event: {
+  const resolveCursor = (event: {
     clientX: number;
     clientY: number;
     shiftKey: boolean;
-  }) => {
+  }): SnapCandidate => {
     const rect = ref.current!.getBoundingClientRect();
-    const u =
+    const rawU =
       (event.clientX - rect.left - size.width / 2) / camera.scale + camera.u;
-    const v =
+    const rawV =
       -(event.clientY - rect.top - size.height / 2) / camera.scale + camera.v;
-    const aligned =
-      pending &&
+    return resolveWorkPlaneSnap({
+      rawU,
+      rawV,
+      scale: camera.scale,
+      plane,
+      spatial,
+      orthogonal,
+      shiftKey: event.shiftKey,
+      tool,
+      anchor: snapAnchor,
+      nodes: project.nodes,
+      members: project.members,
+      uGuides,
+      vGuides,
+    });
+  };
+
+  const parsedDeltaU = parseDecimalInput(deltaU);
+  const parsedDeltaV = parseDecimalInput(deltaV);
+  const hasRelativeBoth =
+    Number.isFinite(parsedDeltaU) && Number.isFinite(parsedDeltaV);
+  const relativeDistance = hasRelativeBoth
+    ? Math.hypot(parsedDeltaU, parsedDeltaV)
+    : NaN;
+  const relativePreview: SnapCandidate | null =
+    (tool === "member" || tool === "node") &&
+    hasRelativeBoth &&
+    !(
       tool === "member" &&
-      spatial &&
-      orthogonal !== event.shiftKey &&
-      onPlane(pending, plane);
-    const horizontal =
-      aligned && Math.abs(u - pending[axisU]) >= Math.abs(v - pending[axisV]);
-    const lockU = aligned && !horizontal ? pending[axisU] : null;
-    const lockV = horizontal ? pending[axisV] : null;
-    const nearest = nodes.reduce<{
-      node: (typeof nodes)[number];
-      error: number;
-    } | null>((best, n) => {
-      if (lockU !== null && Math.abs(n[axisU] - lockU) >= tolerance)
-        return best;
-      if (lockV !== null && Math.abs(n[axisV] - lockV) >= tolerance)
-        return best;
-      const error = Math.hypot(n[axisU] - u, n[axisV] - v) * camera.scale;
-      return error < (best?.error ?? 12) ? { node: n, error } : best;
-    }, null);
-    if (nearest) return { u: nearest.node[axisU], v: nearest.node[axisV] };
-    const snap = (value: number, guides: typeof uGuides) => {
-      const closest = guides.reduce(
-        (best, g) =>
-          Math.abs(g.position - value) < Math.abs(best - value)
-            ? g.position
-            : best,
-        Infinity,
+      pending &&
+      onPlane(pending, plane) &&
+      relativeDistance < tolerance
+    )
+      ? (() => {
+          const target = relativePointOnPlane(
+            relativeAnchor,
+            parsedDeltaU,
+            parsedDeltaV,
+            plane,
+          );
+          return {
+            u: target[axisU],
+            v: target[axisV],
+            point: target,
+            kind: "relative",
+            label: "Coordenada relativa",
+            distance: normalizeCoord(relativeDistance),
+            screenErrorPx: 0,
+          };
+        })()
+      : null;
+  const activeCandidate = relativePreview ?? cursor;
+
+  const cancelRelative = (input?: HTMLInputElement | null) => {
+    setDeltaU("");
+    setDeltaV("");
+    setRelativeError("");
+    setRelativeInvalid({ u: false, v: false });
+    input?.blur();
+  };
+
+  const handleRelativeSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const invalidU = !Number.isFinite(parsedDeltaU);
+    const invalidV = !Number.isFinite(parsedDeltaV);
+    if (invalidU || invalidV) {
+      setRelativeInvalid({ u: invalidU, v: invalidV });
+      setRelativeError(
+        `Informe Δ${axisU.toUpperCase()} e Δ${axisV.toUpperCase()} numéricos em metros.`,
       );
-      return Math.abs(closest - value) * camera.scale < 10
-        ? closest
-        : Math.round(value * 2) / 2;
-    };
-    return { u: lockU ?? snap(u, uGuides), v: lockV ?? snap(v, vGuides) };
+      return;
+    }
+    if (
+      tool === "member" &&
+      pending &&
+      onPlane(pending, plane) &&
+      Math.hypot(parsedDeltaU, parsedDeltaV) < tolerance
+    ) {
+      setRelativeInvalid({ u: true, v: true });
+      setRelativeError("Informe um incremento não nulo a partir da origem.");
+      return;
+    }
+    const target = relativePointOnPlane(
+      relativeAnchor,
+      parsedDeltaU,
+      parsedDeltaV,
+      plane,
+    );
+    if (tool === "node") setLastNodeAnchor(target);
+    onPoint(target);
+    setDeltaU("");
+    setDeltaV("");
+    setRelativeError("");
+    setRelativeInvalid({ u: false, v: false });
   };
 
   const allStations = result ? Object.values(result.members).flat() : [];
@@ -347,14 +433,16 @@ export default function WorkPlaneView({
               u: p.u - (e.clientX - p.x) / c.scale,
               v: p.v + (e.clientY - p.y) / c.scale,
             }));
-          } else setCursor(point(e));
+          } else setCursor(resolveCursor(e));
         }}
         onPointerLeave={() => setCursor(null)}
         onClick={(e) => {
           if (tool === "select") onSelect(null, additiveSelection(e));
           else {
-            const { u, v } = point(e);
-            onPoint(planePoint(u, v, plane));
+            const snapped = resolveCursor(e);
+            setCursor(snapped);
+            if (tool === "node") setLastNodeAnchor(snapped.point);
+            onPoint(snapped.point);
           }
         }}
       >
@@ -721,46 +809,116 @@ export default function WorkPlaneView({
             </g>
           );
         })}
-        {cursor && tool !== "select" && (
-          <g pointerEvents="none">
-            <path
-              d={`M${sx(cursor.u) - 8} ${sy(cursor.v)}h16m-8-8v16`}
-              stroke="var(--geometry-selected)"
-            />
-            <rect
-              x={sx(cursor.u) - 4}
-              y={sy(cursor.v) - 4}
-              width="8"
-              height="8"
-              stroke="var(--geometry-selected)"
-              fill="none"
-            />
-          </g>
-        )}
+        {activeCandidate &&
+          tool !== "select" &&
+          (() => {
+            const cx = sx(activeCandidate.u);
+            const cy = sy(activeCandidate.v);
+            const tagText =
+              activeCandidate.distance !== null
+                ? `${activeCandidate.label} · ${activeCandidate.distance.toFixed(2).replace(".", ",")} m`
+                : activeCandidate.label;
+            const tagWidth = Math.max(88, tagText.length * 6.2 + 16);
+            const tagX = Math.min(
+              size.width - tagWidth - 8,
+              Math.max(8, cx + 10),
+            );
+            const tagY = Math.max(26, cy - 10);
+            const markerColor =
+              activeCandidate.kind === "midpoint" ||
+              activeCandidate.kind === "perpendicular"
+                ? "var(--geometry-support)"
+                : "var(--geometry-selected)";
+            return (
+              <g
+                className="snap-indicator"
+                data-snap-kind={activeCandidate.kind}
+                data-snap-u={activeCandidate.u}
+                data-snap-v={activeCandidate.v}
+                pointerEvents="none"
+              >
+                {activeCandidate.kind === "perpendicular" && snapAnchor && (
+                  <line
+                    x1={sx(snapAnchor[axisU])}
+                    y1={sy(snapAnchor[axisV])}
+                    x2={cx}
+                    y2={cy}
+                    stroke="var(--geometry-support)"
+                    strokeWidth="1.2"
+                    strokeDasharray="3 3"
+                  />
+                )}
+                <path d={`M${cx - 8} ${cy}h16m-8-8v16`} stroke={markerColor} />
+                {activeCandidate.kind === "midpoint" ? (
+                  <polygon
+                    points={`${cx},${cy - 7} ${cx + 6},${cy + 5} ${cx - 6},${cy + 5}`}
+                    stroke={markerColor}
+                    strokeWidth="1.6"
+                    fill="var(--geometry-node-fill)"
+                  />
+                ) : activeCandidate.kind === "perpendicular" ? (
+                  <g stroke={markerColor} strokeWidth="1.6" fill="none">
+                    <path d={`M${cx - 6} ${cy}h12M${cx} ${cy - 8}v8`} />
+                    <path d={`M${cx} ${cy - 5}h5v5`} />
+                  </g>
+                ) : activeCandidate.kind === "relative" ? (
+                  <polygon
+                    points={`${cx},${cy - 6} ${cx + 6},${cy} ${cx},${cy + 6} ${cx - 6},${cy}`}
+                    stroke={markerColor}
+                    strokeWidth="1.6"
+                    fill="none"
+                  />
+                ) : (
+                  <rect
+                    x={cx - 4}
+                    y={cy - 4}
+                    width="8"
+                    height="8"
+                    stroke={markerColor}
+                    fill="none"
+                  />
+                )}
+                <g className="snap-tag">
+                  <rect
+                    x={tagX}
+                    y={tagY - 14}
+                    width={tagWidth}
+                    height="18"
+                    rx="3"
+                  />
+                  <text x={tagX + 7} y={tagY - 2}>
+                    {tagText}
+                  </text>
+                </g>
+              </g>
+            );
+          })()}
         {pending &&
-          cursor &&
-          (tool === "slab" ? (
-            <rect
-              x={Math.min(sx(pending.x), sx(cursor.u))}
-              y={Math.min(sy(pending.y), sy(cursor.v))}
-              width={Math.abs(sx(pending.x) - sx(cursor.u))}
-              height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)" fillOpacity={0.16}
-              stroke="var(--geometry-selected)"
-              strokeDasharray="6 4"
-              pointerEvents="none"
-            />
-          ) : (
-            <line
-              x1={sx(pending[axisU])}
-              y1={sy(pending[axisV])}
-              x2={sx(cursor.u)}
-              y2={sy(cursor.v)}
-              stroke="var(--geometry-selected)"
-              strokeDasharray="6 4"
-              pointerEvents="none"
-            />
-          ))}
+          (tool === "slab"
+            ? cursor && (
+                <rect
+                  x={Math.min(sx(pending.x), sx(cursor.u))}
+                  y={Math.min(sy(pending.y), sy(cursor.v))}
+                  width={Math.abs(sx(pending.x) - sx(cursor.u))}
+                  height={Math.abs(sy(pending.y) - sy(cursor.v))}
+                  fill="var(--geometry-selected)"
+                  fillOpacity={0.16}
+                  stroke="var(--geometry-selected)"
+                  strokeDasharray="6 4"
+                  pointerEvents="none"
+                />
+              )
+            : activeCandidate && (
+                <line
+                  x1={sx(pending[axisU])}
+                  y1={sy(pending[axisV])}
+                  x2={sx(activeCandidate.u)}
+                  y2={sy(activeCandidate.v)}
+                  stroke="var(--geometry-selected)"
+                  strokeDasharray="6 4"
+                  pointerEvents="none"
+                />
+              ))}
       </svg>
       {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
         <div className="empty-canvas">
@@ -773,13 +931,84 @@ export default function WorkPlaneView({
           </div>
         </div>
       )}
+      {(tool === "member" || tool === "node") && (
+        <form
+          className="relative-input-bar"
+          aria-label="Coordenadas relativas no plano"
+          onSubmit={handleRelativeSubmit}
+        >
+          <span className="relative-origin">
+            Origem ({relativeAnchor[axisU].toFixed(2).replace(".", ",")};{" "}
+            {relativeAnchor[axisV].toFixed(2).replace(".", ",")}) m
+          </span>
+          <label>
+            <span>Δ{axisU.toUpperCase()} (m)</span>
+            <input
+              aria-label={`Δ${axisU.toUpperCase()} (m)`}
+              aria-invalid={relativeInvalid.u}
+              inputMode="decimal"
+              placeholder="0,00"
+              value={deltaU}
+              onChange={(e) => {
+                setDeltaU(e.target.value);
+                setRelativeError("");
+                setRelativeInvalid((prev) => ({ ...prev, u: false }));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                  cancelRelative(e.currentTarget);
+                }
+              }}
+            />
+          </label>
+          <label>
+            <span>Δ{axisV.toUpperCase()} (m)</span>
+            <input
+              aria-label={`Δ${axisV.toUpperCase()} (m)`}
+              aria-invalid={relativeInvalid.v}
+              inputMode="decimal"
+              placeholder="0,00"
+              value={deltaV}
+              onChange={(e) => {
+                setDeltaV(e.target.value);
+                setRelativeError("");
+                setRelativeInvalid((prev) => ({ ...prev, v: false }));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                  cancelRelative(e.currentTarget);
+                }
+              }}
+            />
+          </label>
+          <button type="submit">Confirmar</button>
+          <button type="button" onClick={() => cancelRelative()}>
+            Cancelar
+          </button>
+          {relativeError && (
+            <span role="alert" className="relative-error">
+              {relativeError}
+            </span>
+          )}
+        </form>
+      )}
       <div className="view-foot">
         <span>
           {normal.toUpperCase()} = {plane.offset} m <b>·</b> Snap 0,50 m
         </span>
         <span>
-          {cursor
-            ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
+          {activeCandidate && tool !== "select"
+            ? `${activeCandidate.label} · ${axisU.toUpperCase()} ${activeCandidate.u.toFixed(2).replace(".", ",")} · ${axisV.toUpperCase()} ${activeCandidate.v.toFixed(2).replace(".", ",")} m${
+                activeCandidate.distance !== null
+                  ? ` · Dist. ${activeCandidate.distance.toFixed(2).replace(".", ",")} m`
+                  : ""
+              }`
             : display === "deformed"
               ? `Deformada ×${deformationScale.toFixed(1)}`
               : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
