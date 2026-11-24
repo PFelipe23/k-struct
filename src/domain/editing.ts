@@ -34,7 +34,15 @@ function appendMember(p: Project, properties: Omit<Member, "id" | "name">) {
   return bar;
 }
 
-export function addMember(p: Project, from: Point3, to: Point3) {
+export function addMember(
+  p: Project,
+  from: Point3,
+  to: Point3,
+  properties: Pick<Member, "sectionId" | "roll"> = {
+    sectionId: p.sections[0].id,
+    roll: 0,
+  },
+) {
   if (distance(from, to) < tolerance)
     throw new Error("Escolha uma extremidade diferente para a barra.");
   const a = addPoint(p, from);
@@ -44,8 +52,7 @@ export function addMember(p: Project, from: Point3, to: Point3) {
   return appendMember(p, {
     start: a.id,
     end: b.id,
-    sectionId: p.sections[0].id,
-    roll: 0,
+    ...properties,
   });
 }
 

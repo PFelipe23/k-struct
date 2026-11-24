@@ -1960,3 +1960,19 @@ button.primary {
     grid-template-columns: 1fr;
   }
 }
+
+.member-launch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 4px 10px;
+  background: var(--surface-view-chrome);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.member-launch label { display: inline-flex; align-items: center; gap: 5px; }
+.member-launch select { max-width: 18ch; }
+.member-launch input { width: 7ch; }
+.member-launch [role="alert"] { color: var(--danger); }

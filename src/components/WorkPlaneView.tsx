@@ -24,9 +24,11 @@ import type {
   MemberEnvelopeResult,
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
+import { pickGuideSpan } from "../domain/guideSpan";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 
+export type MemberMode = "single" | "chain" | "span";
 export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
@@ -46,6 +48,8 @@ interface Props {
   slabMap: SlabMap | null;
   patternId: string;
   pending: Point3 | null;
+  memberMode: MemberMode;
+  onSpan: (from: Point3, to: Point3) => void;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
 }
@@ -68,6 +72,8 @@ export default function WorkPlaneView({
   slabMap,
   patternId,
   pending,
+  memberMode,
+  onSpan,
   onPoint,
   onSelect,
 }: Props) {
@@ -81,8 +87,9 @@ export default function WorkPlaneView({
   const [labels, setLabels] = useState(true);
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
-  const uGuides = spatial ? project.guides[axisU] : [];
-  const vGuides = spatial ? project.guides[axisV] : [];
+  const quick = tool === "member" && memberMode === "span";
+  const uGuides = spatial || quick ? project.guides[axisU] : [];
+  const vGuides = spatial || quick ? project.guides[axisV] : [];
   const nodes = project.nodes.filter((n) => onPlane(n, plane));
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const bars = project.members.filter(
@@ -150,7 +157,10 @@ export default function WorkPlaneView({
     fit();
     setCursor(null);
   }, [project.id, plane.kind]);
-  useEffect(() => setCursor(null), [plane.offset]);
+  useEffect(
+    () => setCursor(null),
+    [plane.offset, tool, memberMode, camera, size],
+  );
 
   const sx = useCallback(
     (u: number) => size.width / 2 + (u - camera.u) * camera.scale,
@@ -170,6 +180,7 @@ export default function WorkPlaneView({
       (event.clientX - rect.left - size.width / 2) / camera.scale + camera.u;
     const v =
       -(event.clientY - rect.top - size.height / 2) / camera.scale + camera.v;
+    if (quick) return { u, v };
     const aligned =
       pending &&
       tool === "member" &&
@@ -206,6 +217,10 @@ export default function WorkPlaneView({
     };
     return { u: lockU ?? snap(u, uGuides), v: lockV ?? snap(v, vGuides) };
   };
+
+  const guideSpan = ({ u, v }: UV) =>
+    pickGuideSpan(project.guides, plane, u, v, 8 / camera.scale);
+  const hoverSpan = quick && cursor ? guideSpan(cursor) : null;
 
   const allStations = result ? Object.values(result.members).flat() : [];
   const dofU = `u${axisU}` as const,
@@ -352,7 +367,12 @@ export default function WorkPlaneView({
         onPointerLeave={() => setCursor(null)}
         onClick={(e) => {
           if (tool === "select") onSelect(null, additiveSelection(e));
-          else {
+          else if (quick) {
+            const cursor = point(e);
+            setCursor(cursor);
+            const span = guideSpan(cursor);
+            if (span) onSpan(...span);
+          } else {
             const { u, v } = point(e);
             onPoint(planePoint(u, v, plane));
           }
@@ -721,7 +741,20 @@ export default function WorkPlaneView({
             </g>
           );
         })}
-        {cursor && tool !== "select" && (
+        {hoverSpan && (
+          <line
+            aria-label="Vão a lançar"
+            pointerEvents="none"
+            x1={sx(hoverSpan[0][axisU])}
+            y1={sy(hoverSpan[0][axisV])}
+            x2={sx(hoverSpan[1][axisU])}
+            y2={sy(hoverSpan[1][axisV])}
+            stroke="var(--geometry-selected)"
+            strokeWidth={5}
+            strokeDasharray="8 3"
+          />
+        )}
+        {cursor && !quick && tool !== "select" && (
           <g pointerEvents="none">
             <path
               d={`M${sx(cursor.u) - 8} ${sy(cursor.v)}h16m-8-8v16`}
@@ -745,7 +778,8 @@ export default function WorkPlaneView({
               y={Math.min(sy(pending.y), sy(cursor.v))}
               width={Math.abs(sx(pending.x) - sx(cursor.u))}
               height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)" fillOpacity={0.16}
+              fill="var(--geometry-selected)"
+              fillOpacity={0.16}
               stroke="var(--geometry-selected)"
               strokeDasharray="6 4"
               pointerEvents="none"
@@ -762,27 +796,32 @@ export default function WorkPlaneView({
             />
           ))}
       </svg>
-      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
-        <div className="empty-canvas">
-          <h2>Lance a primeira barra</h2>
-          <p>
-            Ative <b>Barra</b> e marque duas extremidades na malha.
-          </p>
-          <div>
-            <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+      {!project.nodes.length &&
+        !project.slabs.length &&
+        tool !== "member" &&
+        tool !== "slab" && (
+          <div className="empty-canvas">
+            <h2>Lance a primeira barra</h2>
+            <p>
+              Ative <b>Barra</b> e marque duas extremidades na malha.
+            </p>
+            <div>
+              <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+            </div>
           </div>
-        </div>
-      )}
+        )}
       <div className="view-foot">
         <span>
           {normal.toUpperCase()} = {plane.offset} m <b>·</b> Snap 0,50 m
         </span>
         <span>
-          {cursor
-            ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
-            : display === "deformed"
-              ? `Deformada ×${deformationScale.toFixed(1)}`
-              : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
+          {quick && !hoverSpan
+            ? "Aproxime o cursor de um eixo, entre dois cruzamentos."
+            : cursor
+              ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
+              : display === "deformed"
+                ? `Deformada ×${deformationScale.toFixed(1)}`
+                : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
         </span>
       </div>
     </section>
