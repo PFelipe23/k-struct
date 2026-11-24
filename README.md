@@ -48,6 +48,8 @@ A compilação dos pacotes prepara o OOFEM a partir do commit fixado da versão 
 
 ## Primeiro uso
 
+Para explorar os envelopes de esforços, baixe o [projeto de exemplo do pórtico em L](examples/portico-em-l-envelopes.kstruct.json) e siga o [roteiro de análise e conferência](examples/README.md).
+
 1. Abra **Viga de referência**. Ela contém 6 m de vão, seção 15 × 20 cm, E = 200 GPa e carga de −10 kN/m em Z.
 2. Selecione a barra ou um nó em qualquer vista ou no explorador. As propriedades aparecem à direita.
 3. No desktop instalado, clique **Analisar**. Reações esperadas de 30 kN por apoio, momento de meio de vão 45 kN·m e flecha −8,4375 mm.

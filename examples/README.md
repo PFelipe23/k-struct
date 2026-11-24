@@ -1,0 +1,17 @@
+# Pórtico em L com envelope de esforços
+
+O [projeto de exemplo](portico-em-l-envelopes.kstruct.json) reproduz o [benchmark de envelopes](../docs/VALIDATION.md#envelopes-de-esforços). É um modelo espacial com um pilar de 3 m engastado na base e uma viga V1 de 4 m. As duas barras têm seção de 15 × 20 cm. Os padrões `G` e `P` aplicam forças e momentos na extremidade livre da viga.
+
+Use o KStruct desktop da branch `master` a partir do commit [`49ee0e3`](https://github.com/ricardocorsini/k-struct/commit/49ee0e3532217ea0729301859fdd95e5cb02546b), que aceita o esquema v4 e inclui envelopes. Para configurar o motor em uma instalação de desenvolvimento, consulte o [guia do OOFEM 3.0](../docs/OOFEM.md).
+
+1. Baixe `portico-em-l-envelopes.kstruct.json`. No desktop, clique em **Abrir projeto** e selecione o arquivo.
+2. Em **Caso, combinação ou envelope**, selecione **EL · Estática linear** e clique em **Analisar**. Quando terminar, selecione **CP · Compressão** e clique em **Analisar** novamente.
+3. No mesmo seletor, escolha **Envelope**. Em **Resultados do envelope**, selecione **V1** em **Barra** e **0,5** em **Estação x/L**. Essa estação fica a 2 m do início da viga.
+4. No seletor acima do diagrama, escolha **Momento fletor My** e leia a linha **Máximo**. Depois escolha **Normal N** e leia a linha **Mínimo**. Em cada linha, veja o nome na coluna **Combinação governante** e os esforços simultâneos nas colunas dessa mesma linha.
+
+| Extremo em V1 (x/L = 0,5) | Combinação governante | N (kN) | My (kN·m) |
+| ------------------------- | --------------------- | -----: | --------: |
+| Maior My                  | CF · Flexão           |   −4,8 |     11,99 |
+| Menor N (compressão)      | CC · Compressão       |  −15,1 |     −4,98 |
+
+Se salvar uma cópia do projeto, os casos, as combinações e o envelope ficam no arquivo. Ao reabrir a cópia, analise EL e CP novamente para consultar os resultados.

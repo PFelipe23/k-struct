@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   addPoint,
@@ -5,6 +6,8 @@ import {
   createProject,
   free,
   nodalLoad,
+  parseProject,
+  serializeProject,
   uniformLoad,
   type Project,
 } from "../src/domain/model";
@@ -24,6 +27,16 @@ function solve(p: Project, caseId = "EL") {
   const input = exportOofem(p, caseId);
   return parseOofemOutput(runDeck(input.deck, executable!), input);
 }
+
+const envelopeExample = readFileSync(
+  new URL("../examples/portico-em-l-envelopes.kstruct.json", import.meta.url),
+  "utf8",
+);
+
+it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", () => {
+  const project = parseProject(envelopeExample);
+  expect(parseProject(serializeProject(project))).toEqual(project);
+});
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
   it("pórtico plano de dois pavimentos concorda com a solução independente por rigidez direta", () => {
@@ -210,99 +223,8 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     expect(spatialBenchmarkDifferences(model, solve(model))).toEqual([]);
   });
   it("envelope de pórtico em L mantém os esforços simultâneos de cada combinação governante", async () => {
-    const project = createProject("spatial");
-    const a = addPoint(project, { x: 0, y: 0, z: 0 });
-    const b = addPoint(project, { x: 0, y: 0, z: 3 });
-    const c = addPoint(project, { x: 4, y: 0, z: 3 });
-    a.restraints = {
-      ux: true,
-      uy: true,
-      uz: true,
-      rx: true,
-      ry: true,
-      rz: true,
-    };
-    project.members = [
-      {
-        id: "P1",
-        name: "P1",
-        start: a.id,
-        end: b.id,
-        roll: 0,
-        sectionId: "rect",
-      },
-      {
-        id: "V1",
-        name: "V1",
-        start: b.id,
-        end: c.id,
-        roll: 0,
-        sectionId: "rect",
-      },
-    ];
-    project.loadPatterns[0].nodal = [
-      {
-        nodeId: c.id,
-        fx: -2000,
-        fy: 1500,
-        fz: -5000,
-        mx: 700,
-        my: 300,
-        mz: -400,
-      },
-    ];
-    project.loadPatterns.push({
-      id: "P",
-      name: "Compressão",
-      uniform: [],
-      nodal: [
-        {
-          nodeId: c.id,
-          fx: -12000,
-          fy: -1200,
-          fz: 1000,
-          mx: -900,
-          my: 150,
-          mz: 200,
-        },
-      ],
-    });
-    project.analysisCases.push({
-      id: "CP",
-      name: "Compressão",
-      type: "linear-static",
-      factors: [{ patternId: "P", factor: 1 }],
-    });
-    const weights = [
-      { id: "CF", name: "Flexão", f: 1.2, p: 0.2 },
-      { id: "CC", name: "Compressão", f: -0.25, p: 1.3 },
-    ];
-    for (const { id, name, f, p } of weights) {
-      project.resultCombinations.push({
-        id,
-        name,
-        type: "linear",
-        factors: [
-          { caseId: "EL", factor: f },
-          { caseId: "CP", factor: p },
-        ],
-      });
-      project.analysisCases.push({
-        id: `DIRECT-${id}`,
-        name,
-        type: "linear-static",
-        factors: [
-          { patternId: "G", factor: f },
-          { patternId: "P", factor: p },
-        ],
-      });
-    }
-    const definition = {
-      id: "E1",
-      name: "Envelope",
-      combinationIds: ["CF", "CC"],
-    };
-    project.resultEnvelopes = [definition];
+    const project = parseProject(envelopeExample);
+    const [definition] = project.resultEnvelopes;
     const cases = new Map(["EL", "CP"].map((id) => [id, solve(project, id)]));
     const evaluated = await evaluateMemberEnvelope(project, definition, cases);
     const middle = evaluated.V1[4];
@@ -314,16 +236,31 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const expected = [
       {
         extreme: middle.ranges.my.max,
+        factors: [1.2, 0.2],
         values: [-4800, 1560, -5800, 660, 11990, 2680],
       },
       {
         extreme: middle.ranges.n.min,
+        factors: [-0.25, 1.3],
         values: [-15100, -1935, 2550, -1345, -4980, -3510],
       },
     ];
-    for (const { extreme, values } of expected) {
-      const direct = solve(project, `DIRECT-${extreme.combinationId}`).members
-        .V1[4];
+    for (const {
+      extreme,
+      factors: [permanent, compression],
+      values,
+    } of expected) {
+      const directId = `DIRECT-${extreme.combinationId}`;
+      project.analysisCases.push({
+        id: directId,
+        name: directId,
+        type: "linear-static",
+        factors: [
+          { patternId: "G", factor: permanent },
+          { patternId: "P", factor: compression },
+        ],
+      });
+      const direct = solve(project, directId).members.V1[4];
       for (const [i, key] of components.entries()) {
         expect(extreme.forces[key], key).toBeCloseTo(values[i], 1);
         expect(extreme.forces[key], key).toBeCloseTo(direct[key], 1);
