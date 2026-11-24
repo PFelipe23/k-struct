@@ -26,6 +26,8 @@ type ResultView =
 
 export default function Results({
   project,
+  forceMemberId,
+  onForceMemberChange,
   view,
   message,
   running,
@@ -33,6 +35,8 @@ export default function Results({
   openRunHistory,
 }: {
   project: Project;
+  forceMemberId: string;
+  onForceMemberChange: (id: string) => void;
   view: ResultView;
   message: string;
   running: boolean;
@@ -126,13 +130,15 @@ export default function Results({
         return `${symbol} (${unit})`;
       }),
     ];
-    rows = Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
-      stations.map((s) => [
-        memberNames.get(id) ?? id,
-        s.t,
-        ...components.map((key) => s[key] / 1000),
-      ]),
-    );
+    rows = Object.entries(result?.members ?? {})
+      .filter(([id]) => !forceMemberId || id === forceMemberId)
+      .flatMap(([id, stations]) =>
+        stations.map((s) => [
+          memberNames.get(id) ?? id,
+          s.t,
+          ...components.map((key) => s[key] / 1000),
+        ]),
+      );
   }
   return (
     <section className="results">
@@ -154,6 +160,23 @@ export default function Results({
           ))}
         </div>
         <div className="result-actions">
+          {tab === "forces" && (
+            <label>
+              Barra
+              <select
+                aria-label="Barra em Esforços"
+                value={forceMemberId}
+                onChange={(event) => onForceMemberChange(event.target.value)}
+              >
+                <option value="">Todas as barras</option>
+                {project.members.map(({ id, name }) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {openRunHistory && tab === "log" && (
             <button onClick={openRunHistory}>
               <History size={13} />

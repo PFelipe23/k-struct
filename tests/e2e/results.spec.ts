@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import {
@@ -6,6 +6,7 @@ import {
   parseProject,
   serializeProject,
 } from "../../src/domain/model";
+import { twoSpanBeam } from "../fixtures/two-span-beam";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
 // OOFEM benchmark, not an alternative solver or a fallback in the application.
@@ -13,7 +14,10 @@ const output = readFileSync(
   new URL("../fixtures/beam-oofem.txt", import.meta.url),
   "utf8",
 );
-async function bridge(page: import("@playwright/test").Page, delayed = false) {
+async function bridge(
+  page: Page,
+  { delayed = false, solverOutput = output } = {},
+) {
   await page.addInitScript(
     ({ output, delayed }) => {
       type InvokeArgs = {
@@ -110,7 +114,7 @@ async function bridge(page: import("@playwright/test").Page, delayed = false) {
         },
       };
     },
-    { output, delayed },
+    { output: solverOutput, delayed },
   );
 }
 
@@ -265,6 +269,117 @@ test("combinação linear lista casos pendentes, consulta resultados e preserva 
   await expect(status).toContainText("Permanente, Variável");
 });
 
+test("filtro de esforços acompanha caso e combinação e limita as linhas do CSV", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const solverOutput = readFileSync(
+    new URL("../fixtures/two-span-beam-oofem.txt", import.meta.url),
+    "utf8",
+  );
+  await bridge(page, { solverOutput });
+  const project = twoSpanBeam();
+  const combination = {
+    id: "C1",
+    name: "Combinação de teste",
+    type: "linear" as const,
+    factors: [{ caseId: "EL", factor: 2 }],
+  };
+  project.resultCombinations = [combination];
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "dois-vaos.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(project)),
+  });
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Esforços").click();
+  const filter = page.getByRole("combobox", { name: "Barra em Esforços" });
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator("option")).toHaveText([
+    "Todas as barras",
+    "B1",
+    "B2",
+  ]);
+  await button("Analisar").click();
+  const table = page.getByRole("table");
+  const memberCells = table.locator("tbody td:first-child");
+  const stationCells = table.locator("tbody td:nth-child(2)");
+  await expect(table.getByRole("columnheader")).toHaveText([
+    "Barra",
+    "x/L",
+    "N (kN)",
+    "V (kN)",
+    "M (kN·m)",
+  ]);
+  await expect(memberCells).toHaveText(["B1", "B1", "B1", "B2", "B2", "B2"]);
+
+  await filter.selectOption({ label: "B2" });
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await expect(stationCells).toHaveText(["0", "0,5", "1"]);
+  const middleMoment = table.locator("tbody td:last-child").nth(1);
+  await expect(middleMoment).toHaveText("5,625");
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const exportCsv = async () => {
+    const waiting = page.waitForEvent("download");
+    await button("CSV").click();
+    const path = (await (await waiting).path())!;
+    const [header, ...rows] = (await readFile(path, "utf8")).split("\n");
+    expect(rows.map((row) => row.split(";").slice(0, 2))).toEqual([
+      ['"B2"', "0"],
+      ['"B2"', "0.5"],
+      ['"B2"', "1"],
+    ]);
+    return { header, rows };
+  };
+  const caseCsv = await exportCsv();
+  const columns = '\uFEFF"Barra";"x/L";"N (kN)";"V (kN)";"M (kN·m)"';
+  expect(caseCsv.header).toBe(`${columns};"Caso";"ID do caso"`);
+  for (const row of caseCsv.rows)
+    expect(row).toMatch(/;"EL · Estática linear";"EL"$/);
+  expect(caseCsv.rows[1]).toContain(";0.5;0;5.625;5.625;");
+
+  const picker = page.getByLabel("Caso, combinação ou envelope", {
+    exact: true,
+  });
+  await picker.selectOption(`combination:${combination.id}`);
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await expect(stationCells).toHaveText(["0", "0,5", "1"]);
+  await expect(middleMoment).toHaveText("11,25");
+  const combinationCsv = await exportCsv();
+  expect(combinationCsv.header).toBe(
+    `${columns};"Combinação";"ID da combinação";"Parcelas (ID do caso e fator)"`,
+  );
+  for (const row of combinationCsv.rows)
+    expect(row).toMatch(
+      /;"Combinação de teste";"C1";"\[\{""caseId"":""EL"",""factor"":2\}\]"$/,
+    );
+  expect(combinationCsv.rows[1]).toContain(";0.5;0;11.25;11.25;");
+
+  await picker.selectOption("EL");
+  await expect(filter).toHaveValue("V2");
+  await expect(memberCells).toHaveText(["B2", "B2", "B2"]);
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B2", exact: true })
+    .click();
+  await button("Excluir").click();
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator("option")).toHaveText(["Todas as barras", "B1"]);
+  await expect(table).toHaveCount(0);
+  await expect(button("CSV")).toHaveCount(0);
+  await expect(
+    page.getByText("Execute uma análise para consultar os esforços do caso"),
+  ).toBeVisible();
+  await button("Desfazer").click();
+  await expect(filter.locator("option")).toHaveCount(3);
+  await expect(filter).toHaveValue("");
+});
+
 test("envelope consulta os dois extremos por estação e exporta as combinações governantes", async ({
   page,
 }) => {
@@ -415,7 +530,7 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
 test("resposta antiga é descartada quando o modelo muda durante a execução", async ({
   page,
 }) => {
-  await bridge(page, true);
+  await bridge(page, { delayed: true });
   await page.goto("/");
   await page.getByRole("button", { name: /Viga de referência/ }).click();
   await page.getByRole("button", { name: "Analisar", exact: true }).click();
@@ -440,7 +555,7 @@ test("resposta antiga é descartada quando o modelo muda durante a execução", 
 test("cancelamento não publica resultados e o log é recuperado ao reabrir", async ({
   page,
 }) => {
-  await bridge(page, true);
+  await bridge(page, { delayed: true });
   await page.goto("/");
   await page.getByRole("button", { name: /Viga de referência/ }).click();
   await page.getByRole("button", { name: "Analisar", exact: true }).click();

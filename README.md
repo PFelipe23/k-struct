@@ -64,6 +64,8 @@ No desktop, escolha um caso estático em **Caso, combinação ou envelope** e cl
 
 Para combinar os resultados, abra **Cargas e casos** → **Combinações lineares** e cadastre os casos e seus fatores. Informe ao menos um fator diferente de zero. Depois de aplicar as definições e analisar os casos com fatores diferentes de zero, selecione a combinação em **Caso, combinação ou envelope**. O KStruct exibe a composição, a deformada, os diagramas e as tabelas. Os CSVs identificam a origem das linhas e registram os IDs e fatores dos casos que compõem cada combinação.
 
+Na aba **Esforços** de um caso ou combinação, use **Barra** para filtrar as estações da tabela e do CSV. A opção inicial é **Todas as barras**. O filtro acompanha a troca de resultados do projeto e volta a **Todas as barras** se a barra selecionada for removida.
+
 Em **Cargas e casos** → **Envelopes**, dê um nome ao envelope e marque as combinações que participam. Depois de analisar seus casos, selecione o envelope e o componente de esforço. As curvas indicam o mínimo e o máximo com sinal nas estações da malha. Clique no diagrama ou escolha **Barra** e **Estação x/L** para consultar a combinação governante de cada extremo e todos os esforços que atuam simultaneamente naquela seção. O CSV inclui as estações de todas as barras para o componente em exibição, com IDs e fatores para rastrear cada extremo. Uma edição do projeto ou das definições descarta os resultados em memória.
 
 Atalhos: `V` selecionar, `N` nó, `B` barra, `Esc` cancelar lançamento, `Delete` excluir seleção, `Ctrl+Z` desfazer, `Ctrl+Shift+Z` refazer e `Ctrl+S` salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.

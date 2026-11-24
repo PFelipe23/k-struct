@@ -172,6 +172,9 @@ export default function App() {
   } | null>(null);
   const [preferredSection, setPreferredSection] =
     useState<EnvelopeSection | null>(null);
+  const [forceMemberId, setForceMemberId] = useState("");
+  if (forceMemberId && !p.members.some(({ id }) => id === forceMemberId))
+    setForceMemberId("");
   const [calculatedEnvelope, setCalculatedEnvelope] = useState<{
     project: Project;
     envelope: ResultEnvelope;
@@ -398,6 +401,7 @@ export default function App() {
     setGuide("");
     setCaseId(project.analysisCases[0].id);
     setDerivedChoice(null);
+    setForceMemberId("");
     setPatternId(project.loadPatterns[0].id);
     setSaved(serializeProject(project));
     setMessage(`Projeto aberto: ${project.name}.`);
@@ -1187,6 +1191,8 @@ export default function App() {
           ) : (
             <Results
               project={p}
+              forceMemberId={forceMemberId}
+              onForceMemberChange={setForceMemberId}
               view={
                 combination && combined
                   ? {
