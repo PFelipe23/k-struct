@@ -76,6 +76,7 @@ import {
   ReplicateDialog,
   WorkPlaneControls,
 } from "./components/LaunchTools";
+import { parseNumberInput } from "./components/numberInput";
 import NewProjectDialog from "./components/NewProjectDialog";
 import SpatialView from "./components/SpatialView";
 import Inspector from "./components/Inspector";
@@ -144,6 +145,15 @@ export default function App() {
     [tool, setTool] = useState<Tool>("select");
   const [preferredPlane, setPlane] = useState<PlaneKind>("XY");
   const [guideId, setGuide] = useState(slab?.levelId ?? "");
+  const [memberMode, setMemberMode] = useState<"single" | "chain" | "span">(
+    "single",
+  );
+  const [launchSection, setLaunchSection] = useState("");
+  const [rollText, setRollText] = useState("0");
+  const sectionId =
+    p.sections.find((s) => s.id === launchSection)?.id ?? p.sections[0].id;
+  const roll = spatial ? parseNumberInput(rollText) : 0;
+  const validRoll = Number.isFinite(roll) && Math.abs(roll) <= 360;
   const [orthogonal, setOrthogonal] = useState(true);
   const [launchDialog, setLaunchDialog] = useState<
     "guides" | "replicate" | "nodes" | "new-project" | null
@@ -443,6 +453,8 @@ export default function App() {
     current.current = project;
     dispatch({ type: "reset", project });
     setLaunchDialog(null);
+    setLaunchSection("");
+    setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
     setPending(null);
     setPlane("XY");
@@ -520,6 +532,11 @@ export default function App() {
         setTimeout(() => void save(), 0);
         return;
       }
+      if (e.key === "Escape" && tool === "member") {
+        changeTool("select");
+        setSelection([]);
+        return;
+      }
       if ((e.target as HTMLElement).closest("input,textarea,select,button"))
         return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -543,6 +560,23 @@ export default function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  const placeMember = (from: Point3, to: Point3) => {
+    if (!validRoll) {
+      setMessage("Informe uma rotação entre −360° e 360° para lançar a barra.");
+      return;
+    }
+    let memberId = "";
+    let end = to;
+    const error = edit((draft) => {
+      const bar = addMember(draft, from, to, { sectionId, roll });
+      memberId = bar.id;
+      end = draft.nodes.find((node) => node.id === bar.end)!;
+    });
+    if (!error) {
+      selectObject({ kind: "member", id: memberId });
+      setPending(memberMode === "chain" ? end : null);
+    }
+  };
   const onPoint = (point: Point3) => {
     if (tool === "node") {
       let id = "";
@@ -557,17 +591,17 @@ export default function App() {
       setPending(point);
       return;
     }
+    if (tool === "member") {
+      placeMember(pending, point);
+      return;
+    }
     let id = "";
-    const error = edit((p) => {
-      id =
-        tool === "slab"
-          ? addSlab(p, activeGuide.id, pending, point).id
-          : addMember(p, pending, point).id;
+    const error = edit((draft) => {
+      id = addSlab(draft, activeGuide.id, pending, point).id;
     });
     if (!error) {
-      selectObject({ kind: tool, id });
-      setPending(null);
-      if (tool === "slab") setTool("select");
+      selectObject({ kind: "slab", id });
+      changeTool("select");
     }
   };
   const selectPlane = () => {
@@ -851,6 +885,53 @@ export default function App() {
               </div>
               <small>LANÇAMENTO</small>
             </div>
+            {tool === "member" && (
+              <div
+                className="member-launch"
+                role="group"
+                aria-label="Lançamento de barras"
+              >
+                <label>
+                  Traçado
+                  <select
+                    value={memberMode}
+                    onChange={(e) => {
+                      setPending(null);
+                      setMemberMode(e.target.value as typeof memberMode);
+                    }}
+                  >
+                    <option value="single">Dois pontos</option>
+                    <option value="chain">Em cadeia</option>
+                    <option value="span">Vão entre eixos</option>
+                  </select>
+                </label>
+                <label>
+                  Seção ativa
+                  <select
+                    value={sectionId}
+                    onChange={(e) => setLaunchSection(e.target.value)}
+                  >
+                    {p.sections.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {spatial && (
+                  <label>
+                    Rotação local (°)
+                    <input
+                      inputMode="decimal"
+                      aria-invalid={!validRoll}
+                      value={rollText}
+                      onChange={(e) => setRollText(e.target.value)}
+                    />
+                  </label>
+                )}
+                {!validRoll && <span role="alert">Use −360° a 360°.</span>}
+              </div>
+            )}
             <div className="ribbon-group loads-group">
               <label>
                 Padrão de cargas
@@ -1261,16 +1342,20 @@ export default function App() {
                   : selection.length
               }
               onPlane={(kind) => {
+                setPending(null);
                 setPlane(kind);
                 setGuide("");
                 if (tool === "slab") changeTool("select");
               }}
               onGuide={(id) => {
                 setGuide(id);
-                if (tool === "slab") setPending(null);
+                setPending(null);
               }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
-              editGuides={() => setLaunchDialog("guides")}
+              editGuides={() => {
+                setPending(null);
+                setLaunchDialog("guides");
+              }}
               selectPlane={selectPlane}
               replicate={() => setLaunchDialog("replicate")}
               connect={connect}
@@ -1283,6 +1368,7 @@ export default function App() {
               orthogonal={orthogonal}
               selection={selection}
               tool={tool}
+              quick={tool === "member" && memberMode === "span"}
               result={result}
               envelope={
                 showEnvelope && envelopeResult && section
@@ -1296,6 +1382,7 @@ export default function App() {
               display={visibleDisplay}
               slabMap={showSlabMap}
               patternId={patternId}
+              onSpan={placeMember}
               pending={pending}
               onPoint={onPoint}
               onSelect={selectObject}
@@ -1417,7 +1504,9 @@ export default function App() {
             : pending
               ? "Marque a segunda extremidade · Esc para cancelar"
               : tool === "member"
-                ? "Marque a primeira extremidade da barra"
+                ? memberMode === "span"
+                  ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
+                  : "Marque a primeira extremidade da barra"
                 : tool === "node"
                   ? "Clique na malha para inserir um nó"
                   : selection.length > 1

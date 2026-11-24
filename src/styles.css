@@ -629,6 +629,21 @@ button.primary {
   background: transparent;
   max-width: 195px;
 }
+.drawing-span { cursor: crosshair; }
+.elevation:has(.drawing-span, .drawing-member) .empty-canvas { display: none; }
+.ribbon:has(.member-launch) { overflow-x: auto; }
+.member-launch {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line-strong);
+}
+.ribbon .member-launch label { white-space: nowrap; }
+.ribbon .member-launch select { min-width: 0; width: 15ch; }
+.member-launch input { width: 8ch; font-size: 11px; }
+.member-launch [role="alert"] { color: var(--danger); font-size: 11px; }
+
 .plane-tools {
   display: flex;
   flex-wrap: wrap;

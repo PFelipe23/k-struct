@@ -24,6 +24,7 @@ import type {
   MemberEnvelopeResult,
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
+import { pickGuideSpan } from "../domain/guideSpan";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 
@@ -36,6 +37,8 @@ interface Props {
   orthogonal: boolean;
   selection: SelectedObject[];
   tool: Tool;
+  quick: boolean;
+  onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
     result: MemberEnvelopeResult;
@@ -61,7 +64,9 @@ export default function WorkPlaneView({
   plane,
   orthogonal,
   selection,
-  tool,
+  tool: activeTool,
+  quick,
+  onSpan,
   result,
   envelope,
   display,
@@ -78,11 +83,21 @@ export default function WorkPlaneView({
   const pan = useRef<{ x: number; y: number; u: number; v: number } | null>(
     null,
   );
+  const [spanPointer, setSpanPointer] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  // The span picker handles its own hits and does not request point placement.
+  const tool = quick ? "select" : activeTool;
+  useEffect(() => {
+    setSpanPointer(null);
+    if (quick) setCursor(null);
+  }, [quick, plane.kind, plane.offset, project.id]);
   const [labels, setLabels] = useState(true);
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
-  const uGuides = spatial ? project.guides[axisU] : [];
-  const vGuides = spatial ? project.guides[axisV] : [];
+  const uGuides = spatial || quick ? project.guides[axisU] : [];
+  const vGuides = spatial || quick ? project.guides[axisV] : [];
   const nodes = project.nodes.filter((n) => onPlane(n, plane));
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const bars = project.members.filter(
@@ -248,6 +263,20 @@ export default function WorkPlaneView({
       (_, i) => start + i * gridStep,
     );
   };
+  function pointerPosition(event: MouseEvent<SVGSVGElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+  function spanAt({ x, y }: { x: number; y: number }) {
+    return pickGuideSpan(
+      project.guides,
+      plane,
+      (x - sx(0)) / camera.scale,
+      (sy(0) - y) / camera.scale,
+      8 / camera.scale,
+    );
+  }
+  const hoverSpan = quick && spanPointer ? spanAt(spanPointer) : null;
   const arrow = (x: number, y: number, dx: number, dy: number, key: string) => (
     <line
       key={key}
@@ -306,10 +335,32 @@ export default function WorkPlaneView({
       </div>
       <svg
         ref={ref}
-        className={`drawing drawing-${tool}`}
+        className={`drawing drawing-${quick ? "span" : tool}`}
         aria-label={`Área de lançamento ${plane.kind}`}
         role="application"
         tabIndex={0}
+        onPointerMoveCapture={(event) => {
+          if (!quick || pan.current) return;
+          event.stopPropagation();
+          setSpanPointer(pointerPosition(event));
+        }}
+        onPointerOutCapture={(event) => {
+          if (
+            quick &&
+            !event.currentTarget.contains(
+              event.relatedTarget instanceof Node ? event.relatedTarget : null,
+            )
+          )
+            setSpanPointer(null);
+        }}
+        onClickCapture={(event) => {
+          if (!quick) return;
+          event.stopPropagation();
+          const point = pointerPosition(event);
+          setSpanPointer(point);
+          const span = spanAt(point);
+          if (span) onSpan(...span);
+        }}
         onWheel={(e) => {
           e.preventDefault();
           setCamera((c) => ({
@@ -432,6 +483,19 @@ export default function WorkPlaneView({
             </g>
           ))}
         </g>
+        {hoverSpan && (
+          <line
+            aria-label="Vão a lançar"
+            pointerEvents="none"
+            x1={sx(hoverSpan[0][axisU])}
+            y1={sy(hoverSpan[0][axisV])}
+            x2={sx(hoverSpan[1][axisU])}
+            y2={sy(hoverSpan[1][axisV])}
+            stroke="var(--geometry-selected)"
+            strokeWidth={6}
+            strokeDasharray="8 3"
+          />
+        )}
         {slab && (
           <SlabPlan
             slab={slab}
