@@ -68,6 +68,52 @@ O benchmark usa um pórtico espacial em L com viga de 4 m, pilar engastado de 3 
 
 O teste plano verifica a conservação do sinal e o desempate pela ordem de seleção. O Playwright verifica escolha das combinações, estação selecionada no diagrama, tabela, CSV, reabertura e invalidação. Os limites são avaliados nas estações da malha e ligados por segmentos no diagrama.
 
+## Placa retangular simplesmente apoiada
+
+O caso usa uma placa isolada no plano XY, de 4,00 m em X por 3,00 m em Y, com 0,10 m de espessura. O material elástico isotrópico `IsoLE` tem E = 30 GPa e ν = 0,20. A seção `SimpleCS` fornece a espessura. A pressão de −5.000 N/m² em Z resulta em −60.000 N. O caso tem um passo de `StaticStructural`, com a pressão constante durante o passo. A densidade de 2.500 kg/m³ consta no material e o caso só aplica a pressão.
+
+### Elemento, malha e apoios
+
+O elemento `qdktplate` é o quadrilátero de quatro nós da teoria discreta de Kirchhoff (QDKT). A relação entre o vão menor e a espessura é 30, adequada ao caso de placa delgada. A formulação elimina a deformação por cisalhamento transversal, como a solução de Kirchhoff–Love usada na referência. O domínio `2dMindlinPlate` declara os três graus de liberdade por nó. A formulação de flexão vem do registro `qdktplate` e usa quatro pontos de Gauss. [Manual da tag v3.0](https://github.com/oofem/oofem/blob/v3.0/doc/elementlibmanual/elementlibmanual.tex#L842) · [Registro e implementação do QDKT](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/Plates/qdkt.C#L56)
+
+Cada célula retangular da grade é um elemento. O gerador numera nós e elementos em linhas, primeiro em X e depois em Y. Em cada célula, os vértices são nordeste, noroeste, sudoeste e sudeste, em sentido anti-horário visto de +Z. Suas coordenadas naturais são `(+1,+1)`, `(-1,+1)`, `(-1,-1)` e `(+1,-1)`. `ConstantSurfaceLoad` usa eixos globais (`csType 0`) e `dofs 3 3 4 5 components 3 -5000 0 0`. O conjunto `elementboundaries` contém o par `(ID do elemento, face 1)` para cada célula, de modo que a carga seja integrada sobre toda a área. [Gerador da entrada](../tests/fixtures/plate-benchmark.ts)
+
+| Borda           | Graus de liberdade prescritos | Rotação livre |
+| --------------- | ----------------------------- | ------------- |
+| X = 0 e X = 4 m | Uz = 0 (GL 3), Rx = 0 (GL 4)  | Ry (GL 5)     |
+| Y = 0 e Y = 3 m | Uz = 0 (GL 3), Ry = 0 (GL 5)  | Rx (GL 4)     |
+
+Nos quatro cantos, os três graus de liberdade são prescritos. A referência impõe `w = 0` e momento normal à borda `Mnn = 0`. Na cinemática de Kirchhoff, `Rx = ∂w/∂y` e `Ry = −∂w/∂x`. A rotação prescrita em cada borda corresponde à derivada tangencial, que se anula onde `w = 0`. A rotação livre deixa a inclinação normal variar, permitindo a condição natural de momento normal nulo. Os apoios são bilaterais e as reações são somadas com sinal.
+
+### Referência independente e recuperação
+
+O cálculo de Navier resolve `D ∇⁴w = pz`, com `D = Eh³/[12(1 − ν²)]`. Para `a = 4 m`, `b = 3 m`, `α = mπ/a` e `β = nπ/b`, expande a pressão uniforme em senos com coeficientes `16 pz/(π²mn)` para índices ímpares. Cada coeficiente de pressão é dividido por `D(α² + β²)²` para obter a amplitude de deslocamento. As derivadas `wxx = ∂²w/∂x²` e `wyy = ∂²w/∂y²` dão `Mx = D(wxx + νwyy)` e `My = D(wyy + νwxx)`. A soma usa 256 termos ímpares em cada direção. Ao dobrar de 128 para 256, a flecha muda em menos de 4 × 10⁻¹² mm e cada momento em menos de 3,0 × 10⁻⁷ kN·m/m. [Cálculo de referência](../tests/fixtures/plate-navier.ts) · [Referência sobre a solução de Navier](https://doi.org/10.1155/2017/6516471)
+
+O ponto de consulta é sempre o nó em (2,00 m, 1,50 m, 0), comum aos quatro elementos adjacentes. A flecha vem da linha `dof 3 d` do nó, em metros, com Z positivo para cima. O equilíbrio usa as linhas `Node … iDof 3 reaction` dos nós das bordas, em newtons.
+
+Para a issue #10, associe cada bloco `element <rótulo> (<número interno>)` ao ID da célula usando o rótulo. Em cada linha `stresses` dos pontos `GP 1.1` a `GP 1.4`, leia as colunas 4 e 5, contando a partir do primeiro número. Elas contêm os momentos de flexão por unidade de largura, em N·m/m, nas seções de normais X e Y. Inverta os sinais de ambas as colunas para obter Mx e My positivos em flexão sagente. Os pontos naturais, na ordem da saída, são `(-g,-g)`, `(-g,+g)`, `(+g,-g)` e `(+g,+g)`, com `g = 1/√3`. Para recuperar os momentos no nó central, extrapole bilinearmente os quatro valores de cada célula até seu vértice central `(ξ, η)` e faça a média das quatro estimativas. Para cada ponto de sinais `(sx, sy)`, o peso da extrapolação é `(1 + sx ξ/g)(1 + sy η/g)/4`. [Ordem dos pontos e quadratura](https://github.com/oofem/oofem/blob/v3.0/src/core/gaussintegrationrule.C#L102)
+
+### Resultados e reprodução
+
+Resultados do OOFEM 3.0 no commit `214b161ed3acb471f2d0104b004c37fd73bafaa2`. Os erros são relativos absolutos à referência de Navier.
+
+| Malha X × Y | Elementos | Σ Rz (kN) |     Uz (mm) | Mx (kN·m/m) | My (kN·m/m) | Erro Uz (%) | Erro Mx (%) | Erro My (%) |
+| ----------- | --------: | --------: | ----------: | ----------: | ----------: | ----------: | ----------: | ----------: |
+| 8 × 6       |        48 |  60,00020 | −1,02668720 |    1,997732 |    3,127024 |      0,4106 |      0,5840 |      1,7010 |
+| 16 × 12     |       192 |  60,00000 | −1,02991662 |    1,989041 |    3,087367 |      0,0974 |      0,1464 |      0,4112 |
+| 32 × 24     |       768 |  60,00014 | −1,03067275 |    1,986897 |    3,077772 |      0,0240 |      0,0385 |      0,0991 |
+| Navier      |         — |         — | −1,03092043 |    1,986133 |    3,074724 |           — |           — |           — |
+
+A regressão admite um resíduo de equilíbrio menor que 3 N (0,005% da carga total). A soma de meia unidade na última casa de cada reação impressa chega a 2,44 N entre as três malhas. Para as grandezas centrais, o erro deve cair pelo menos pela metade a cada refinamento. Os erros medidos caem por fatores próximos a quatro. Na malha final, os limites são 0,05% para Uz, 0,10% para Mx e 0,20% para My. Esses limites têm margem sobre o erro de discretização medido e são superiores aos erros de truncamento da série e de arredondamento da saída. [Teste de regressão](../tests/plate.integration.test.ts)
+
+Use o executável fixado pelo KStruct. No Linux, depois de `npm ci` e `npm run oofem:stage`, o teste focado resolve as três malhas e imprime os resultados e os erros. [Configuração do OOFEM](OOFEM.md)
+
+```sh
+OOFEM_BIN="$PWD/.oofem-dist/build/bin/oofem" npm test -- tests/plate.integration.test.ts
+```
+
+No Windows, use o caminho absoluto do `oofem.exe` em `OOFEM_BIN`. A regressão integra `npm run check` e é explicitamente ignorada se `OOFEM_BIN` estiver ausente.
+
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, placas com deformação por cisalhamento transversal, cascas, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
