@@ -15,7 +15,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v6, com migração dos projetos v1 a v5 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v7, com migração dos projetos v1 a v6 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -66,6 +66,8 @@ Em **Modelo** → **Tabela de nós**, edite as coordenadas em metros de vários 
 Em **Exibição → Arranjo de vistas**, escolha **Planta + elevação + perspectiva** para acompanhar um pórtico espacial nos três painéis. Clique ou dê foco ao painel em que quer trabalhar. A faixa acima do desenho identifica a vista ativa e sua cota. Os controles de plano e eixo atuam nessa vista. Zoom, enquadramento, nomes, grelha e cargas podem ser ajustados em cada painel. Trocar de vista cancela o trecho em andamento e preserva as peças já lançadas. No projeto plano, use a elevação XZ sozinha ou ao lado da perspectiva.
 
 ![Planta do segundo pavimento, elevação XZ e perspectiva do pórtico com a viga B3 selecionada](docs/images/vistas-simultaneas.webp)
+
+No modo **Selecionar** das vistas 2D, arraste da esquerda para a direita para conter objetos inteiros ou da direita para a esquerda para incluir os que cruzam a janela. `Ctrl` ou `Shift` adiciona o conjunto. `Esc` cancela o arraste. Em **Seleção e grupos**, combine tipo, pavimento, material e seção. Um pavimento inclui barras com as duas extremidades na mesma cota. Escolha **Aplicar critérios**, dê um nome e use **Salvar seleção como grupo** para recuperar as mesmas peças depois de reabrir o arquivo. Os grupos guardam os IDs dos objetos.
 
 Em **Exibição → Tema**, escolha **Claro** ou **Escuro**. A primeira abertura usa o tema escuro. A escolha é guardada nas preferências locais e vale para a interface e as duas vistas, inclusive durante a consulta de resultados.
 

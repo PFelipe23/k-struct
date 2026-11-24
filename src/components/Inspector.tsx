@@ -505,6 +505,27 @@ export default function Inspector({
         )}
         {member && (
           <>
+            <label className="stack-field">
+              Nome da barra
+              <input
+                key={member.name}
+                defaultValue={member.name}
+                maxLength={120}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                onBlur={(e) => {
+                  const name = e.currentTarget.value.trim();
+                  if (!name || name === member.name) {
+                    e.currentTarget.value = member.name;
+                    return;
+                  }
+                  edit((draft) => {
+                    draft.members.find((m) => m.id === member.id)!.name = name;
+                  });
+                }}
+              />
+            </label>
             <h4>Conectividade</h4>
             <div className="property-line">
               <span>Início → fim</span>

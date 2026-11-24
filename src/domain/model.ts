@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { selectionKey } from "./selection";
 import {
   distance,
   interiorParameter,
@@ -204,7 +205,7 @@ const quadProjectV5 = triangleProjectV5.extend({
     .min(1)
     .max(100),
 });
-export const projectSchema = triangleProjectV5.extend({
+const projectV6 = triangleProjectV5.extend({
   schemaVersion: z.literal(6),
   // A v5 panel could have a free elevation in addition to 40 named levels.
   guides: spatialSchema.shape.guides.extend({
@@ -213,6 +214,25 @@ export const projectSchema = triangleProjectV5.extend({
   slabs: z
     .array(slabSchema.extend({ formulation: z.enum(["dkt", "qdkt"]) }))
     .max(1),
+});
+
+const objectRef = z
+  .object({ kind: z.enum(["node", "member", "slab"]), id })
+  .strict();
+const selectionGroups = z
+  .array(
+    z
+      .object({
+        id,
+        name: z.string().trim().min(1).max(120),
+        objects: z.array(objectRef).max(2001),
+      })
+      .strict(),
+  )
+  .max(100);
+export const projectSchema = projectV6.extend({
+  schemaVersion: z.literal(7),
+  selectionGroups,
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -225,7 +245,7 @@ export type Slab = Project["slabs"][number];
 export type SlabEdge = keyof Slab["supports"];
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
 export type UniformLoad = Project["loadPatterns"][number]["uniform"][number];
-export type SelectedObject = { kind: "node" | "member" | "slab"; id: string };
+export type SelectedObject = z.infer<typeof objectRef>;
 export type Selection = SelectedObject | null;
 export const uid = () => crypto.randomUUID();
 export const free = () => ({
@@ -272,7 +292,8 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 6,
+    schemaVersion: 7,
+    selectionGroups: [],
     id: uid(),
     name: "Projeto sem título",
     units: "N-m-kg-s",
@@ -344,18 +365,46 @@ export function beamExample(): Project {
   return p;
 }
 
+export const projectFileLimit = 5_000_000;
+function exceedsFileLimit(json: string) {
+  return (
+    json.length > projectFileLimit ||
+    (json.length * 3 > projectFileLimit &&
+      new TextEncoder().encode(json).length > projectFileLimit)
+  );
+}
 export function serializeProject(p: Project) {
-  return JSON.stringify(projectSchema.parse(p), null, 2);
+  const data = projectSchema.parse(p);
+  const pretty = JSON.stringify(data, null, 2);
+  if (!exceedsFileLimit(pretty)) return pretty;
+  const compact = JSON.stringify(data);
+  if (exceedsFileLimit(compact))
+    throw new Error("O projeto excede o limite de 5 MB.");
+  return compact;
 }
 
 export function parseProject(source: string): Project {
-  if (source.length > 5_000_000)
+  if (exceedsFileLimit(source))
     throw new Error("O arquivo excede o limite inicial de 5 MB.");
   let value: unknown;
   try {
     value = JSON.parse(source);
   } catch {
     throw new Error("O arquivo não contém um JSON válido.");
+  }
+  // Preserve explicit object references when a legacy file already includes groups.
+  let oldGroups: unknown = [];
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    typeof value.schemaVersion === "number" &&
+    value.schemaVersion < 7 &&
+    "selectionGroups" in value
+  ) {
+    const { selectionGroups, ...model } = value;
+    oldGroups = selectionGroups;
+    value = model;
   }
   const legacy = legacySchema.safeParse(value);
   if (legacy.success) {
@@ -454,14 +503,46 @@ export function parseProject(source: string): Project {
       })),
     };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 6
+  ) {
+    const old = projectV6.safeParse(value);
+    if (old.success) {
+      const p = old.data;
+      const groups = selectionGroups.safeParse(oldGroups);
+      if (!groups.success)
+        throw new Error("Formato de grupo de seleção inválido.");
+      const ids = projectObjectIds(p);
+      value = {
+        ...p,
+        schemaVersion: 7,
+        selectionGroups: groups.data.map((g) => ({
+          ...g,
+          objects: g.objects.filter((o) => ids[o.kind].has(o.id)),
+        })),
+      };
+    }
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 6, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 7, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
+  if (source.length * 3 > projectFileLimit) serializeProject(parsed.data);
   return parsed.data;
+}
+
+function projectObjectIds(p: Pick<Project, "nodes" | "members" | "slabs">) {
+  return {
+    node: new Set(p.nodes.map((n) => n.id)),
+    member: new Set(p.members.map((m) => m.id)),
+    slab: new Set(p.slabs.map((s) => s.id)),
+  };
 }
 
 export function referenceErrors(p: Project): string[] {
@@ -476,10 +557,27 @@ export function referenceErrors(p: Project): string[] {
     p.analysisCases,
     p.resultCombinations,
     p.resultEnvelopes,
+    p.selectionGroups,
     ...Object.values(p.guides),
   ]) {
     if (new Set(list.map((v) => v.id)).size !== list.length)
       errors.push("Há identificadores duplicados no projeto.");
+  }
+  if (p.selectionGroups.length) {
+    const ids = projectObjectIds(p);
+    const names = new Set<string>();
+    for (const group of p.selectionGroups) {
+      const name = group.name.trim().toLocaleLowerCase("pt-BR");
+      if (names.has(name))
+        errors.push(`Já existe um grupo com o nome “${group.name}”.`);
+      names.add(name);
+      if (group.objects.some((o) => !ids[o.kind].has(o.id)))
+        errors.push(`Grupo ${group.name} contém um objeto inexistente.`);
+      if (
+        new Set(group.objects.map(selectionKey)).size !== group.objects.length
+      )
+        errors.push(`Grupo ${group.name} contém um objeto repetido.`);
+    }
   }
   for (const guides of Object.values(p.guides)) {
     if (
@@ -765,6 +863,9 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   });
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
+  const removed = { node: nodes, member: bars, slab: slabs };
+  for (const group of p.selectionGroups)
+    group.objects = group.objects.filter((o) => !removed[o.kind].has(o.id));
   for (const pat of p.loadPatterns) {
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
