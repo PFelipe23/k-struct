@@ -70,7 +70,6 @@ import WorkPlaneView, {
   additiveSelection,
   type Display,
   type Tool,
-  type MemberMode,
 } from "./components/WorkPlaneView";
 import {
   GuideEditor,
@@ -146,7 +145,9 @@ export default function App() {
     [tool, setTool] = useState<Tool>("select");
   const [preferredPlane, setPlane] = useState<PlaneKind>("XY");
   const [guideId, setGuide] = useState(slab?.levelId ?? "");
-  const [memberMode, setMemberMode] = useState<MemberMode>("single");
+  const [memberMode, setMemberMode] = useState<"single" | "chain" | "span">(
+    "single",
+  );
   const [launchSection, setLaunchSection] = useState("");
   const [rollText, setRollText] = useState("0");
   const sectionId =
@@ -1325,7 +1326,7 @@ export default function App() {
                   value={memberMode}
                   onChange={(e) => {
                     setPending(null);
-                    setMemberMode(e.target.value as MemberMode);
+                    setMemberMode(e.target.value as typeof memberMode);
                   }}
                 >
                   <option value="single">Dois pontos</option>
@@ -1366,7 +1367,7 @@ export default function App() {
               plane={plane}
               orthogonal={orthogonal}
               selection={selection}
-              tool={tool}
+              tool={tool === "member" && memberMode === "span" ? "span" : tool}
               result={result}
               envelope={
                 showEnvelope && envelopeResult && section
@@ -1380,7 +1381,6 @@ export default function App() {
               display={visibleDisplay}
               slabMap={showSlabMap}
               patternId={patternId}
-              memberMode={memberMode}
               onSpan={placeMember}
               pending={pending}
               onPoint={onPoint}
@@ -1504,7 +1504,7 @@ export default function App() {
               ? "Marque a segunda extremidade · Esc para cancelar"
               : tool === "member"
                 ? memberMode === "span"
-                  ? "Aponte para o interior de um vão sobre um eixo"
+                  ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
                   : "Marque a primeira extremidade da barra"
                 : tool === "node"
                   ? "Clique na malha para inserir um nó"

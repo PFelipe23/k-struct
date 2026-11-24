@@ -28,7 +28,6 @@ import { pickGuideSpan } from "../domain/guideSpan";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 
-export type MemberMode = "single" | "chain" | "span";
 export type Tool = "select" | "node" | "member" | "slab";
 export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
@@ -37,7 +36,8 @@ interface Props {
   plane: WorkPlane;
   orthogonal: boolean;
   selection: SelectedObject[];
-  tool: Tool;
+  tool: Tool | "span";
+  onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
     result: MemberEnvelopeResult;
@@ -48,8 +48,6 @@ interface Props {
   slabMap: SlabMap | null;
   patternId: string;
   pending: Point3 | null;
-  memberMode: MemberMode;
-  onSpan: (from: Point3, to: Point3) => void;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
 }
@@ -66,14 +64,13 @@ export default function WorkPlaneView({
   orthogonal,
   selection,
   tool,
+  onSpan,
   result,
   envelope,
   display,
   slabMap,
   patternId,
   pending,
-  memberMode,
-  onSpan,
   onPoint,
   onSelect,
 }: Props) {
@@ -84,10 +81,18 @@ export default function WorkPlaneView({
   const pan = useRef<{ x: number; y: number; u: number; v: number } | null>(
     null,
   );
+  const [spanPointer, setSpanPointer] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const quick = tool === "span";
+  useEffect(() => {
+    setSpanPointer(null);
+    if (quick) setCursor(null);
+  }, [quick, plane.kind, plane.offset, project.id]);
   const [labels, setLabels] = useState(true);
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
-  const quick = tool === "member" && memberMode === "span";
   const uGuides = spatial || quick ? project.guides[axisU] : [];
   const vGuides = spatial || quick ? project.guides[axisV] : [];
   const nodes = project.nodes.filter((n) => onPlane(n, plane));
@@ -157,10 +162,7 @@ export default function WorkPlaneView({
     fit();
     setCursor(null);
   }, [project.id, plane.kind]);
-  useEffect(
-    () => setCursor(null),
-    [plane.offset, tool, memberMode, camera, size],
-  );
+  useEffect(() => setCursor(null), [plane.offset]);
 
   const sx = useCallback(
     (u: number) => size.width / 2 + (u - camera.u) * camera.scale,
@@ -180,7 +182,6 @@ export default function WorkPlaneView({
       (event.clientX - rect.left - size.width / 2) / camera.scale + camera.u;
     const v =
       -(event.clientY - rect.top - size.height / 2) / camera.scale + camera.v;
-    if (quick) return { u, v };
     const aligned =
       pending &&
       tool === "member" &&
@@ -217,10 +218,6 @@ export default function WorkPlaneView({
     };
     return { u: lockU ?? snap(u, uGuides), v: lockV ?? snap(v, vGuides) };
   };
-
-  const guideSpan = ({ u, v }: UV) =>
-    pickGuideSpan(project.guides, plane, u, v, 8 / camera.scale);
-  const hoverSpan = quick && cursor ? guideSpan(cursor) : null;
 
   const allStations = result ? Object.values(result.members).flat() : [];
   const dofU = `u${axisU}` as const,
@@ -263,6 +260,20 @@ export default function WorkPlaneView({
       (_, i) => start + i * gridStep,
     );
   };
+  function pointerPosition(event: MouseEvent<SVGSVGElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+  function spanAt({ x, y }: { x: number; y: number }) {
+    return pickGuideSpan(
+      project.guides,
+      plane,
+      (x - sx(0)) / camera.scale,
+      (sy(0) - y) / camera.scale,
+      8 / camera.scale,
+    );
+  }
+  const hoverSpan = quick && spanPointer ? spanAt(spanPointer) : null;
   const arrow = (x: number, y: number, dx: number, dy: number, key: string) => (
     <line
       key={key}
@@ -325,6 +336,28 @@ export default function WorkPlaneView({
         aria-label={`Área de lançamento ${plane.kind}`}
         role="application"
         tabIndex={0}
+        onPointerMoveCapture={(event) => {
+          if (!quick || pan.current) return;
+          event.stopPropagation();
+          setSpanPointer(pointerPosition(event));
+        }}
+        onPointerOutCapture={(event) => {
+          if (
+            quick &&
+            !event.currentTarget.contains(
+              event.relatedTarget instanceof Node ? event.relatedTarget : null,
+            )
+          )
+            setSpanPointer(null);
+        }}
+        onClickCapture={(event) => {
+          if (!quick) return;
+          event.stopPropagation();
+          const point = pointerPosition(event);
+          setSpanPointer(point);
+          const span = spanAt(point);
+          if (span) onSpan(...span);
+        }}
         onWheel={(e) => {
           e.preventDefault();
           setCamera((c) => ({
@@ -367,12 +400,7 @@ export default function WorkPlaneView({
         onPointerLeave={() => setCursor(null)}
         onClick={(e) => {
           if (tool === "select") onSelect(null, additiveSelection(e));
-          else if (quick) {
-            const cursor = point(e);
-            setCursor(cursor);
-            const span = guideSpan(cursor);
-            if (span) onSpan(...span);
-          } else {
+          else {
             const { u, v } = point(e);
             onPoint(planePoint(u, v, plane));
           }
@@ -452,6 +480,19 @@ export default function WorkPlaneView({
             </g>
           ))}
         </g>
+        {hoverSpan && (
+          <line
+            aria-label="Vão a lançar"
+            pointerEvents="none"
+            x1={sx(hoverSpan[0][axisU])}
+            y1={sy(hoverSpan[0][axisV])}
+            x2={sx(hoverSpan[1][axisU])}
+            y2={sy(hoverSpan[1][axisV])}
+            stroke="var(--geometry-selected)"
+            strokeWidth={6}
+            strokeDasharray="8 3"
+          />
+        )}
         {slab && (
           <SlabPlan
             slab={slab}
@@ -741,20 +782,7 @@ export default function WorkPlaneView({
             </g>
           );
         })}
-        {hoverSpan && (
-          <line
-            aria-label="Vão a lançar"
-            pointerEvents="none"
-            x1={sx(hoverSpan[0][axisU])}
-            y1={sy(hoverSpan[0][axisV])}
-            x2={sx(hoverSpan[1][axisU])}
-            y2={sy(hoverSpan[1][axisV])}
-            stroke="var(--geometry-selected)"
-            strokeWidth={5}
-            strokeDasharray="8 3"
-          />
-        )}
-        {cursor && !quick && tool !== "select" && (
+        {cursor && tool !== "select" && (
           <g pointerEvents="none">
             <path
               d={`M${sx(cursor.u) - 8} ${sy(cursor.v)}h16m-8-8v16`}
@@ -778,8 +806,7 @@ export default function WorkPlaneView({
               y={Math.min(sy(pending.y), sy(cursor.v))}
               width={Math.abs(sx(pending.x) - sx(cursor.u))}
               height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)"
-              fillOpacity={0.16}
+              fill="var(--geometry-selected)" fillOpacity={0.16}
               stroke="var(--geometry-selected)"
               strokeDasharray="6 4"
               pointerEvents="none"
@@ -796,32 +823,27 @@ export default function WorkPlaneView({
             />
           ))}
       </svg>
-      {!project.nodes.length &&
-        !project.slabs.length &&
-        tool !== "member" &&
-        tool !== "slab" && (
-          <div className="empty-canvas">
-            <h2>Lance a primeira barra</h2>
-            <p>
-              Ative <b>Barra</b> e marque duas extremidades na malha.
-            </p>
-            <div>
-              <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
-            </div>
+      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
+        <div className="empty-canvas">
+          <h2>Lance a primeira barra</h2>
+          <p>
+            Ative <b>Barra</b> e marque duas extremidades na malha.
+          </p>
+          <div>
+            <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
           </div>
-        )}
+        </div>
+      )}
       <div className="view-foot">
         <span>
           {normal.toUpperCase()} = {plane.offset} m <b>·</b> Snap 0,50 m
         </span>
         <span>
-          {quick && !hoverSpan
-            ? "Aproxime o cursor de um eixo, entre dois cruzamentos."
-            : cursor
-              ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
-              : display === "deformed"
-                ? `Deformada ×${deformationScale.toFixed(1)}`
-                : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
+          {cursor
+            ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
+            : display === "deformed"
+              ? `Deformada ×${deformationScale.toFixed(1)}`
+              : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
         </span>
       </div>
     </section>
