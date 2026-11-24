@@ -31,9 +31,6 @@ import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 
-export type Tool = "select" | "node" | "member" | "slab";
-export type Display = "model" | "deformed" | MemberForceComponent;
-type UV = { u: number; v: number };
 export type PlaneCamera = {
   projectId: string;
   kind: WorkPlane["kind"];
@@ -41,10 +38,11 @@ export type PlaneCamera = {
   v: number;
   scale: number;
 };
-interface Props extends LayerControls {
-  active: boolean;
-  savedCamera: RefObject<PlaneCamera | null>;
-  onActivate: () => void;
+
+export type Tool = "select" | "node" | "member" | "slab";
+export type Display = "model" | "deformed" | MemberForceComponent;
+type UV = { u: number; v: number };
+interface Props {
   project: Project;
   plane: WorkPlane;
   orthogonal: boolean;
@@ -61,6 +59,9 @@ interface Props extends LayerControls {
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
+  active: boolean;
+  savedCamera: RefObject<PlaneCamera | null>;
+  onActivate: () => void;
   pending: Point3 | null;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -93,7 +94,7 @@ export default function WorkPlaneView({
   pending,
   onPoint,
   onSelect,
-}: Props) {
+}: Props & LayerControls) {
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 700, height: 460 });
   const [camera, setCamera] = useState({ u: 3, v: 1.5, scale: 65 });
@@ -193,13 +194,6 @@ export default function WorkPlaneView({
     else fit();
     setCursor(null);
   }, [project.id, plane.kind]);
-  useEffect(() => {
-    savedCamera.current = {
-      projectId: project.id,
-      kind: plane.kind,
-      ...camera,
-    };
-  }, [camera, project.id, plane.kind, savedCamera]);
   useEffect(() => setCursor(null), [plane.offset]);
 
   const sx = useCallback(
@@ -324,6 +318,13 @@ export default function WorkPlaneView({
       markerEnd={`url(#${markerId})`}
     />
   );
+  useEffect(() => {
+    savedCamera.current = {
+      projectId: project.id,
+      kind: plane.kind,
+      ...camera,
+    };
+  }, [camera, project.id, plane.kind, savedCamera]);
   const heading = plane.kind === "XY" ? "Planta XY" : `Elevação ${plane.kind}`;
 
   return (
@@ -858,8 +859,7 @@ export default function WorkPlaneView({
               y={Math.min(sy(pending.y), sy(cursor.v))}
               width={Math.abs(sx(pending.x) - sx(cursor.u))}
               height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)"
-              fillOpacity={0.16}
+              fill="var(--geometry-selected)" fillOpacity={0.16}
               stroke="var(--geometry-selected)"
               strokeDasharray="6 4"
               pointerEvents="none"
