@@ -101,11 +101,13 @@ test("vão elevado destaca e cria o trecho 4–10 m uma única vez", async ({
   await expect(page.locator(".model-count")).toHaveText("0 nós · 0 barras");
   const mid = await position(page, 7, 0);
   await drawing(page).hover({ position: mid });
-  await expect(line).toBeVisible();
+  await expect(line).toHaveAttribute("stroke-width", "6");
   const a = await position(page, 4, 0),
     b = await position(page, 10, 0);
   expect(Number(await line.getAttribute("x1"))).toBeCloseTo(a.x, 4);
   expect(Number(await line.getAttribute("x2"))).toBeCloseTo(b.x, 4);
+  expect(Number(await line.getAttribute("y1"))).toBeCloseTo(a.y, 4);
+  expect(Number(await line.getAttribute("y2"))).toBeCloseTo(b.y, 4);
   await click(page, 7, 0);
   await click(page, 7, 0);
   await expect(page.getByRole("status")).toContainText("Já existe uma barra");

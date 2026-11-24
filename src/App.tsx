@@ -885,6 +885,53 @@ export default function App() {
               </div>
               <small>LANÇAMENTO</small>
             </div>
+            {tool === "member" && (
+              <div
+                className="member-launch"
+                role="group"
+                aria-label="Lançamento de barras"
+              >
+                <label>
+                  Traçado
+                  <select
+                    value={memberMode}
+                    onChange={(e) => {
+                      setPending(null);
+                      setMemberMode(e.target.value as typeof memberMode);
+                    }}
+                  >
+                    <option value="single">Dois pontos</option>
+                    <option value="chain">Em cadeia</option>
+                    <option value="span">Vão entre eixos</option>
+                  </select>
+                </label>
+                <label>
+                  Seção ativa
+                  <select
+                    value={sectionId}
+                    onChange={(e) => setLaunchSection(e.target.value)}
+                  >
+                    {p.sections.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {spatial && (
+                  <label>
+                    Rotação local (°)
+                    <input
+                      inputMode="decimal"
+                      aria-invalid={!validRoll}
+                      value={rollText}
+                      onChange={(e) => setRollText(e.target.value)}
+                    />
+                  </label>
+                )}
+                {!validRoll && <span role="alert">Use −360° a 360°.</span>}
+              </div>
+            )}
             <div className="ribbon-group loads-group">
               <label>
                 Padrão de cargas
@@ -1313,53 +1360,6 @@ export default function App() {
               replicate={() => setLaunchDialog("replicate")}
               connect={connect}
             />
-          )}
-          {tool === "member" && (
-            <div
-              className="member-launch"
-              role="group"
-              aria-label="Lançamento de barras"
-            >
-              <label>
-                Traçado
-                <select
-                  value={memberMode}
-                  onChange={(e) => {
-                    setPending(null);
-                    setMemberMode(e.target.value as typeof memberMode);
-                  }}
-                >
-                  <option value="single">Dois pontos</option>
-                  <option value="chain">Em cadeia</option>
-                  <option value="span">Vão entre eixos</option>
-                </select>
-              </label>
-              <label>
-                Seção ativa
-                <select
-                  value={sectionId}
-                  onChange={(e) => setLaunchSection(e.target.value)}
-                >
-                  {p.sections.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {spatial && (
-                <label>
-                  Rotação local (°)
-                  <input
-                    inputMode="decimal"
-                    aria-invalid={!validRoll}
-                    value={rollText}
-                    onChange={(e) => setRollText(e.target.value)}
-                  />
-                </label>
-              )}
-              {!validRoll && <span role="alert">Use −360° a 360°.</span>}
-            </div>
           )}
           <div className={`viewports ${dual ? "dual" : "single"}`}>
             <WorkPlaneView
