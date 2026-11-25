@@ -1,3 +1,4 @@
+import { rectangle } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   analysisErrors,
@@ -210,7 +211,7 @@ describe("modelos paramétricos (KS-06)", () => {
     project.nodes[1].restraints.uz = true;
     project.nodes[2].restraints.uz = true;
     project.nodes[1].x = 5;
-    project.sections[0].width = 0.25;
+    rectangle(project.sections[0]).width = 0.25;
     project.loadPatterns[0].uniform.push({
       ...uniformLoad(project.members[0].id),
       qz: -10000,

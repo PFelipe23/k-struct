@@ -1,3 +1,4 @@
+import { rectangle } from "./project-v8";
 import {
   createProject,
   free,
@@ -13,7 +14,8 @@ export function spatialBenchmark(): Project {
   const p = createProject("spatial");
   p.materials[0].E = model.e;
   p.materials[0].nu = model.nu;
-  [p.sections[0].width, p.sections[0].height] = model.section;
+  const section = rectangle(p.sections[0]);
+  [section.width, section.height] = model.section;
   p.nodes = model.nodes.map(([x, y, z], i) => {
     const id = `N${i + 1}`,
       fixed = model.fixed.includes(i);

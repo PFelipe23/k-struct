@@ -1,3 +1,5 @@
+import SectionPreview from "./SectionPreview";
+import { dimensions, geometryErrors, shapeNames } from "../domain/sections";
 import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -29,6 +31,7 @@ export function NumberField({
   min,
   max,
   integer = false,
+  validate,
 }: {
   label: string;
   value: number;
@@ -37,9 +40,11 @@ export function NumberField({
   min?: number;
   max?: number;
   integer?: boolean;
+  validate?: (value: number) => string | undefined;
 }) {
   const [draft, setDraft] = useState(String(value)),
     [invalid, setInvalid] = useState(false);
+  const [detail, setDetail] = useState<string>();
   const cancelling = useRef(false);
   useEffect(() => {
     setDraft(String(Number(value.toPrecision(10))));
@@ -51,7 +56,10 @@ export function NumberField({
       return;
     }
     const n = parseNumberInput(draft);
+    const error = validate?.(n);
+    setDetail(error);
     if (
+      error ||
       !Number.isFinite(n) ||
       (integer && !Number.isInteger(n)) ||
       (min !== undefined && n < min) ||
@@ -88,8 +96,8 @@ export function NumberField({
       </div>
       {invalid && (
         <em>
-          {integer ? "Informe um número inteiro" : "Informe um valor válido"}
-          {min !== undefined ? ` (mín. ${min})` : ""}.
+          {detail ??
+            `${integer ? "Informe um número inteiro" : "Informe um valor válido"}${min !== undefined ? ` (mín. ${min})` : ""}.`}
         </em>
       )}
     </label>
@@ -295,12 +303,14 @@ export default function Inspector({
   patternId,
   edit,
   onMaterials,
+  onSections,
 }: {
   project: Project;
   selection: SelectedObject[];
   patternId: string;
   edit: (fn: (p: Project) => void) => void;
   onMaterials: () => void;
+  onSections: (id: string) => void;
 }) {
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
@@ -592,54 +602,37 @@ export default function Inspector({
           selection.length < 2 &&
           (member || !p.slabs.length) && (
             <>
-              <h4>Seção retangular compartilhada</h4>
+              <h4>
+                {shapeNames[section.shape]} · {section.name}
+              </h4>
               <p className="help">
                 Alterações se aplicam a todas as barras que usam esta seção.
               </p>
-              <NumberField
-                label="Largura b"
-                unit="cm"
-                value={section.width * 100}
-                min={0.1}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.width =
-                      v / 100;
-                  })
-                }
-              />
-              <NumberField
-                label="Altura h"
-                unit="cm"
-                value={section.height * 100}
-                min={0.1}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.height =
-                      v / 100;
-                  })
-                }
-              />
-              <div className="section-preview">
-                <div
-                  style={{
-                    width: Math.max(
-                      15,
-                      Math.min(90, (section.width / section.height) * 70),
-                    ),
-                    height: 70,
-                  }}
+              {dimensions(section).map(({ key, label, value }) => (
+                <NumberField
+                  key={`${section.id}-${key}`}
+                  label={label}
+                  unit="cm"
+                  value={value * 100}
+                  validate={(v) =>
+                    Object.values(
+                      geometryErrors({ ...section, [key]: v / 100 }),
+                    )[0]
+                  }
+                  onChange={(v) =>
+                    edit((draft) => {
+                      Object.assign(
+                        draft.sections.find((s) => s.id === section.id)!,
+                        { [key]: v / 100 },
+                      );
+                    })
+                  }
                 />
-                <span>
-                  A = {(section.width * section.height * 1e4).toFixed(1)} cm²
-                  <br />
-                  IY ={" "}
-                  {(((section.width * section.height ** 3) / 12) * 1e8).toFixed(
-                    1,
-                  )}{" "}
-                  cm⁴
-                </span>
-              </div>
+              ))}
+              <SectionPreview geometry={section} roll={member?.roll} />
+              <button onClick={() => onSections(section.id)}>
+                Catálogo de seções
+              </button>
               <h4>Material da seção</h4>
               <div className="property-line">
                 <span>{section.name}</span>

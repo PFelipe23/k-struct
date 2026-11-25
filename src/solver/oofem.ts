@@ -1,3 +1,4 @@
+import { sectionProperties } from "../domain/sections";
 import {
   add,
   cross,
@@ -90,16 +91,6 @@ const spatialDofs = [
 ] as const;
 const planarDofs = [spatialDofs[0], spatialDofs[2], spatialDofs[4]];
 
-function rectangleTorsion(width: number, height: number) {
-  const a = Math.max(width, height),
-    b = Math.min(width, height);
-  // Saint-Venant torsion constant from the odd terms of the rectangular series.
-  let series = 0;
-  for (let k = 1; k < 120; k += 2)
-    series += Math.tanh((k * Math.PI * a) / (2 * b)) / k ** 5;
-  return ((a * b ** 3) / 3) * (1 - ((192 * b) / (Math.PI ** 5 * a)) * series);
-}
-
 export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const p = projectSchema.parse(project);
   const errors = analysisErrors(p);
@@ -173,10 +164,9 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   };
   const cs = p.sections.map((s, i) => {
     const ids = sectionElements.get(s.id)!;
-    const spatialProperties = spatial
-      ? ` Iz ${(s.height * s.width ** 3) / 12} Ik ${rectangleTorsion(s.width, s.height)}`
-      : "";
-    return `SimpleCS ${i + 1} area ${s.width * s.height} Iy ${(s.width * s.height ** 3) / 12}${spatialProperties} beamShearCoeff 1.e18 material ${p.materials.findIndex((m) => m.id === s.materialId) + 1} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`;
+    const { A, Iy, Iz, J } = sectionProperties(s);
+    const spatialProperties = spatial ? ` Iz ${Iz} Ik ${J}` : "";
+    return `SimpleCS ${i + 1} area ${A} Iy ${Iy}${spatialProperties} beamShearCoeff 1.e18 material ${p.materials.findIndex((m) => m.id === s.materialId) + 1} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`;
   });
   for (const n of p.nodes) {
     const fixed = dofs.filter(([key]) => n.restraints[key]).map(([, d]) => d);

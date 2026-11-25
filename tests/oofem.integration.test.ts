@@ -11,12 +11,13 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { defaultGeometry } from "../src/domain/sections";
 import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
 import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
 import { addMember, connectMeshJoint } from "../src/domain/editing";
-import { projectV8 } from "./fixtures/project-v8";
+import { projectV8, projectV9, rectangle } from "./fixtures/project-v8";
 import {
   assignMaterial,
   duplicateSection,
@@ -58,9 +59,83 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it.each([
+    {
+      geometry: defaultGeometry.circle,
+      iy: 4908738.521234051,
+      iz: 4908738.521234051,
+      j: 9817477.042468103,
+    },
+    {
+      geometry: defaultGeometry.tube,
+      iy: 2898119.222936584,
+      iz: 2898119.222936584,
+      j: 5796238.445873168,
+    },
+    {
+      geometry: defaultGeometry.i,
+      iy: 20982666.66666667,
+      iz: 1669906.666666667,
+      j: 80346.666666667,
+    },
+  ])(
+    "KS-18 · flexão biaxial e torção no balanço 3D com seção $geometry.shape",
+    ({ geometry, iy, iz, j }) => {
+      const p = createProject("spatial");
+      const E = 210e9,
+        nu = 0.3,
+        G = E / (2 * (1 + nu)),
+        L = 2,
+        fy = 300,
+        fz = -900,
+        mx = 15;
+      Object.assign(p.materials[0], { E, nu });
+      const section = {
+        ...geometry,
+        id: "ensaio",
+        name: "Seção de ensaio",
+        materialId: p.materials[0].id,
+      };
+      p.sections.push(section);
+      const root = addPoint(p, { x: 0, y: 0, z: 0 }),
+        tip = addPoint(p, { x: L, y: 0, z: 0 });
+      root.restraints = {
+        ux: true,
+        uy: true,
+        uz: true,
+        rx: true,
+        ry: true,
+        rz: true,
+      };
+      const bar = addMember(p, root, tip, { sectionId: section.id, roll: 0 });
+      p.loadPatterns[0].nodal = [{ ...nodalLoad(tip.id), fy, fz, mx }];
+      for (const roll of [0, 90]) {
+        bar.roll = roll;
+        const result = solve(p);
+        const u = result.displacements[tip.id];
+        // Independent moments of inertia in mm⁴. A quarter-turn exchanges the bending axes.
+        const expected = [
+          [u.uy, (fy * L ** 3) / (3 * E * (roll === 0 ? iz : iy) * 1e-12)],
+          [u.uz, (fz * L ** 3) / (3 * E * (roll === 0 ? iy : iz) * 1e-12)],
+          [u.rx, (mx * L) / (G * j * 1e-12)],
+        ];
+        for (const [computed, reference] of expected)
+          expect(
+            Math.abs(computed - reference) / Math.abs(reference),
+          ).toBeLessThan(2e-6);
+        expect(result.reactions[0]).toMatchObject({
+          nodeId: root.id,
+          fy: -fy,
+          fz: -fz,
+          mx: -mx,
+        });
+      }
+    },
+  );
+
   it("KS-17 · dobrar E em uma seção reduz à metade somente a flecha de seu balanço", () => {
     const p = createProject();
-    const sectionA = p.sections[0];
+    const sectionA = rectangle(p.sections[0]);
     Object.assign(sectionA, { width: 0.2, height: 0.3 });
     const sectionB = duplicateSection(p, sectionA.id);
     const steel = {
@@ -138,8 +213,8 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
 
   it("KS-15 · carga de 9 kN a 2 m na barra íntegra, reações, salto, flexão e flecha", () => {
     const p = internalJointBeam();
-    const EI =
-      (p.materials[0].E * p.sections[0].width * p.sections[0].height ** 3) / 12;
+    const section = rectangle(p.sections[0]);
+    const EI = (p.materials[0].E * section.width * section.height ** 3) / 12;
     // Simple supports, point load P at a, b=L−a: w(a) = −P a² b²/(3 E I L).
     const expectedUz = (-9000 * 2 ** 2 * 4 ** 2) / (3 * EI * 6);
     for (const count of [8, 6, 13]) {
@@ -337,6 +412,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const p = createProject();
     p.materials[0].E = portal.e;
     p.sections = portal.sections.map(([width, height], i) => ({
+      shape: "rectangle",
       id: `R${i}`,
       name: `Seção R${i}`,
       materialId: p.materials[0].id,
@@ -610,7 +686,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         check(copy[i][k], sign * station[k]);
     }
   });
-  it("balanço espacial com seção girada: flexão biaxial, normal e torção", () => {
+  it("balanço espacial v9 com retângulo girado: flexão biaxial, normal e torção", () => {
     const p = createProject("spatial");
     const a = addPoint(p, { x: 0, y: 2, z: 1 });
     const b = addPoint(p, { x: 3, y: 2, z: 1 });
@@ -635,13 +711,15 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     p.loadPatterns[0].nodal = [
       { ...nodalLoad(b.id), fx: 1800, fy: 1200, fz: -2400, mx: 600 },
     ];
-    const { width, height } = p.sections[0];
+    const { width, height } = rectangle(p.sections[0]);
     const { E, nu } = p.materials[0];
     const iy = (width * height ** 3) / 12;
     const iz = (height * width ** 3) / 12;
     const j = 0.00012180866179401363;
     const g = E / (2 * (1 + nu));
-    const r = solve(p),
+    const migrated = parseProject(JSON.stringify(projectV9(p)));
+    expect(migrated).toEqual(p);
+    const r = solve(migrated),
       u = r.displacements[b.id];
     expect(u.ux).toBeCloseTo((1800 * 3) / (E * width * height), 9);
     expect(u.uy).toBeCloseTo((1200 * 3 ** 3) / (3 * E * iy), 8);

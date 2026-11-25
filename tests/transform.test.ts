@@ -1,3 +1,4 @@
+import { rectangle } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import { addMember } from "../src/domain/editing";
 import {
@@ -75,7 +76,8 @@ describe("transformações de seleção", () => {
       { x: 4, y: 3, z: 1 },
       { sectionId: p.sections[0].id, roll: 27 },
     );
-    expect(p.sections[0].width).not.toBe(p.sections[0].height);
+    const section = rectangle(p.sections[0]);
+    expect(section.width).not.toBe(section.height);
     const plan = planTransform(p, [member(b.id)], yzMirror);
     const [a, c, A, C] = plan.project.nodes;
     near(A, { x: -2, y: 1, z: 0 });

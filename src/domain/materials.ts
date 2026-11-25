@@ -102,7 +102,13 @@ export function duplicateSection(p: Project, id: string) {
   const copy = {
     ...section,
     id: uid(),
-    name: nextName("Retangular R", p.sections),
+    name:
+      section.shape === "rectangle"
+        ? nextName("Retangular R", p.sections)
+        : nextName(
+            `${section.name.slice(0, 120 - " · cópia ".length - String(sectionLimit).length)} · cópia `,
+            p.sections,
+          ),
   };
   p.sections.push(copy);
   return copy.id;
