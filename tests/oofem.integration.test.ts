@@ -11,6 +11,8 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
+import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
 import { addMember } from "../src/domain/editing";
@@ -228,6 +230,38 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       const atMidspan = result.members[middleId].find((s) => s.t === t)!;
       expect(atMidspan.m).toBeCloseTo(45000, 1);
       expect(atMidspan.uz).toBeCloseTo(-0.0084375, 8);
+    }
+  });
+  it("reparar duas barras invertidas aplica a carga escolhida uma única vez", () => {
+    const p = beamExample();
+    p.members.push({
+      ...p.members[0],
+      id: "INV",
+      name: "Invertida",
+      start: "B",
+      end: "A",
+    });
+    p.loadPatterns[0].uniform.push({
+      ...p.loadPatterns[0].uniform[0],
+      memberId: "INV",
+    });
+    const stage = stagedMembers(p, 0.001, []),
+      choices = noRepairs();
+    choices.members = [{ drop: "V1", keep: "INV" }];
+    const preview = planRepair(stage, choices);
+    expect(preview.project).toBeNull();
+    expect(preview.questions).toHaveLength(1);
+    for (const [value, reaction] of [
+      ["use:V1", 30000],
+      ["all", 60000],
+    ] as const) {
+      choices.answers[preview.questions[0].key] = value;
+      const result = solve(planRepair(stage, choices).project!);
+      for (const id of ["A", "B"])
+        expect(result.reactions.find((r) => r.nodeId === id)!.fz).toBeCloseTo(
+          reaction,
+          1,
+        );
     }
   });
   it("duplicar a carga duplica deslocamentos e esforços", () => {

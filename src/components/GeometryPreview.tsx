@@ -23,13 +23,15 @@ export default function GeometryPreview({
   mode,
   guide,
   children,
+  labels = ["Original", "Resultado"],
 }: {
   source: ReturnType<typeof drawing>;
   target: ReturnType<typeof drawing>;
-  plane: PlaneKind;
+  plane: View;
   mode: Project["mode"];
   guide?: { points: Point3[]; center?: Point3; label: string };
   children?: ReactNode;
+  labels?: [string, string];
 }) {
   const [view, setView] = useState<View>(plane);
   const project = (n: Point3) =>
@@ -115,8 +117,8 @@ export default function GeometryPreview({
         ))}
       </svg>
       <div className="transform-legend">
-        <span>Original</span>
-        <span>Resultado</span>
+        <span>{labels[0]}</span>
+        <span>{labels[1]}</span>
         {guide && <span>{guide.label}</span>}
       </div>
       {children}

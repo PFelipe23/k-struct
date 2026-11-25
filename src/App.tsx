@@ -34,6 +34,7 @@ import {
   PanelLeft,
   PanelRight,
   Scissors,
+  ScanSearch,
 } from "lucide-react";
 import {
   addPoint,
@@ -76,6 +77,7 @@ import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
+import DuplicateDialog from "./components/DuplicateDialog";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
 import type { TransformPlan } from "./domain/transform";
@@ -194,6 +196,7 @@ export default function App() {
     | "guides"
     | "replicate"
     | "member-edit"
+    | "duplicates"
     | "nodes"
     | "new-project"
     | "selection"
@@ -454,8 +457,13 @@ export default function App() {
       setMessage(`Caso ${selected.name} selecionado. Clique em Analisar.`);
     }
   };
+  const [diagnosticHighlight, setDiagnosticHighlight] = useState<
+    SelectedObject[]
+  >([]);
+  const shownSelection =
+    launchDialog === "duplicates" ? diagnosticHighlight : selection;
   const isSelected = (kind: SelectedObject["kind"], id: string) =>
-    selection.some((s) => s.kind === kind && s.id === id);
+    shownSelection.some((s) => s.kind === kind && s.id === id);
   const selectObject = useCallback((object: Selection, additive = false) => {
     if (!additive) setSelection(object ? [object] : []);
     else if (object)
@@ -975,6 +983,16 @@ export default function App() {
                 >
                   <Scissors size={20} />
                   <span>Editar barras</span>
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={() => {
+                    setDiagnosticHighlight([]);
+                    setLaunchDialog("duplicates");
+                  }}
+                >
+                  <ScanSearch size={20} />
+                  <span>Duplicidades</span>
                 </button>
                 <button
                   className="tool-button"
@@ -1534,7 +1552,7 @@ export default function App() {
                   project={p}
                   plane={view.plane}
                   orthogonal={orthogonal}
-                  selection={selection}
+                  selection={shownSelection}
                   tool={active ? tool : "select"}
                   quick={active && tool === "member" && memberMode === "span"}
                   result={result}
@@ -1580,7 +1598,7 @@ export default function App() {
                 patternId={patternId}
                 theme={theme}
                 project={p}
-                selection={selection}
+                selection={shownSelection}
                 result={visibleDisplay === "deformed" ? result : null}
                 onSelect={selectObject}
               />
@@ -1820,6 +1838,31 @@ export default function App() {
               p.guides = guides;
             })
           }
+        />
+      )}
+      {launchDialog === "duplicates" && (
+        <DuplicateDialog
+          project={p}
+          onHighlight={setDiagnosticHighlight}
+          onClose={() => setLaunchDialog(null)}
+          onApply={(source, next) => {
+            if (current.current !== source)
+              return "O modelo mudou. Reabra o diagnóstico.";
+            const error = edit((draft) => {
+              draft.nodes = next.nodes;
+              draft.members = next.members;
+              draft.loadPatterns = next.loadPatterns;
+              draft.selectionGroups = next.selectionGroups;
+            });
+            if (!error) {
+              changeTool("select");
+              setSelection([]);
+              setMessage(
+                "Correções aplicadas. Reabra Duplicidades para consultar os pares restantes.",
+              );
+            }
+            return error;
+          }}
         />
       )}
       {launchDialog === "member-edit" && (
