@@ -825,6 +825,10 @@ export default function WorkPlaneView({
                       const value = station[display];
                       const [x, y] = forcePoint(station.t, value);
                       const { symbol, unit } = forceLabels[display];
+                      const towardSpan = end === "i" ? 1 : -1;
+                      const dx = (towardSpan * du) / length;
+                      const dy = (-towardSpan * dv) / length;
+                      const gap = Math.min(12, length * camera.scale * 0.12);
                       return (
                         <g
                           key={end}
@@ -832,8 +836,19 @@ export default function WorkPlaneView({
                           aria-label={`${m.name}, ${end}, ${symbol} ${formatResult(value / 1000)} ${unit}`}
                         >
                           <circle cx={x} cy={y} r={3} />
-                          <text x={x} y={y + 13}>
-                            {end} · {formatResult(value / 1000)}
+                          <text
+                            x={x + dx * gap}
+                            y={y + 13 + dy * gap}
+                            style={{
+                              textAnchor:
+                                dx > 0.3
+                                  ? "start"
+                                  : dx < -0.3
+                                    ? "end"
+                                    : "middle",
+                            }}
+                          >
+                            {end} · {formatResult(value / 1000)} {unit}
                           </text>
                         </g>
                       );

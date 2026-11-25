@@ -149,13 +149,14 @@ function drawMemberAxes(
       `Eixo local ${name} de ${member.name}`,
     );
   }
-  for (const [end, node] of [
-    ["i", a],
-    ["j", b],
+  for (const [end, node, other] of [
+    ["i", a, b],
+    ["j", b, a],
   ] as const) {
-    const label = annotate(group, scenePoint(node), [end])!;
+    const anchor = scenePoint(interpolate(node, other, 0.12));
+    const label = annotate(group, anchor, [end])!;
     label.element.classList.add("scene-axis-label", "scene-member-end");
-    label.center.set(1, 1);
+    label.center.set(0.5, 1);
     label.element.setAttribute(
       "aria-label",
       `${member.name}: ${end} ${node.name}`,

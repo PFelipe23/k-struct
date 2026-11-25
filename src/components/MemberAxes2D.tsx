@@ -32,7 +32,10 @@ export default function MemberAxes2D({
     cy = (y0 + y1) / 2;
   const span = Math.hypot(x1 - x0, y1 - y0);
   const size = Math.max(25, Math.min(43, span * 0.3));
-  const offset = x1 >= x0 ? -12 : 12;
+  // Keep both end marks on their own span at a shared joint, at any zoom.
+  const inset = Math.min(0.12, 18 / span);
+  const dx = (x1 - x0) * inset;
+  const dy = (y1 - y0) * inset;
   const towardViewer = plane === "XZ" ? -1 : 1;
   return (
     <g
@@ -40,10 +43,10 @@ export default function MemberAxes2D({
       role="img"
       aria-label={`Eixos locais de ${member.name}: i ${a.name}, j ${b.name}`}
     >
-      <text x={x0 + offset} y={y0 - 8}>
+      <text x={x0 + dx} y={y0 + dy - 8}>
         i
       </text>
-      <text x={x1 + offset} y={y1 - 8}>
+      <text x={x1 - dx} y={y1 - dy - 8}>
         j
       </text>
       {beamAxes(a, b, member.roll, mode).map((axis, i) => {
