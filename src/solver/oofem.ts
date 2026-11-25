@@ -1,6 +1,7 @@
 import { sectionProperties } from "../domain/sections";
 import {
   add,
+  coordinates,
   cross,
   distance,
   interpolate,
@@ -375,6 +376,7 @@ export function parseOofemOutput(
     stations.push(end);
   }
   const reactions: Reaction[] = [];
+  const printedLocalReactions: Reaction[] = [];
   for (const n of input.project.nodes) {
     if (!Object.values(n.restraints).some(Boolean)) continue;
     const num = modelNumbers.get(n.id)!;
@@ -389,6 +391,7 @@ export function parseOofemOutput(
     }
     const basis = frames.get(num);
     if (basis) {
+      printedLocalReactions.push(result);
       const force = supportToGlobal(
         { x: result.fx, y: result.fy, z: result.fz },
         basis,
@@ -408,7 +411,12 @@ export function parseOofemOutput(
       });
     } else reactions.push(result);
   }
-  checkEquilibrium(input.project, input.caseId, reactions);
+  checkEquilibrium(
+    input.project,
+    input.caseId,
+    reactions,
+    printedLocalReactions,
+  );
   return {
     ...metadata,
     displacements: Object.fromEntries(
@@ -421,16 +429,42 @@ export function parseOofemOutput(
   };
 }
 
+// OOFEM 3.0 prints reactions with %.4e. Bound the half-unit of the last digit
+// before projecting local components, which can cancel along a global axis.
+function reactionPrintError(value: number) {
+  return value === 0
+    ? 0
+    : 0.5 * 10 ** (Math.floor(Math.log10(Math.abs(value))) - 4);
+}
+
 export function checkEquilibrium(
   p: Project,
   caseId: string,
   reactions: Reaction[],
+  printedLocalReactions: readonly Reaction[] = [],
 ) {
   const sum = [0, 0, 0, 0, 0, 0];
   const magnitudes = [1, 1, 1, 1, 1, 1];
   const reference = p.nodes[0] ?? origin;
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
   const members = new Map(p.members.map((m) => [m.id, m]));
+  const rounding = [0, 0, 0, 0, 0, 0];
+  for (const local of printedLocalReactions) {
+    const node = byId.get(local.nodeId)!;
+    const basis = supportBasis(node.supportFrame);
+    const lever = subtract(node, reference);
+    for (const key of coordinates) {
+      const axis = basis[key];
+      const arm = cross(lever, axis);
+      const df = reactionPrintError(local[`f${key}`]);
+      const dm = reactionPrintError(local[`m${key}`]);
+      for (const [i, global] of coordinates.entries()) {
+        rounding[i] += Math.abs(axis[global]) * df;
+        rounding[i + 3] +=
+          Math.abs(arm[global]) * df + Math.abs(axis[global]) * dm;
+      }
+    }
+  }
   const accumulate = (force: Point3, moment: Point3, point: Point3) => {
     const lever = subtract(point, reference);
     const induced = cross(lever, force);
@@ -481,7 +515,8 @@ export function checkEquilibrium(
   }
   if (
     sum.some(
-      (v, i) => !Number.isFinite(v) || Math.abs(v) > 1e-3 * magnitudes[i],
+      (v, i) =>
+        !Number.isFinite(v) || Math.abs(v) > 1e-3 * magnitudes[i] + rounding[i],
     )
   )
     throw new Error(

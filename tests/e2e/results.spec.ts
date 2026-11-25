@@ -128,6 +128,12 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   await expect(page.getByRole("status")).toContainText("Análise concluída");
   await expect(page.getByLabel("Visualização dos resultados")).toHaveValue("m");
   await page.getByRole("button", { name: "Reações", exact: true }).click();
+  await expect(
+    page.getByRole("columnheader", { name: "RZ global (kN)" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "RZ local (kN)" }),
+  ).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "30", exact: true })).toHaveCount(
     2,
   );

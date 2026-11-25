@@ -110,6 +110,59 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     );
   });
 
+  it("KS-19/20 · inverter i/j conserva o vínculo, as reações e o deslocamento do rolete", () => {
+    const p = inclinedBeam();
+    const original = solve(p);
+    reverseMember(p, "V1");
+    const reversed = solve(p);
+    for (const [i, reaction] of original.reactions.entries()) {
+      expect(reversed.reactions[i].nodeId).toBe(reaction.nodeId);
+      expect(reversed.reactions[i].fx).toBeCloseTo(reaction.fx, 2);
+      expect(reversed.reactions[i].fz).toBeCloseTo(reaction.fz, 2);
+    }
+    expect(reversed.displacements.B.ux).toBeCloseTo(
+      original.displacements.B.ux,
+      12,
+    );
+    expect(reversed.displacements.B.uz).toBeCloseTo(
+      original.displacements.B.uz,
+      12,
+    );
+  });
+
+  it.each(["horizontal", "vertical"] as const)(
+    "KS-20 · distingue arredondamento de desequilíbrio em balanço %s com engaste a 31°",
+    (orientation) => {
+      const p = beamExample();
+      const [root, tip] = p.nodes;
+      root.restraints = { ...free(), ux: true, uz: true, ry: true };
+      root.supportFrame = { kind: "planar", angle: 31 };
+      tip.restraints = free();
+      if (orientation === "vertical") Object.assign(tip, { x: 0, z: 6 });
+      // The force error also contributes a moment about the free end.
+      p.nodes = [tip, root];
+      p.loadPatterns[0].uniform = [];
+      p.loadPatterns[0].nodal = [{ ...nodalLoad(tip.id), fz: -12345 }];
+      const input = exportOofem(p, "EL");
+      const raw = runDeck(input.deck, executable!);
+      const [reaction] = parseOofemOutput(raw, input).reactions;
+      expect(Math.abs(reaction.fx)).toBeLessThan(0.5);
+      expect(Math.abs(reaction.fz - 12345)).toBeLessThan(0.5);
+      expect(reaction.my).toBeCloseTo(
+        orientation === "horizontal" ? -74070 : 0,
+        2,
+      );
+      const corrupted = raw.replace(
+        /(Node\s+\d+\s+iDof\s+1\s+reaction\s+)(\S+)/,
+        (_, prefix, value) => prefix + (Number(value) + 10).toExponential(4),
+      );
+      expect(corrupted).not.toBe(raw);
+      expect(() => parseOofemOutput(corrupted, input)).toThrow(
+        /equilíbrio global/,
+      );
+    },
+  );
+
   it("KS-20 · rolete de ângulo zero reproduz o apoio global legado", () => {
     const p = beamExample();
     const global = solve(p);

@@ -82,14 +82,14 @@ export default function Results({
     const hasLocal = (result?.reactions ?? []).some(
       ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
     );
-    const componentHeaders = (frame = "") =>
+    const componentHeaders = (frame: "global" | "local") =>
       keys.map((key) => {
         const [kind, axis] = key.toUpperCase();
-        return `${kind === "F" ? "R" : "M"}${axis}${frame} (${kind === "F" ? "kN" : "kN·m"})`;
+        return `${kind === "F" ? "R" : "M"}${axis} ${frame} (${kind === "F" ? "kN" : "kN·m"})`;
       });
-    headers = ["Nó", ...componentHeaders(hasLocal ? " global" : "")];
+    headers = ["Nó", ...componentHeaders("global")];
     if (hasLocal)
-      headers.push(...componentHeaders(" local"), "Referencial do apoio");
+      headers.push(...componentHeaders("local"), "Referencial do apoio");
     rows = (result?.reactions ?? []).map((r) => {
       const row: (string | number)[] = [
         nodeNames.get(r.nodeId) ?? r.nodeId,
