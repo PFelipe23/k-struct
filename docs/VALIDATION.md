@@ -258,3 +258,30 @@ Em XYZ, um balanço com UZ e RX restritos na ponta é resolvido antes e depois d
 A inversão i/j da barra também preserva as reações e o deslocamento global do rolete. Em dois balanços de 6 m (um horizontal e um vertical), a carga de −12.345 N em Z exige reação vertical de +12.345 N num engaste orientado a 31°. O OOFEM imprime cinco algarismos significativos por componente local. A verificação de equilíbrio propaga metade da última casa impressa de cada componente pelos eixos do apoio e pelo braço da força. Os ensaios verificam o equilíbrio em relação à ponta livre e a rejeição da saída quando uma reação local é alterada em 10 N.
 
 Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- inclined-supports.spec.ts` para verificar edição, desfazer/refazer, persistência, reanálise, tabela e CSV.
+
+## KS-22 · treliça articulada e flexão local do banzo
+
+As entradas abaixo são referências independentes do exportador do KStruct. Usam barras de pórtico do OOFEM 3.0. Em cada articulação, nós coincidentes compartilham as translações e permitem que cada barra gire independentemente. As cargas permanecem nos pontos ou trechos em que foram aplicadas. O módulo `errorcheck` compara as grandezas calculadas com os valores analíticos a cada passo.
+
+### Dois carregamentos na mesma treliça plana
+
+Em [pinned-truss.in](../tests/fixtures/pinned-truss.in), os nós A=(0, 0), B=(6, 0) e C=(3, 4) estão no plano XZ. A restringe UX e UZ, e B restringe UZ. Os três membros têm E = 200 GPa, A = 1.000 mm² e Iy = 2,5 × 10⁻⁵ m⁴. O banzo AB tem dois elementos contínuos no meio do vão. A articulação fica nas pontas físicas.
+
+| Carregamento | Reações verticais em A e B | Esforços e deslocamentos de referência |
+| --- | --- | --- |
+| Força de 10 kN para baixo em C | 5 kN em cada apoio | Tração de 3,75 kN em AB e compressão de 6,25 kN em AC e BC. Cortantes e momentos nulos. UZ de C = −0,2375 mm. |
+| Carga uniforme de 10 kN/m para baixo ao longo de AB | 30 kN em cada apoio | Momento nulo nas pontas e sagente de 45 kN·m no meio do vão. Cortante de +30 kN junto a A e −30 kN junto a B na convenção de seção do KStruct. Flecha central de −33,75 mm. |
+
+No primeiro caso, as diagonais medem 5 m e a componente vertical da força em cada uma vale 4/5 do seu módulo. O deslocamento segue do trabalho virtual, somando as contribuições axiais das três barras. No segundo, para o módulo da carga uniforme q, o momento central vale qL²/8 e a flecha central em módulo vale 5qL⁴/(384EIy). As tolerâncias absolutas são 10⁻⁷ N ou N·m nos esforços, 10⁻¹⁰ m no deslocamento de C e 10⁻⁹ m na flecha de AB.
+
+### Barra articulada ligada a um pórtico espacial
+
+Em [pinned-brace-3d.in](../tests/fixtures/pinned-brace-3d.in), AB é um balanço de 3 m na direção X. BC mede 2 m na direção Y, tem extremidades articuladas à flexão e sua torção é liberada em B. O nó B recebe Fy = 10 kN, Fz = −6 kN, Mx = 0,9 kN·m e Mz = 6 kN·m. A rotação de B pertence ao balanço e a barra BC acompanha a translação desse nó.
+
+Para obter UY de B, use k = EA/L de BC, f = L³/(3EIz) e g = L²/(2EIz) de AB. A compatibilidade dá UY = (f·Fy + g·Mz)/(1 + k·f) = 0,1277293 mm. BC recebe 12,772926 kN de compressão e seus momentos de extremidade são nulos. Em B, o balanço apresenta UZ = −2,7 mm, RX = 0,351 mrad, RY = 1,35 mrad e RZ = 0,3451146 mrad. As tolerâncias são 10⁻⁵ N ou N·m e 10⁻¹⁰ m ou rad.
+
+Execute o teste abaixo com o solver fixado pelo projeto para repetir os três casos.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/pinned-truss.integration.test.ts
+```
