@@ -1822,6 +1822,9 @@ button.primary {
     grid-template-rows: repeat(2, 1fr);
     gap: 2px 4px;
   }
+  .ribbon-tools > label {
+    grid-row: span 2;
+  }
   .ribbon-tools .tool-button {
     flex-direction: row;
     justify-content: flex-start;

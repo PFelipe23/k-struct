@@ -406,7 +406,33 @@ test("tema alterna pelo teclado, preserva as vistas e retorna após recarregar",
 
   const theme = page.getByRole("combobox", { name: "Tema", exact: true });
   await button("Exibição").press("Enter");
-  for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", {
+      name: "Explorador",
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  const properties = button("Propriedades");
+  await expect(properties).toBeFocused();
+  const caption = page.getByText("ÁREA DE TRABALHO", { exact: true });
+  const focusBottom = await properties.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return (
+      element.getBoundingClientRect().bottom +
+      parseFloat(style.outlineOffset) +
+      parseFloat(style.outlineWidth)
+    );
+  });
+  expect(focusBottom).toBeLessThanOrEqual((await caption.boundingBox())!.y);
+  await properties.press("Space");
+  await expect(properties).toHaveAttribute("aria-pressed", "false");
+  await properties.press("Space");
+  await expect(properties).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
   await expect(theme).toBeFocused();
   await expect(theme).toHaveCSS("outline-style", "solid");
   await expect(theme).toHaveValue("dark");

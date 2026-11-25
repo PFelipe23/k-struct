@@ -1203,6 +1203,7 @@ export default function App() {
               <div className="ribbon-tools">
                 <button
                   className={`tool-button ${left ? "active" : ""}`}
+                  aria-pressed={left}
                   onClick={() => setLeft((v) => !v)}
                 >
                   <PanelLeft />
@@ -1210,6 +1211,7 @@ export default function App() {
                 </button>
                 <button
                   className={`tool-button ${right ? "active" : ""}`}
+                  aria-pressed={right}
                   onClick={() => setRight((v) => !v)}
                 >
                   <PanelRight />
