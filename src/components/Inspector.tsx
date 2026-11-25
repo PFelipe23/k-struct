@@ -1,3 +1,4 @@
+import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
 import {
   Box,
@@ -120,11 +121,13 @@ function SlabFields({
   slab,
   pattern,
   edit,
+  onMaterials,
 }: {
   project: Project;
   slab: Slab;
   pattern: Pattern;
   edit: (fn: (p: Project) => void) => void;
+  onMaterials: () => void;
 }) {
   const material = project.materials.find(({ id }) => id === slab.materialId)!;
   const updateSlab = (changes: Partial<Slab>) =>
@@ -197,31 +200,8 @@ function SlabFields({
           ))}
         </select>
       </label>
-      <NumberField
-        key={`${material.id}-E`}
-        label="Módulo E"
-        unit="GPa"
-        min={0.001}
-        value={material.E / 1e9}
-        onChange={(value) =>
-          edit((draft) => {
-            draft.materials.find(({ id }) => id === material.id)!.E =
-              value * 1e9;
-          })
-        }
-      />
-      <NumberField
-        key={`${material.id}-nu`}
-        label="Poisson ν"
-        min={0}
-        max={0.499999}
-        value={material.nu}
-        onChange={(value) =>
-          edit((draft) => {
-            draft.materials.find(({ id }) => id === material.id)!.nu = value;
-          })
-        }
-      />
+      <MaterialProperties material={material} />
+      <button onClick={onMaterials}>Abrir material na biblioteca</button>
       <h4>Apoios de borda</h4>
       <p className="help">
         Marque as bordas com apoio simples. Bordas desmarcadas ficam livres. Use
@@ -314,11 +294,13 @@ export default function Inspector({
   selection,
   patternId,
   edit,
+  onMaterials,
 }: {
   project: Project;
   selection: SelectedObject[];
   patternId: string;
   edit: (fn: (p: Project) => void) => void;
+  onMaterials: () => void;
 }) {
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
@@ -597,7 +579,13 @@ export default function Inspector({
           </>
         )}
         {slab && (
-          <SlabFields project={p} slab={slab} pattern={pattern} edit={edit} />
+          <SlabFields
+            project={p}
+            slab={slab}
+            pattern={pattern}
+            edit={edit}
+            onMaterials={onMaterials}
+          />
         )}
         {!slab &&
           !node &&
@@ -652,29 +640,15 @@ export default function Inspector({
                   cm⁴
                 </span>
               </div>
-              <h4>Material compartilhado</h4>
-              <NumberField
-                label="Módulo E"
-                unit="GPa"
-                value={material.E / 1e9}
-                min={0.001}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.materials.find((m) => m.id === material.id)!.E = v * 1e9;
-                  })
-                }
-              />
-              <NumberField
-                label="Poisson ν"
-                value={material.nu}
-                min={0}
-                max={0.49}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.materials.find((m) => m.id === material.id)!.nu = v;
-                  })
-                }
-              />
+              <h4>Material da seção</h4>
+              <div className="property-line">
+                <span>{section.name}</span>
+                <b>{material.name}</b>
+              </div>
+              <MaterialProperties material={material} />
+              <button onClick={onMaterials}>
+                Abrir material na biblioteca
+              </button>
             </>
           )}
         {!slab && (member || node || !p.slabs.length) && (

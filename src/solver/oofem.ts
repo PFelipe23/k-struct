@@ -17,6 +17,7 @@ import {
   type Project,
 } from "../domain/model";
 import { beamStations, type SectionLocation } from "../domain/beamMesh";
+import { elasticMaterialRecord } from "./elasticMaterial";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
 export interface MeshNode extends Point3 {
@@ -236,9 +237,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
     ...cs,
-    ...p.materials.map(
-      (m, i) => `IsoLE ${i + 1} d ${m.density} E ${m.E} n ${m.nu} tAlpha 0`,
-    ),
+    ...p.materials.map((material, i) => elasticMaterialRecord(material, i + 1)),
     ...bcs,
     "ConstantFunction 1 f(t) 1",
     ...sets,

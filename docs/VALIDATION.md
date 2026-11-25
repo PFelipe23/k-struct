@@ -174,6 +174,19 @@ Execute `OOFEM_BIN=/caminho/para/oofem npm run check` com o OOFEM 3.0 fixado no 
 
 O teste de interface `tests/e2e/mesh-connections.spec.ts` conecta C, inspeciona a camada de malha, desfaz e refaz, refina, salva e reabre o projeto. Na envoltória dos fatores +1 e −1, o máximo de V em x/L = 1/3 é governado pela combinação direta do lado i e pela invertida do lado j. O teste confere a tabela e o CSV pelo ID do membro, pela posição, pelo lado e pela combinação.
 
+## Materiais compartilhados e independentes (KS-17)
+
+Dois balanços XZ independentes de 3 m têm seções de 20 × 30 cm e carga de ponta de −10,5 kN. As duas seções começam vinculadas ao mesmo aço, com E = 210 GPa, ν = 0,30, ρ = 7.850 kg/m³ e α = 0,000012/K. A referência de Euler–Bernoulli fornece $I_y=bh^3/12=0{,}00045\,\mathrm{m}^4$ e $u_z=-PL^3/(3EI_y)$, com $P$ em módulo.
+
+| Configuração | Flecha na ponta A | Flecha na ponta B |
+| --- | ---: | ---: |
+| Duas seções com E = 210 GPa | −1,000 mm | −1,000 mm |
+| Cópia com E = 420 GPa atribuída apenas à seção B | −1,000 mm | −0,500 mm |
+
+Em ambas as configurações cada engaste deve fornecer +10,5 kN em Z e −31,5 kN·m em Y. O teste verifica os IDs de material nos registros `SimpleCS`, as propriedades em `IsoLE`, as flechas com tolerância absoluta de 5 × 10⁻¹¹ m e as reações com 0,05 N ou N·m. Outro ensaio abre a viga biapoiada no formato v8 e confere α = 0, a flecha de −8,4375 mm e o momento de +45 kN·m no meio do vão.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check`. O fluxo de interface em `tests/e2e/materials.spec.ts` verifica edição compartilhada, cópia, reatribuição, desfazer/refazer e reabertura do arquivo. Com `OOFEM_BIN` configurado, resolve também a entrada exportada pela interface.
+
 ## Ainda não validado nesta etapa
 
 Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.

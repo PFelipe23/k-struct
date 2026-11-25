@@ -1,3 +1,4 @@
+import { projectV8 } from "./fixtures/project-v8";
 import { expect, it } from "vitest";
 import {
   beamStations,
@@ -107,7 +108,7 @@ it("valida apoios na topologia conectada, preserva seleção física e migra v7 
   p.nodes[0].restraints = p.nodes[1].restraints = free();
   p.nodes[2].restraints = { ...free(), ux: true, uz: true, ry: true };
   expect(analysisErrors(p)).toEqual([]);
-  const { meshConnections, ...before } = p;
+  const { meshConnections, ...before } = projectV8(p);
   const legacy = parseProject(JSON.stringify({ ...before, schemaVersion: 7 }));
   expect(legacy.meshConnections).toEqual([]);
   expect(analysisErrors(legacy).join()).toMatch(/apoios insuficientes/);
@@ -118,7 +119,7 @@ it("valida apoios na topologia conectada, preserva seleção física e migra v7 
     reference: { kind: "distance", metres: 2 },
   }).project;
   expect(divided.meshConnections).toEqual([]);
-  const { meshConnections: _, ...oldSplit } = divided;
+  const { meshConnections: _, ...oldSplit } = projectV8(divided);
   const migrated = parseProject(
     JSON.stringify({ ...oldSplit, schemaVersion: 7 }),
   );

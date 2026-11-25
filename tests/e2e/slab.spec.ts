@@ -92,8 +92,26 @@ for (const formulation of ["qdkt", "dkt"] as const) {
     await expect(page.getByLabel("Lado X")).toHaveValue("4");
     await expect(page.getByLabel("Lado Y")).toHaveValue("3");
     await expect(page.getByLabel("Pavimento da laje")).toHaveValue("level1");
-    await expect(page.getByLabel("Módulo E")).toHaveValue("30");
-    await expect(page.getByLabel("Poisson ν")).toHaveValue("0.2");
+    const properties = page.getByLabel("Propriedades do material");
+    await expect(properties).toContainText("30 GPa");
+    await expect(properties).toContainText("0,2");
+    await page
+      .getByRole("button", { name: "Abrir material na biblioteca" })
+      .click();
+    const library = page.getByRole("dialog", {
+      name: "Biblioteca de materiais",
+    });
+    await expect(
+      library.getByLabel("Material do projeto").locator("option:checked"),
+    ).toHaveText("Concreto");
+    await library
+      .getByRole("button", { name: "Editar material", exact: true })
+      .click();
+    await expect(
+      library.getByRole("region", { name: "Uso do material" }),
+    ).toContainText("1 laje · L1");
+    await library.getByRole("button", { name: "Cancelar edição" }).click();
+    await library.getByRole("button", { name: "Fechar", exact: true }).click();
     await expect(page.getByLabel("Espessura")).toHaveValue("10");
     await expect(drawing.locator(".slab-supported-edge")).toHaveCount(4);
     const element = page.getByLabel("Elemento de placa");

@@ -1,4 +1,5 @@
 import type { AnalysisCase, Project, Slab } from "../domain/model";
+import { elasticMaterialRecord } from "./elasticMaterial";
 import { meshSlab, type SlabDof, type SlabMesh } from "../domain/slab";
 
 const slabDofs = [3, 4, 5] as const;
@@ -118,7 +119,7 @@ export function exportSlab(
         `${quad ? "qdktplate" : "DKTPlate"} ${number} nodes ${nodes.length} ${nodes.join(" ")}`,
     ),
     `SimpleCS 1 thick ${definition.thickness} material 1 set 1`,
-    `IsoLE 1 d ${material.density} E ${material.E} n ${material.nu} tAlpha 0`,
+    elasticMaterialRecord(material, 1),
     ...conditions,
     "ConstantFunction 1 f(t) 1",
     ...sets,
