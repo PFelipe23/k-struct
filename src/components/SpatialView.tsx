@@ -5,7 +5,8 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import { beamStations } from "../domain/beamMesh";
+import { memberAxis } from "../domain/memberOffsets";
+import { beamMeshLayout } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import { formatResult } from "./resultFormatting";
 import { Maximize, Plus, Minus } from "lucide-react";
@@ -62,6 +63,13 @@ function createModelMaterials() {
     selectedSlab: new THREE.MeshStandardMaterial(),
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
+    rigidArm: new THREE.LineBasicMaterial(),
+    launchAxis: new THREE.LineDashedMaterial({
+      dashSize: 0.12,
+      gapSize: 0.08,
+      transparent: true,
+      opacity: 0.5,
+    }),
     deformed: new THREE.LineBasicMaterial(),
     axisX: new THREE.LineBasicMaterial({ depthTest: false }),
     axisY: new THREE.LineBasicMaterial({ depthTest: false }),
@@ -285,6 +293,8 @@ export default function SpatialView({
       materials.axisZ.color.set(color("--axis-z"));
       materials.slab.color.set(color("--geometry-member"));
       materials.selectedSlab.color.set(color("--geometry-selected"));
+      materials.rigidArm.color.set(color("--geometry-support"));
+      materials.launchAxis.color.set(color("--geometry-member"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
       materials.deformed.color.set(color("--geometry-deformed"));
@@ -453,15 +463,21 @@ export default function SpatialView({
       );
     }
     if (layers.mesh) {
-      const layout = beamStations(project);
+      const layout = beamMeshLayout(project);
       const regular: THREE.Vector3[] = [];
-      const joints = new Set<string>();
+      const joints = new Map<string, { id: string; at: THREE.Vector3 }>();
+      const markJoint = (id: string, at: THREE.Vector3) =>
+        joints.set(JSON.stringify([id, at.x, at.y, at.z]), { id, at });
+      for (const { nodeId } of layout.rigidLinks)
+        markJoint(nodeId, scenePoint(nodes.get(nodeId)!));
       for (const m of project.members) {
         const a = nodes.get(m.start)!,
           b = nodes.get(m.end)!;
-        for (const { t, nodeId } of layout.get(m.id)!.slice(1, -1)) {
-          if (nodeId) joints.add(nodeId);
-          else regular.push(scenePoint(interpolate(a, b, t)));
+        const axis = memberAxis(m, a, b);
+        for (const { t, nodeId } of layout.stations.get(m.id)!.slice(1, -1)) {
+          const at = scenePoint(interpolate(axis.faceI, axis.faceJ, t));
+          if (nodeId) markJoint(nodeId, at);
+          else regular.push(at);
         }
       }
       if (regular.length) {
@@ -472,22 +488,23 @@ export default function SpatialView({
         markers.renderOrder = 2;
         s.model.add(markers);
       }
-      for (const id of joints) {
+      for (const { id, at } of joints.values()) {
         const element = document.createElement("span");
         element.className = "scene-mesh-joint";
         element.dataset.meshJoint = id;
         const ring = new CSS2DObject(element);
-        ring.position.copy(scenePoint(nodes.get(id)!));
+        ring.position.copy(at);
         s.model.add(ring);
       }
     }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
+      const axis = memberAxis(m, a, b);
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          scenePoint(a),
-          scenePoint(b),
+          scenePoint(axis.faceI),
+          scenePoint(axis.faceJ),
         ]),
         selectedIds.has(`member:${m.id}`)
           ? s.materials.selectedMember
@@ -495,12 +512,48 @@ export default function SpatialView({
       );
       line.userData.selection = { kind: "member", id: m.id };
       s.model.add(line);
+      if (m.offsets) {
+        if (distance(a, axis.start) || distance(b, axis.end)) {
+          const launch = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              scenePoint(a),
+              scenePoint(b),
+            ]),
+            s.materials.launchAxis,
+          );
+          launch.computeLineDistances();
+          s.model.add(launch);
+        }
+        for (const [joint, insertion, face, side] of [
+          [a, axis.start, axis.faceI, "i"],
+          [b, axis.end, axis.faceJ, "j"],
+        ] as const) {
+          if (!distance(joint, insertion) && !distance(insertion, face))
+            continue;
+          const arm = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(
+              [joint, insertion, face].map(scenePoint),
+            ),
+            s.materials.rigidArm,
+          );
+          arm.userData.selection = line.userData.selection;
+          s.model.add(arm);
+          const marker = new THREE.Points(
+            new THREE.BufferGeometry().setFromPoints([scenePoint(face)]),
+            s.materials.meshStation,
+          );
+          s.model.add(marker);
+          if (selectedIds.has(`member:${m.id}`) && layers.labels) {
+            annotate(s.model, scenePoint(face), [`Face ${side}`]);
+          }
+        }
+      }
       const loads = layers.loads
         ? (pattern?.uniform.filter((load) => load.memberId === m.id) ?? [])
         : [];
       annotate(
         s.model,
-        scenePoint(interpolate(a, b, 0.5)),
+        scenePoint(interpolate(axis.start, axis.end, 0.5)),
         [
           ...(layers.labels ? [m.name] : []),
           ...loadComponents(
@@ -515,7 +568,7 @@ export default function SpatialView({
       const stations = result?.members[m.id];
       if (stations) {
         const positions = stations.map((v) => {
-          const p = interpolate(a, b, v.t);
+          const p = interpolate(axis.faceI, axis.faceJ, v.t);
           return scenePoint({
             x: p.x + v.ux * deformationScale,
             y: p.y + v.uy * deformationScale,
@@ -606,12 +659,15 @@ export default function SpatialView({
       const nodes = new Map(project.nodes.map((node) => [node.id, node]));
       for (const member of project.members) {
         if (selected.size && !selected.has(member.id)) continue;
+        const a = nodes.get(member.start)!,
+          b = nodes.get(member.end)!;
+        const axis = memberAxis(member, a, b);
         drawMemberAxes(
           s.memberAxes,
           s.materials,
           member,
-          nodes.get(member.start)!,
-          nodes.get(member.end)!,
+          { ...a, ...axis.faceI },
+          { ...b, ...axis.faceJ },
           project.mode,
         );
       }

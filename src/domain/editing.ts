@@ -1,3 +1,4 @@
+import { offsetError, splitOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
@@ -41,7 +42,15 @@ export function inspectNodeCoordinateChanges(
       byId.get(member.start)!,
       byId.get(member.end)!,
     );
-    if (message) issues.push({ message, nodeIds: moved });
+    const error =
+      message ??
+      offsetError(
+        member,
+        byId.get(member.start)!,
+        byId.get(member.end)!,
+        project.mode,
+      );
+    if (error) issues.push({ message: error, nodeIds: moved });
   }
   if (!issues.length && project.meshConnections.length) {
     try {
@@ -82,6 +91,8 @@ export function reverseMember(p: Project, id: string) {
   const member = p.members.find((item) => item.id === id);
   if (!member) throw new Error("A barra selecionada não existe.");
   [member.start, member.end] = [member.end, member.start];
+  if (member.offsets)
+    member.offsets = { i: member.offsets.j, j: member.offsets.i };
   // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
   // keeps z fixed in global space when x changes sign.
   if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
@@ -280,6 +291,7 @@ export function connectIntersections(p: Project) {
 
 // Cut nodes are ordered from i to j. The first span inherits the physical member ID.
 export function splitMembers(p: Project, cuts: Map<string, string[]>) {
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const split = new Map<string, string[]>();
   let barCount = p.members.length;
   const usedNames = [...p.members];
@@ -295,6 +307,24 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
     const joints = [m.start, ...interior, m.end];
     const children = joints.slice(0, -1).map((start, i) => {
       const child = { ...m, start, end: joints[i + 1] };
+      splitOffsets(
+        m,
+        nodes.get(m.start)!,
+        nodes.get(m.end)!,
+        child,
+        nodes.get(child.start)!,
+        nodes.get(child.end)!,
+      );
+      const error = offsetError(
+        child,
+        nodes.get(child.start)!,
+        nodes.get(child.end)!,
+        p.mode,
+      );
+      if (error)
+        throw new Error(
+          `O corte precisa ficar no trecho deformável de ${m.name}. ${error}`,
+        );
       if (i > 0) {
         child.id = uid();
         child.name = nextName("B", usedNames);
@@ -316,7 +346,6 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       })),
     );
   }
-  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const byId = new Map(p.members.map((m) => [m.id, m]));
   p.meshConnections = p.meshConnections.flatMap((link) => {
     const children = split.get(link.memberId);

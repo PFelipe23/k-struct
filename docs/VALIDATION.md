@@ -285,3 +285,22 @@ Execute o teste abaixo com o solver fixado pelo projeto para repetir os três ca
 ```sh
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/pinned-truss.integration.test.ts
 ```
+
+
+## KS-23 · excentricidades de inserção e trechos rígidos
+
+Os ensaios usam o OOFEM 3.0 fixado pelo projeto. As coordenadas dos nós e as excentricidades estão em metros. Nos ensaios axiais, o balanço tem 6 m, E = 200 GPa e A = 0,03 m².
+
+| Ensaio | Valor de referência |
+| --- | --- |
+| Balanço XYZ ao longo de X, nó de aplicação 0,20 m em +Y em relação à seção da ponta, Fz = −10 kN | Mx da seção = −2 kN·m. No engaste, Rz = +10 kN, Mx = +2 kN·m e My = −60 kN·m. Trocar o lado do braço inverte Mx. |
+| Barra XZ e XYZ com P = 60 kN | Alongamento de 0,060 mm na barra centrada e 0,050 mm com 0,50 m rígido em cada ponta. Neste último caso, PL/(EA) usa 5 m. |
+| Carga qz = −10 kN/m com eixo 0,20 m em +Y e trechos rígidos de 0,50 e 1,00 m | No engaste, Rz = +60 kN, Mx = +12 kN·m e My = −180 kN·m. Os momentos fletores em módulo nas faces i e j são 151,25 e 5 kN·m. |
+| Dois apoios verticais a 0,50 m um do outro, na mesma zona rígida inicial de 1 m, com Fz = −1 kN no nó a 6 m | Reações verticais de −11 e +12 kN. A flecha na ponta é −2,083333 mm para Iy = 0,0001 m⁴. |
+
+O ensaio de torção compara o nó excêntrico com uma força e um binário aplicados diretamente no eixo. A excentricidade de inserção no nó da ponta vale −0,20 m em Y quando o braço da seção até a carga vale +0,20 m. A comparação é repetida com i/j invertidos e com 2 e 9 elementos. A verificação axial compara 2 e 11 elementos. Os limites absolutos são 0,01 N·m na torção e 10⁻¹² m no alongamento. Os testes adicionais cobrem apoio inclinado, equilíbrio das cargas distribuídas, divisão da barra, conexões dentro do trecho rígido, na face e no trecho deformável.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/member-offsets.test.ts tests/member-offsets.integration.test.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-offsets.spec.ts
+```

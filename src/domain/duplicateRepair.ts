@@ -1,3 +1,4 @@
+import { centeredOffsets } from "./memberOffsets";
 import { distance, tolerance } from "./geometry";
 import {
   endpoints,
@@ -255,6 +256,25 @@ export function planRepair(
         acknowledge,
       );
     }
+    const ends = dst.offsets ?? centeredOffsets;
+    if (
+      ids.some((id) => {
+        const source = members.get(id)!.offsets ?? centeredOffsets;
+        const same = candidate.get(id)!.start === candidate.get(keep)!.start;
+        return (["i", "j"] as const).some((side) => {
+          const other = source[same ? side : side === "i" ? "j" : "i"];
+          return (
+            ends[side].rigidLength !== other.rigidLength ||
+            distance(ends[side].eccentricity, other.eccentricity) > 0
+          );
+        });
+      })
+    )
+      ask(
+        ["offsets", ...ids],
+        `Conservar as excentricidades e os trechos rígidos de ${named(dst)}`,
+        acknowledge,
+      );
     for (const pat of p.loadPatterns)
       pat.uniform = resolveRows(pat.uniform, ids, members, "memberId", pat);
   }

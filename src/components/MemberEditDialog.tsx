@@ -1,3 +1,4 @@
+import { memberAxis } from "../domain/memberOffsets";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   coordinates,
@@ -41,7 +42,7 @@ function describe(p: Project, ids: string[]) {
     .map((m) => {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
-      return { m, a, b, span: distance(a, b) };
+      return { m, a, b, span: memberAxis(m, a, b).span };
     });
   const ends = new Set(rows.flatMap(({ a, b }) => [a.id, b.id]));
   return { rows, draw: drawing(p, ends, affected) };

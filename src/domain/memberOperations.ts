@@ -1,3 +1,4 @@
+import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
 import {
   add,
   beamAxes,
@@ -209,7 +210,9 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   const survivor = bars[0],
     a = nodes.get(survivor.start)!,
     b = nodes.get(survivor.end)!;
-  const [axis, , z] = beamAxes(a, b, survivor.roll);
+  const [axis] = beamAxes(a, b, survivor.roll);
+  const line = memberAxis(survivor, a, b);
+  const [, , z] = beamAxes(line.start, line.end, survivor.roll);
   const ends = new Set(bars.flatMap((m) => [m.start, m.end]));
   const stations = [...ends]
     .map((id) => {
@@ -229,11 +232,8 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
     intervals.add(Math.min(i, j));
     if (m.sectionId !== survivor.sectionId)
       throw new Error("As barras precisam ter a mesma seção.");
-    const [, , localZ] = beamAxes(
-      nodes.get(m.start)!,
-      nodes.get(m.end)!,
-      m.roll,
-    );
+    const segment = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
+    const [, , localZ] = beamAxes(segment.start, segment.end, m.roll);
     if (length(cross(z, localZ)) > 1e-8)
       throw new Error("As barras têm orientações de seção incompatíveis.");
   }
@@ -264,6 +264,36 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
     pat.uniform = pat.uniform.filter(
       (l) => !selected.has(l.memberId) || l.memberId === survivor.id,
     );
+  }
+  if (bars.some((m) => m.offsets)) {
+    const first = stations[0],
+      last = stations.at(-1)!;
+    const endsAt = (id: string) =>
+      bars.flatMap((m) => {
+        const e = m.offsets ?? centeredOffsets;
+        if (m.start === id) return [e.i];
+        if (m.end === id) return [e.j];
+        return [];
+      });
+    const [i] = endsAt(first.id),
+      [j] = endsAt(last.id);
+    for (const station of stations.slice(1, -1)) {
+      const t = (station.d - first.d) / (last.d - first.d);
+      const expected = add(
+        i.eccentricity,
+        scale(subtract(j.eccentricity, i.eccentricity), t),
+      );
+      if (
+        endsAt(station.id).some(
+          (e) =>
+            e.rigidLength || distance(e.eccentricity, expected) > tolerance,
+        )
+      )
+        throw new Error(
+          "A união precisa preservar um único eixo de inserção e os trechos rígidos nas pontas externas.",
+        );
+    }
+    setOffsets(survivor, { i, j });
   }
   survivor.start = stations[0].id;
   survivor.end = stations.at(-1)!.id;

@@ -4,6 +4,7 @@ import {
   tolerance,
   type WorkPlane,
 } from "./geometry";
+import { memberAxis, memberOnPlane } from "./memberOffsets";
 import type { Project, SelectedObject } from "./model";
 
 export type SelectionMode = "replace" | "add" | "subtract" | "intersect";
@@ -121,23 +122,25 @@ export function objectsInWindow(
     top: Math.max(from.v, to.v) + tolerance,
   };
   const [u, v] = planeCoordinates[plane.kind];
-  const visibleNodes = new Map<string, ViewPoint>();
+  const byId = new Map(p.nodes.map((n) => [n.id, n]));
   const found: SelectedObject[] = [];
   for (const node of p.nodes) {
     if (!onPlane(node, plane)) continue;
     const point = { u: node[u], v: node[v] };
-    visibleNodes.set(node.id, point);
     if (inside(point, bounds)) found.push({ kind: "node", id: node.id });
   }
   for (const m of p.members) {
-    const a = visibleNodes.get(m.start),
-      b = visibleNodes.get(m.end);
+    const a = byId.get(m.start)!,
+      b = byId.get(m.end)!;
+    if (!memberOnPlane(m, a, b, plane)) continue;
+    const axis = memberAxis(m, a, b);
+    const points = (m.offsets ? [a, axis.start, axis.end, b] : [a, b]).map(
+      (n) => ({ u: n[u], v: n[v] }),
+    );
     if (
-      a &&
-      b &&
-      (crossing
-        ? intersects(a, b, bounds)
-        : inside(a, bounds) && inside(b, bounds))
+      crossing
+        ? points.slice(1).some((pt, i) => intersects(points[i], pt, bounds))
+        : points.every((pt) => inside(pt, bounds))
     )
       found.push({ kind: "member", id: m.id });
   }

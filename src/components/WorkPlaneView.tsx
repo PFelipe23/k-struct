@@ -13,6 +13,7 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
+  distance,
   normalizeCoord,
   onPlane,
   parseDecimalInput,
@@ -33,7 +34,8 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
-import { beamStations, nearestSection } from "../domain/beamMesh";
+import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
+import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
@@ -144,7 +146,7 @@ export default function WorkPlaneView({
   }, [quick, plane.kind, plane.offset, project.id]);
   const { labels } = layers;
   const mesh = useMemo(
-    () => (layers.mesh ? beamStations(project) : null),
+    () => (layers.mesh ? beamMeshLayout(project) : null),
     [layers.mesh, project],
   );
   const markerId = useId();
@@ -153,9 +155,9 @@ export default function WorkPlaneView({
   const uGuides = spatial || quick ? project.guides[axisU] : [];
   const vGuides = spatial || quick ? project.guides[axisV] : [];
   const nodes = project.nodes.filter((n) => onPlane(n, plane));
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const bars = project.members.filter(
-    (m) => nodeMap.has(m.start) && nodeMap.has(m.end),
+  const nodeMap = new Map(project.nodes.map((n) => [n.id, n]));
+  const bars = project.members.filter((m) =>
+    memberOnPlane(m, nodeMap.get(m.start)!, nodeMap.get(m.end)!, plane),
   );
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const hasMemberSelection = selection.some((item) => item.kind === "member");
@@ -197,13 +199,21 @@ export default function WorkPlaneView({
 
   const cameraBeforeFit = useRef(camera);
   const fit = () => {
+    const points = [
+      ...project.nodes,
+      ...bars.flatMap((m) => {
+        if (!m.offsets) return [];
+        const line = memberAxis(m, nodeMap.get(m.start)!, nodeMap.get(m.end)!);
+        return [line.start, line.end];
+      }),
+    ];
     const us = [
-      ...project.nodes.map((n) => n[axisU]),
+      ...points.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
       ...(slab ? [slab.x, slab.x + slab.lengthX] : []),
     ];
     const vs = [
-      ...project.nodes.map((n) => n[axisV]),
+      ...points.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
       ...(slab ? [slab.y, slab.y + slab.lengthY] : []),
     ];
@@ -695,10 +705,12 @@ export default function WorkPlaneView({
         {bars.map((m) => {
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
-          const u = a[axisU],
-            v = a[axisV],
-            du = b[axisU] - u,
-            dv = b[axisV] - v;
+          const line = memberAxis(m, a, b);
+          const u = line.faceI[axisU],
+            v = line.faceI[axisV],
+            du = line.faceJ[axisU] - u,
+            dv = line.faceJ[axisV] - v;
+          const point = (p: Point3) => `${sx(p[axisU])},${sy(p[axisV])}`;
           const active = selected.has(`member:${m.id}`);
           const loads = patterns.uniform.filter((l) => l.memberId === m.id);
           const components = coordinates.map((k) =>
@@ -765,6 +777,62 @@ export default function WorkPlaneView({
           }
           return (
             <g key={m.id}>
+              {m.offsets && (
+                <g aria-label={`Braços rígidos de ${m.name}`}>
+                  <line
+                    x1={sx(a[axisU])}
+                    y1={sy(a[axisV])}
+                    x2={sx(b[axisU])}
+                    y2={sy(b[axisV])}
+                    stroke="var(--geometry-member)"
+                    strokeDasharray="5 4"
+                    opacity=".55"
+                    pointerEvents="none"
+                  >
+                    <title>Linha entre os nós de lançamento</title>
+                  </line>
+                  {(
+                    [
+                      [a, line.start, line.faceI, "i"],
+                      [b, line.end, line.faceJ, "j"],
+                    ] as const
+                  ).map(
+                    ([joint, insertion, face, side]) =>
+                      (distance(joint, insertion) > 0 ||
+                        distance(insertion, face) > 0) && (
+                        <g
+                          key={side}
+                          onClick={(event) => {
+                            if (tool === "select") {
+                              event.stopPropagation();
+                              onSelect(
+                                { kind: "member", id: m.id },
+                                additiveSelection(event),
+                              );
+                            }
+                          }}
+                        >
+                          <title>{`Braço rígido e face ${side} de ${m.name}`}</title>
+                          <polyline
+                            points={[joint, insertion, face]
+                              .map(point)
+                              .join(" ")}
+                            fill="none"
+                            stroke="var(--geometry-support)"
+                            strokeWidth="4"
+                          />
+                          <circle
+                            data-rigid-face={side}
+                            cx={sx(face[axisU])}
+                            cy={sy(face[axisV])}
+                            r="3.5"
+                            fill="var(--geometry-support)"
+                          />
+                        </g>
+                      ),
+                  )}
+                </g>
+              )}
               <line
                 data-member-id={m.id}
                 x1={sx(u)}
@@ -794,8 +862,27 @@ export default function WorkPlaneView({
                     );
                 }}
               />
-              {mesh
-                ?.get(m.id)
+              {mesh?.rigidLinks
+                .filter((l) => l.memberId === m.id)
+                .map(({ nodeId }) => {
+                  const joint = nodeMap.get(nodeId)!;
+                  return (
+                    <circle
+                      key={nodeId}
+                      data-mesh-member={m.id}
+                      data-mesh-joint={nodeId}
+                      cx={sx(joint[axisU])}
+                      cy={sy(joint[axisV])}
+                      r="8"
+                      fill="none"
+                      stroke="var(--geometry-support)"
+                      strokeWidth="2"
+                      pointerEvents="none"
+                    />
+                  );
+                })}
+              {mesh?.stations
+                .get(m.id)
                 ?.slice(1, -1)
                 .map(({ t, nodeId }) => (
                   <circle
@@ -832,8 +919,14 @@ export default function WorkPlaneView({
                     {norm > 0 &&
                       Array.from({ length: 9 }, (_, i) =>
                         arrow(
-                          sx(u + (du * i) / 8),
-                          sy(v + (dv * i) / 8),
+                          sx(
+                            line.start[axisU] +
+                              ((line.end[axisU] - line.start[axisU]) * i) / 8,
+                          ),
+                          sy(
+                            line.start[axisV] +
+                              ((line.end[axisV] - line.start[axisV]) * i) / 8,
+                          ),
                           (qu / norm) * 34,
                           (-qv / norm) * 34,
                           String(i),
@@ -919,8 +1012,8 @@ export default function WorkPlaneView({
                 length >= tolerance && (
                   <MemberAxes2D
                     member={m}
-                    a={a}
-                    b={b}
+                    a={{ ...a, ...line.faceI }}
+                    b={{ ...b, ...line.faceJ }}
                     mode={project.mode}
                     plane={plane.kind}
                     sx={sx}

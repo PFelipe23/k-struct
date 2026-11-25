@@ -7,6 +7,7 @@ import {
   interpolate,
   beamAxes,
   localComponents,
+  length,
   origin,
   scale,
   subtract,
@@ -18,7 +19,9 @@ import {
   projectSchema,
   type Project,
 } from "../domain/model";
-import { beamStations, type SectionLocation } from "../domain/beamMesh";
+import { memberAxis } from "../domain/memberOffsets";
+import { rigidGroups, rigidJointEquations } from "./rigidOffsets";
+import { beamMeshLayout, type SectionLocation } from "../domain/beamMesh";
 import { supportBasis, supportToGlobal } from "../domain/supports";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
@@ -26,6 +29,7 @@ import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 export interface MeshNode extends Point3 {
   number: number;
   objectId?: string;
+  master?: number;
 }
 export interface MeshElement {
   number: number;
@@ -132,18 +136,40 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     p.sections.map((s) => [s.id, [] as number[]]),
   );
   const memberElements = new Map<string, number[]>();
-  const layout = beamStations(p);
+  const { stations: layout, rigidLinks } = beamMeshLayout(p);
+  const lines = new Map<string, ReturnType<typeof memberAxis>>();
+  const explicitDofs = new Set<number>();
   for (const m of p.members) {
     const a = modelNodes.get(m.start)!,
       b = modelNodes.get(m.end)!;
-    axes.set(m.id, beamAxes(a, b, m.roll, p.mode));
+    const line = memberAxis(m, a, b);
+    lines.set(m.id, line);
+    axes.set(m.id, beamAxes(line.start, line.end, m.roll, p.mode));
+    const stationNode = (t: number, nodeId?: string) => {
+      const at =
+        t === 0
+          ? line.faceI
+          : t === 1
+            ? line.faceJ
+            : interpolate(line.faceI, line.faceJ, t);
+      const joint = nodeId ? modelNodes.get(nodeId) : undefined;
+      if (
+        joint &&
+        (!m.offsets ||
+          (at.x === joint.x && at.y === joint.y && at.z === joint.z))
+      )
+        return joint.number;
+      const number = nodes.length + 1;
+      if (joint) explicitDofs.add(joint.number);
+      nodes.push({ ...at, number, ...(joint ? { master: joint.number } : {}) });
+      return number;
+    };
     const ids: number[] = [];
-    let start = nodeNumber(m.start);
+    let start = stationNode(0, m.start);
     const stations = layout.get(m.id)!;
     for (let i = 1; i < stations.length; i++) {
       const { t, nodeId } = stations[i];
-      const end = nodeId ? nodeNumber(nodeId) : nodes.length + 1;
-      if (!nodeId) nodes.push({ number: end, ...interpolate(a, b, t) });
+      const end = stationNode(t, nodeId);
       if (!(distance(nodes[start - 1], nodes[end - 1]) > 0))
         throw new Error(
           `${m.name}: a malha produziria um segmento de comprimento nulo.`,
@@ -181,6 +207,39 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${fixed.length} ${fixed.join(" ")} values ${fixed.length} ${fixed.map(() => 0).join(" ")} set ${set(`nodes 1 ${nodeNumber(n.id)}`)}`,
       );
   }
+  const membersById = new Map(p.members.map((m) => [m.id, m]));
+  const publicNodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const rigidMasters = rigidGroups(rigidLinks, p.nodes);
+  const supportRows = new Map<string, number[][]>();
+  for (const [nodeId, masterId] of rigidMasters) {
+    const master = nodeNumber(masterId),
+      joint = nodeNumber(nodeId);
+    explicitDofs.add(master);
+    modelNodes.get(nodeId)!.master = master;
+    const independent = supportRows.get(masterId) ?? [];
+    supportRows.set(masterId, independent);
+    for (const equation of rigidJointEquations(
+      publicNodes.get(masterId)!,
+      publicNodes.get(nodeId)!,
+      master,
+      joint,
+      p.mode,
+      independent,
+    ))
+      bcs.push(`LinearConstraintBC ${bcs.length + 1} ${equation}`);
+  }
+  // Flatten auxiliary links, including a face attached to a joint in a rigid zone.
+  for (const node of nodes) {
+    if (!node.master || node.objectId) continue;
+    const joint = nodes[node.master - 1];
+    if (joint.master) node.master = joint.master;
+  }
+  function addNodalLoad(id: string, values: number[]) {
+    if (!values.some(Boolean)) return;
+    bcs.push(
+      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(id) ? " cstype 0" : ""} set ${set(`nodes 1 ${nodeNumber(id)}`)}`,
+    );
+  }
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
     const scaleLoad = (values: number[]) => {
@@ -193,13 +252,29 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     };
     for (const l of pat.nodal) {
       const values = scaleLoad(dofs.map(([, , key]) => l[key]));
-      if (!values.some(Boolean)) continue;
-      bcs.push(
-        `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(l.nodeId) ? " cstype 0" : ""} set ${set(`nodes 1 ${nodeNumber(l.nodeId)}`)}`,
-      );
+      addNodalLoad(l.nodeId, values);
     }
     for (const l of pat.uniform) {
       if (!factor.factor || !(l.qx || l.qy || l.qz)) continue;
+      const m = membersById.get(l.memberId)!;
+      if (m.offsets) {
+        const line = lines.get(m.id)!;
+        for (const [id, end, insertion, face] of [
+          [m.start, m.offsets.i, line.start, line.faceI],
+          [m.end, m.offsets.j, line.end, line.faceJ],
+        ] as const) {
+          if (!end.rigidLength) continue;
+          const force = scale({ x: l.qx, y: l.qy, z: l.qz }, end.rigidLength);
+          const moment = cross(
+            subtract(interpolate(insertion, face, 0.5), modelNodes.get(id)!),
+            force,
+          );
+          const components = spatial
+            ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+            : [force.x, force.z, moment.y];
+          addNodalLoad(id, scaleLoad(components));
+        }
+      }
       const ids = memberElements
         .get(l.memberId)!
         .flatMap((number) => [number, 1]);
@@ -216,7 +291,12 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const deck = [
     "analysis.out",
     `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
-    "StaticStructural nsteps 1 deltat 1",
+    // Additional prescribed directions introduce Lagrange multipliers. GMRES
+    // can solve that indefinite system even with a zero diagonal pivot.
+    "StaticStructural nsteps 1 deltat 1" +
+      ([...supportRows.values()].some((rows) => rows.length)
+        ? " lstype 1 smtype 2 stype 1 lstol 1e-12 lsiter 2000"
+        : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
     `ndofman ${nodes.length} nelem ${elements.length} ncrosssect ${cs.length} nmat ${p.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
@@ -225,7 +305,14 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const lcs = basis
         ? ` lcs 6 ${basis.x.x} ${basis.x.y} ${basis.x.z} ${basis.y.x} ${basis.y.y} ${basis.y.z}`
         : "";
-      return `Node ${n.number} coords 3 ${n.x} ${n.y} ${n.z}${lcs}`;
+      const coords = `coords 3 ${n.x} ${n.y} ${n.z}`;
+      if (n.master) {
+        const joint = n.objectId && publicNodes.get(n.objectId);
+        const mask = (value: number) =>
+          `${dofs.length} ${dofs.map(([key]) => (joint && joint.restraints[key] ? 0 : value)).join(" ")}`;
+        return `RigidArmNode ${n.number} ${coords}${lcs} master ${n.master} dofidmask ${dofList} mastermask ${mask(1)} doftype ${mask(2)}`;
+      }
+      return `Node ${n.number} ${coords}${lcs}${explicitDofs.has(n.number) ? ` dofidmask ${dofList}` : ""}`;
     }),
     ...elements.map((e) => {
       if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
@@ -266,7 +353,7 @@ export function parseOofemOutput(
     throw new Error("Resultado não finito. Análise rejeitada.");
   const nodeOutput = new Map<number, Map<number, number>>();
   for (const match of rawOutput.matchAll(
-    /Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\nNode|\n\s*Element output)/g,
+    /^(?:RigidArm)?Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm)?Node|\n\s*Element output)/gm,
   )) {
     const values = new Map<number, number>();
     const node = Number(match[1]);
@@ -337,6 +424,30 @@ export function parseOofemOutput(
   for (const n of input.nodes)
     if (!d.has(n.number))
       throw new Error(`Deslocamentos ausentes no nó de análise ${n.number}.`);
+  // Independent supports on the same rigid zone add constraint equations.
+  // Check compatibility against the printed global motions before publishing.
+  for (const n of input.nodes) {
+    if (!n.master) continue;
+    const joint = input.nodes[n.master - 1],
+      m = d.get(n.master)!,
+      s = d.get(n.number)!;
+    const arm = subtract(n, joint);
+    const theta = { x: m.rx, y: m.ry, z: m.rz },
+      rotation = { x: s.rx, y: s.ry, z: s.rz };
+    const u = { x: m.ux, y: m.uy, z: m.uz },
+      actual = { x: s.ux, y: s.uy, z: s.uz };
+    const expected = add(u, cross(theta, arm));
+    const printTolerance = 2e-8;
+    if (
+      distance(theta, rotation) > 1e-12 + printTolerance * length(theta) ||
+      distance(expected, actual) >
+        1e-12 + printTolerance * (length(u) + length(theta) * length(arm))
+    ) {
+      throw new Error(
+        `O resultado do OOFEM é incompatível com o movimento rígido entre os nós de análise ${joint.number} e ${n.number}.`,
+      );
+    }
+  }
   const forces = new Map<number, number[]>();
   for (const m of rawOutput.matchAll(
     /beam element\s+(\d+)\s+\(\s*\d+\)\s*:\r?\n[^\n]*local displacements[^\n]*\n[ \t]*local end forces[ \t]+([^\n]+)/g,
@@ -369,10 +480,17 @@ export function parseOofemOutput(
     };
     // Internal editable joints can exchange forces with loads, supports and other bars.
     if (!stations.length) stations.push(station(false));
-    else if (input.nodes[e.start - 1].objectId)
+    else if (
+      input.nodes[e.start - 1].objectId ||
+      input.nodes[e.start - 1].master
+    )
       stations.push({ ...station(false), side: "right" });
     const end = station(true);
-    if (e.t1 < 1 && input.nodes[e.end - 1].objectId) end.side = "left";
+    if (
+      e.t1 < 1 &&
+      (input.nodes[e.end - 1].objectId || input.nodes[e.end - 1].master)
+    )
+      end.side = "left";
     stations.push(end);
   }
   const reactions: Reaction[] = [];
@@ -506,10 +624,11 @@ export function checkEquilibrium(
       const m = members.get(l.memberId)!;
       const a = byId.get(m.start)!,
         b = byId.get(m.end)!;
+      const line = memberAxis(m, a, b);
       accumulate(
-        scale({ x: l.qx, y: l.qy, z: l.qz }, distance(a, b) * f.factor),
+        scale({ x: l.qx, y: l.qy, z: l.qz }, line.span * f.factor),
         origin,
-        interpolate(a, b, 0.5),
+        interpolate(line.start, line.end, 0.5),
       );
     }
   }

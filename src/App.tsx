@@ -141,6 +141,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v12") ??
       localStorage.getItem("kstruct.draft.v11") ??
       localStorage.getItem("kstruct.draft.v10") ??
       localStorage.getItem("kstruct.draft.v9") ??
@@ -401,7 +402,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v11", serialized);
+      localStorage.setItem("kstruct.draft.v12", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1692,8 +1693,8 @@ export default function App() {
                 {visibleDisplay === "deformed"
                   ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
                   : spatial
-                    ? "x/L vai de i (0) a j (1). Esforços nos eixos locais, na face +x. N positivo em tração."
-                    : "x/L vai de i (0) a j (1). N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
+                    ? "x/L vai da face i (0) à face j (1) do trecho deformável. Esforços nos eixos locais, na face +x. N positivo em tração."
+                    : "x/L vai da face i (0) à face j (1) do trecho deformável. N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
               </div>
             )
           )}
