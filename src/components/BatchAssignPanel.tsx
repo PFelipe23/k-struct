@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   applyBatchAssignment,
+  formatBatchLoad,
   planarDofs,
   planarNodalKeys,
   planarUniformKeys,
@@ -19,17 +20,34 @@ import {
 } from "../domain/batchAssign";
 import type { Project, SelectedObject } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
+import { coordinates } from "../domain/geometry";
+import { supportBasis, type SupportFrame } from "../domain/supports";
+import { formatResult } from "./resultFormatting";
 
-const formatKn = (valueN: number): string =>
-  (valueN / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+function describeFrame(frame?: SupportFrame) {
+  if (!frame) return "Global";
+  if (frame.kind === "planar")
+    return `Local · tangente a ${formatResult(frame.angle)}° em XZ`;
+  const basis = supportBasis(frame);
+  return (
+    "Local · " +
+    coordinates
+      .map(
+        (k) =>
+          `${k} = (${coordinates.map((j) => formatResult(basis[k][j])).join(" / ")})`,
+      )
+      .join(", ")
+  );
+}
 
 const describeSummary = (
   summary: ValueSummary | undefined,
   unit: string,
 ): string => {
   if (!summary) return `0 ${unit}`;
-  if (summary.kind === "uniform") return `${formatKn(summary.value)} ${unit}`;
-  return `Misto (${formatKn(summary.min)} a ${formatKn(summary.max)} ${unit})`;
+  if (summary.kind === "uniform")
+    return `${formatBatchLoad(summary.value)} ${unit}`;
+  return `Misto (${formatBatchLoad(summary.min)} a ${formatBatchLoad(summary.max)} ${unit})`;
 };
 
 export default function BatchAssignPanel({
@@ -45,7 +63,6 @@ export default function BatchAssignPanel({
 }) {
   const spatial = project.mode === "spatial";
   const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
-  const selectionKey = selection.map((s) => `${s.kind}:${s.id}`).join("|");
 
   const [sectionId, setSectionId] = useState("");
   const [restraints, setRestraints] = useState<
@@ -75,19 +92,16 @@ export default function BatchAssignPanel({
     setNotice("");
   };
 
-  useEffect(() => {
-    resetDraft();
-  }, [selectionKey, patternId, project.mode]);
-
   const summary = useMemo(
     () => summarizeBatchSelection(project, selection, patternId),
     [project, selection, patternId],
   );
 
-  if (summary.nodeIds.length === 0 && summary.memberIds.length === 0) {
+  if (summary.nodes.length === 0 && summary.members.length === 0) {
     return null;
   }
 
+  const hasLocalFrame = summary.nodes.some((n) => n.supportFrame);
   const activeDofs = spatial ? spatialDofs : planarDofs;
   const activeUniformKeys = spatial ? spatialUniformKeys : planarUniformKeys;
   const activeNodalKeys = spatial ? spatialNodalKeys : planarNodalKeys;
@@ -98,9 +112,9 @@ export default function BatchAssignPanel({
     for (const key of activeUniformKeys) {
       const raw = uniformDraft[key] ?? "";
       if (!raw.trim()) continue;
-      const parsed = parseNumberInput(raw);
+      const parsed = parseNumberInput(raw) * 1000;
       if (!Number.isFinite(parsed)) invalidUniform.add(key);
-      else uniformValues[key] = parsed * 1000;
+      else uniformValues[key] = parsed;
     }
   }
 
@@ -110,9 +124,9 @@ export default function BatchAssignPanel({
     for (const key of activeNodalKeys) {
       const raw = nodalDraft[key] ?? "";
       if (!raw.trim()) continue;
-      const parsed = parseNumberInput(raw);
+      const parsed = parseNumberInput(raw) * 1000;
       if (!Number.isFinite(parsed)) invalidNodal.add(key);
-      else nodalValues[key] = parsed * 1000;
+      else nodalValues[key] = parsed;
     }
   }
 
@@ -122,7 +136,7 @@ export default function BatchAssignPanel({
     sectionId: sectionId || undefined,
     restraints,
     uniformLoad:
-      summary.memberIds.length > 0
+      summary.members.length > 0
         ? {
             operation: uniformOp,
             values: uniformValues,
@@ -130,7 +144,7 @@ export default function BatchAssignPanel({
           }
         : undefined,
     nodalLoad:
-      summary.nodeIds.length > 0
+      summary.nodes.length > 0
         ? {
             operation: nodalOp,
             values: nodalValues,
@@ -170,11 +184,10 @@ export default function BatchAssignPanel({
     <section className="batch-panel" aria-label="Atribuição em lote">
       <h4>Atribuição em lote</h4>
       <p className="help">
-        Alvo: {summary.nodeIds.length} nós · {summary.memberIds.length} barras.
         Campos vazios ou em &quot;Manter&quot; preservam os valores atuais.
       </p>
 
-      {summary.memberIds.length > 0 && (
+      {summary.members.length > 0 && (
         <>
           <label className="stack-field">
             Seção das barras ({currentSectionLabel})
@@ -197,9 +210,14 @@ export default function BatchAssignPanel({
         </>
       )}
 
-      {summary.nodeIds.length > 0 && (
+      {summary.nodes.length > 0 && (
         <>
           <h4>Apoios dos nós</h4>
+          <p className="help">
+            {hasLocalFrame
+              ? "Os vínculos seguem os eixos de cada nó. Confira os referenciais na prévia."
+              : "Os vínculos da seleção usam os eixos globais."}
+          </p>
           {activeDofs.map((dof) => {
             const state = summary.restraints[dof] ?? "free";
             const stateText =
@@ -236,10 +254,10 @@ export default function BatchAssignPanel({
         </>
       )}
 
-      {summary.memberIds.length > 0 && (
+      {summary.members.length > 0 && (
         <>
           <h4>
-            Carga distribuída em lote <span>{pattern.name}</span>
+            Carga distribuída global <span>{pattern.name}</span>
           </h4>
           <label className="stack-field">
             Operação de carga distribuída
@@ -324,10 +342,10 @@ export default function BatchAssignPanel({
         </>
       )}
 
-      {summary.nodeIds.length > 0 && (
+      {summary.nodes.length > 0 && (
         <>
           <h4>
-            Carga nodal em lote <span>{pattern.name}</span>
+            Carga nodal global <span>{pattern.name}</span>
           </h4>
           <label className="stack-field">
             Operação de carga nodal
@@ -430,6 +448,15 @@ export default function BatchAssignPanel({
               Afeta {preview.affectedNodes} nós · {preview.affectedMembers}{" "}
               barras
             </span>
+            <details>
+              <summary>Objetos afetados</summary>
+              {preview.nodeNames.length > 0 && (
+                <p>Nós · {preview.nodeNames.join(", ")}</p>
+              )}
+              {preview.memberNames.length > 0 && (
+                <p>Barras · {preview.memberNames.join(", ")}</p>
+              )}
+            </details>
             <ul>
               {preview.lines.map((line, idx) => (
                 <li key={idx}>{line}</li>
@@ -437,8 +464,21 @@ export default function BatchAssignPanel({
             </ul>
           </>
         ) : (
-          <span>{notice || "Nenhuma alteração pendente no lote."}</span>
+          !notice && <span>Nenhuma alteração pendente no lote.</span>
         )}
+        {hasLocalFrame && (
+          <details>
+            <summary>Referenciais dos nós selecionados</summary>
+            <ul>
+              {summary.nodes.map((n) => (
+                <li key={n.id}>
+                  {n.name} · {describeFrame(n.supportFrame)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {notice && <span role="status">{notice}</span>}
       </div>
 
       <div className="batch-actions">

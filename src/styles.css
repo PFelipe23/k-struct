@@ -2253,6 +2253,9 @@ button.primary {
   font-weight: 500;
 }
 
+.batch-preview details { overflow-wrap: anywhere; }
+.batch-preview summary { cursor: pointer; }
+
 .batch-preview ul {
   margin: 0;
   padding-left: 16px;

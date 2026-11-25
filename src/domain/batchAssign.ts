@@ -1,5 +1,6 @@
 import {
   nodalLoad,
+  patternLoadLimit,
   uniformLoad,
   type NodalLoad,
   type Project,
@@ -7,21 +8,16 @@ import {
   type UniformLoad,
 } from "./model";
 
-export type DofKey = "ux" | "uy" | "uz" | "rx" | "ry" | "rz";
+import { supportDofs, type SupportDof } from "./supports";
+
+export type DofKey = SupportDof;
 export type SupportAction = "keep" | "restrict" | "release";
 export type LoadOperation = "add" | "replace" | "remove";
 export type NodalLoadKey = Exclude<keyof NodalLoad, "nodeId">;
 export type UniformLoadKey = Exclude<keyof UniformLoad, "memberId">;
 
 export const planarDofs: readonly DofKey[] = ["ux", "uz", "ry"];
-export const spatialDofs: readonly DofKey[] = [
-  "ux",
-  "uy",
-  "uz",
-  "rx",
-  "ry",
-  "rz",
-];
+export const spatialDofs = supportDofs;
 export const planarNodalKeys: readonly NodalLoadKey[] = ["fx", "fz", "my"];
 export const spatialNodalKeys: readonly NodalLoadKey[] = [
   "fx",
@@ -46,28 +42,25 @@ export type SectionSummary =
   | { kind: "none" };
 
 export type BatchSelectionSummary = {
-  nodeIds: string[];
-  memberIds: string[];
-  slabCount: number;
+  nodes: Project["nodes"];
+  members: Project["members"];
   section: SectionSummary;
   restraints: Partial<Record<DofKey, SupportSummary>>;
   nodal: Partial<Record<NodalLoadKey, ValueSummary>>;
   uniform: Partial<Record<UniformLoadKey, ValueSummary>>;
 };
 
+type LoadEdit<K extends string> = {
+  operation: LoadOperation;
+  values: Partial<Record<K, number>>;
+  removeKeys?: readonly K[];
+};
+
 export type BatchAssignmentSpec = {
   sectionId?: string;
   restraints?: Partial<Record<DofKey, SupportAction>>;
-  nodalLoad?: {
-    operation: LoadOperation;
-    values: Partial<Record<NodalLoadKey, number>>;
-    removeKeys?: readonly NodalLoadKey[];
-  };
-  uniformLoad?: {
-    operation: LoadOperation;
-    values: Partial<Record<UniformLoadKey, number>>;
-    removeKeys?: readonly UniformLoadKey[];
-  };
+  nodalLoad?: LoadEdit<NodalLoadKey>;
+  uniformLoad?: LoadEdit<UniformLoadKey>;
 };
 
 export type BatchPreview =
@@ -76,73 +69,63 @@ export type BatchPreview =
       hasChanges: boolean;
       affectedNodes: number;
       affectedMembers: number;
+      nodeNames: string[];
+      memberNames: string[];
       patternName: string;
       lines: string[];
     }
   | { ok: false; errors: string[] };
 
-const normalizeZero = (value: number): number =>
-  Math.abs(value) < 1e-12 ? 0 : Number(value.toPrecision(12));
-
 function summarizeNumbers(values: number[]): ValueSummary {
   if (!values.length) return { kind: "uniform", value: 0 };
   const min = Math.min(...values);
   const max = Math.max(...values);
-  return Math.abs(max - min) < 1e-9
-    ? { kind: "uniform", value: normalizeZero(values[0]) }
-    : { kind: "mixed", min: normalizeZero(min), max: normalizeZero(max) };
+  return min === max
+    ? { kind: "uniform", value: min }
+    : { kind: "mixed", min, max };
 }
 
-function sumNodalInPattern(
-  pattern: Project["loadPatterns"][number],
-  nodeId: string,
-): NodalLoad {
-  const total = nodalLoad(nodeId);
-  for (const item of pattern.nodal) {
-    if (item.nodeId !== nodeId) continue;
-    for (const key of spatialNodalKeys) total[key] += item[key];
-  }
-  return total;
+function selectedObjects(
+  project: Project,
+  selection: readonly SelectedObject[],
+) {
+  const nodeIds = new Set(
+    selection.filter((s) => s.kind === "node").map((s) => s.id),
+  );
+  const memberIds = new Set(
+    selection.filter((s) => s.kind === "member").map((s) => s.id),
+  );
+  return {
+    nodes: project.nodes.filter((n) => nodeIds.has(n.id)),
+    members: project.members.filter((m) => memberIds.has(m.id)),
+  };
 }
 
-function sumUniformInPattern(
-  pattern: Project["loadPatterns"][number],
-  memberId: string,
-): UniformLoad {
-  const total = uniformLoad(memberId);
-  for (const item of pattern.uniform) {
-    if (item.memberId !== memberId) continue;
-    for (const key of spatialUniformKeys) total[key] += item[key];
+// Imported projects may have several load records on a single object.
+function selectedTotals<K extends string, L extends Record<K, number>>(
+  objects: readonly { id: string }[],
+  rows: L[],
+  keys: readonly K[],
+  idOf: (row: L) => string,
+  empty: (id: string) => L,
+) {
+  const totals = new Map(objects.map(({ id }) => [id, empty(id)]));
+  for (const row of rows) {
+    const total: Record<K, number> | undefined = totals.get(idOf(row));
+    if (total) for (const key of keys) total[key] += row[key];
   }
-  return total;
+  return totals;
 }
+
+const nodeIdOf = (load: NodalLoad) => load.nodeId;
+const memberIdOf = (load: UniformLoad) => load.memberId;
 
 export function summarizeBatchSelection(
   project: Project,
   selection: readonly SelectedObject[],
   patternId: string,
 ): BatchSelectionSummary {
-  const nodeIdSet = new Set<string>();
-  const memberIdSet = new Set<string>();
-  let slabCount = 0;
-
-  const projectNodeIds = new Set(project.nodes.map((n) => n.id));
-  const projectMemberIds = new Set(project.members.map((m) => m.id));
-
-  for (const item of selection) {
-    if (item.kind === "node" && projectNodeIds.has(item.id)) {
-      nodeIdSet.add(item.id);
-    } else if (item.kind === "member" && projectMemberIds.has(item.id)) {
-      memberIdSet.add(item.id);
-    } else if (item.kind === "slab") {
-      slabCount++;
-    }
-  }
-
-  const nodeIds = [...nodeIdSet];
-  const memberIds = [...memberIdSet];
-  const nodes = project.nodes.filter((n) => nodeIdSet.has(n.id));
-  const members = project.members.filter((m) => memberIdSet.has(m.id));
+  const { nodes, members } = selectedObjects(project, selection);
   const pattern = project.loadPatterns.find((p) => p.id === patternId);
 
   const sectionIds = new Set(members.map((m) => m.sectionId));
@@ -169,7 +152,15 @@ export function summarizeBatchSelection(
   const activeNodal =
     project.mode === "spatial" ? spatialNodalKeys : planarNodalKeys;
   if (pattern && nodes.length > 0) {
-    const totals = nodes.map((n) => sumNodalInPattern(pattern, n.id));
+    const totals = [
+      ...selectedTotals(
+        nodes,
+        pattern.nodal,
+        activeNodal,
+        nodeIdOf,
+        nodalLoad,
+      ).values(),
+    ];
     for (const key of activeNodal) {
       nodal[key] = summarizeNumbers(totals.map((t) => t[key]));
     }
@@ -179,16 +170,23 @@ export function summarizeBatchSelection(
   const activeUniform =
     project.mode === "spatial" ? spatialUniformKeys : planarUniformKeys;
   if (pattern && members.length > 0) {
-    const totals = members.map((m) => sumUniformInPattern(pattern, m.id));
+    const totals = [
+      ...selectedTotals(
+        members,
+        pattern.uniform,
+        activeUniform,
+        memberIdOf,
+        uniformLoad,
+      ).values(),
+    ];
     for (const key of activeUniform) {
       uniform[key] = summarizeNumbers(totals.map((t) => t[key]));
     }
   }
 
   return {
-    nodeIds,
-    memberIds,
-    slabCount,
+    nodes,
+    members,
     section,
     restraints,
     nodal,
@@ -271,8 +269,137 @@ function validateSpec(
   return errors;
 }
 
-const formatKn = (valueN: number): string =>
-  (valueN / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+export function formatBatchLoad(value: number) {
+  const kilo = value / 1000;
+  return kilo.toLocaleString("pt-BR", {
+    maximumSignificantDigits: 12,
+    notation: kilo !== 0 && Math.abs(kilo) < 1e-4 ? "scientific" : "standard",
+  });
+}
+
+// Only the edited components of a changed object are consolidated. All other
+// components stay on their original rows, including cancelling or very small loads.
+function planLoads<K extends string, L extends Record<K, number>>(
+  rows: L[],
+  objects: readonly { id: string }[],
+  edit: LoadEdit<K> | undefined,
+  keys: readonly K[],
+  idOf: (row: L) => string,
+  empty: (id: string) => L,
+) {
+  const changes = new Map<string, Map<K, number>>();
+  const touched =
+    edit?.operation === "remove"
+      ? (edit.removeKeys ?? [])
+      : keys.filter((k) => edit?.values[k] !== undefined);
+  if (!edit || !touched.length || !objects.length) return { rows, changes };
+  const totals = selectedTotals(objects, rows, keys, idOf, empty);
+  for (const [id, total] of totals) {
+    const updated = new Map<K, number>();
+    for (const k of touched) {
+      const value =
+        edit.operation === "remove"
+          ? 0
+          : edit.operation === "add"
+            ? total[k] + edit.values[k]!
+            : edit.values[k]!;
+      if (!Number.isFinite(value))
+        throw new Error(
+          `O total de ${k.toUpperCase()} excede o intervalo numérico.`,
+        );
+      if (value !== total[k]) updated.set(k, value);
+    }
+    if (updated.size) changes.set(id, updated);
+  }
+  if (!changes.size) return { rows, changes };
+
+  const next: L[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const id = idOf(row);
+    const updated = changes.get(id);
+    if (!updated) {
+      next.push(row);
+      continue;
+    }
+    const copy = { ...row };
+    const components: Record<K, number> = copy;
+    for (const [k, value] of updated) components[k] = seen.has(id) ? 0 : value;
+    seen.add(id);
+    if (keys.some((k) => components[k] !== 0)) next.push(copy);
+  }
+  for (const [id, updated] of changes) {
+    if (seen.has(id)) continue;
+    const row = empty(id);
+    const components: Record<K, number> = row;
+    for (const [k, value] of updated) components[k] = value;
+    next.push(row);
+  }
+  if (next.length > patternLoadLimit)
+    throw new Error(
+      `O lote ultrapassa o limite de ${patternLoadLimit} registros de carga por tipo e padrão.`,
+    );
+  return { rows: next, changes };
+}
+
+function planBatchAssignment(
+  project: Project,
+  selection: readonly SelectedObject[],
+  patternId: string,
+  spec: BatchAssignmentSpec,
+) {
+  const errors = validateSpec(project, patternId, spec);
+  if (errors.length) throw new Error(errors.join("\n"));
+  const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
+  const { nodes, members } = selectedObjects(project, selection);
+  const nodal = planLoads(
+    pattern.nodal,
+    nodes,
+    spec.nodalLoad,
+    spatialNodalKeys,
+    nodeIdOf,
+    nodalLoad,
+  );
+  const uniform = planLoads(
+    pattern.uniform,
+    members,
+    spec.uniformLoad,
+    spatialUniformKeys,
+    memberIdOf,
+    uniformLoad,
+  );
+  const actions = (project.mode === "spatial" ? spatialDofs : planarDofs)
+    .filter(
+      (dof) =>
+        spec.restraints?.[dof] === "restrict" ||
+        spec.restraints?.[dof] === "release",
+    )
+    .map((dof) => ({ dof, fixed: spec.restraints![dof] === "restrict" }));
+  const supportNodes = nodes.filter((n) =>
+    actions.some((a) => n.restraints[a.dof] !== a.fixed),
+  );
+  const sectionMembers = spec.sectionId
+    ? members.filter((m) => m.sectionId !== spec.sectionId)
+    : [];
+  const affectedNodes = new Set([
+    ...supportNodes.map((n) => n.id),
+    ...nodal.changes.keys(),
+  ]);
+  const affectedMembers = new Set([
+    ...sectionMembers.map((m) => m.id),
+    ...uniform.changes.keys(),
+  ]);
+  return {
+    pattern,
+    nodal,
+    uniform,
+    actions,
+    supportNodes,
+    sectionMembers,
+    nodes: nodes.filter((n) => affectedNodes.has(n.id)),
+    members: members.filter((m) => affectedMembers.has(m.id)),
+  };
+}
 
 export function applyBatchAssignment(
   project: Project,
@@ -280,131 +407,15 @@ export function applyBatchAssignment(
   patternId: string,
   spec: BatchAssignmentSpec,
 ): { changedNodes: number; changedMembers: number } {
-  const errors = validateSpec(project, patternId, spec);
-  if (errors.length) {
-    throw new Error(errors.join("\n"));
-  }
-
-  const nodeIds = new Set(
-    selection.filter((s) => s.kind === "node").map((s) => s.id),
-  );
-  const memberIds = new Set(
-    selection.filter((s) => s.kind === "member").map((s) => s.id),
-  );
-
-  const changedNodeSet = new Set<string>();
-  const changedMemberSet = new Set<string>();
-
-  if (spec.sectionId) {
-    for (const member of project.members) {
-      if (!memberIds.has(member.id)) continue;
-      if (member.sectionId !== spec.sectionId) {
-        member.sectionId = spec.sectionId;
-        changedMemberSet.add(member.id);
-      }
-    }
-  }
-
-  const restraintEntries = Object.entries(spec.restraints ?? {}).filter(
-    ([, action]) => action === "restrict" || action === "release",
-  ) as [DofKey, "restrict" | "release"][];
-
-  if (restraintEntries.length > 0) {
-    for (const node of project.nodes) {
-      if (!nodeIds.has(node.id)) continue;
-      for (const [dof, action] of restraintEntries) {
-        const next = action === "restrict";
-        if (node.restraints[dof] !== next) {
-          node.restraints[dof] = next;
-          changedNodeSet.add(node.id);
-        }
-      }
-    }
-  }
-
-  const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
-
-  if (spec.nodalLoad && nodeIds.size > 0) {
-    const { operation, values, removeKeys = [] } = spec.nodalLoad;
-    const keysToTouch =
-      operation === "remove"
-        ? removeKeys
-        : (Object.keys(values).filter(
-            (k) => values[k as NodalLoadKey] !== undefined,
-          ) as NodalLoadKey[]);
-
-    if (keysToTouch.length > 0) {
-      const updatedNodal: NodalLoad[] = [];
-      for (const item of pattern.nodal) {
-        if (!nodeIds.has(item.nodeId)) updatedNodal.push(item);
-      }
-      for (const node of project.nodes) {
-        if (!nodeIds.has(node.id)) continue;
-        const current = sumNodalInPattern(pattern, node.id);
-        const next = { ...current };
-        for (const key of keysToTouch) {
-          if (operation === "remove") {
-            next[key] = 0;
-          } else {
-            const amount = values[key]!;
-            next[key] = normalizeZero(
-              operation === "add" ? current[key] + amount : amount,
-            );
-          }
-          if (Math.abs(next[key] - current[key]) >= 1e-12) {
-            changedNodeSet.add(node.id);
-          }
-        }
-        if (spatialNodalKeys.some((k) => Math.abs(next[k]) >= 1e-12)) {
-          updatedNodal.push(next);
-        }
-      }
-      pattern.nodal = updatedNodal;
-    }
-  }
-
-  if (spec.uniformLoad && memberIds.size > 0) {
-    const { operation, values, removeKeys = [] } = spec.uniformLoad;
-    const keysToTouch =
-      operation === "remove"
-        ? removeKeys
-        : (Object.keys(values).filter(
-            (k) => values[k as UniformLoadKey] !== undefined,
-          ) as UniformLoadKey[]);
-
-    if (keysToTouch.length > 0) {
-      const updatedUniform: UniformLoad[] = [];
-      for (const item of pattern.uniform) {
-        if (!memberIds.has(item.memberId)) updatedUniform.push(item);
-      }
-      for (const member of project.members) {
-        if (!memberIds.has(member.id)) continue;
-        const current = sumUniformInPattern(pattern, member.id);
-        const next = { ...current };
-        for (const key of keysToTouch) {
-          if (operation === "remove") {
-            next[key] = 0;
-          } else {
-            const amount = values[key]!;
-            next[key] = normalizeZero(
-              operation === "add" ? current[key] + amount : amount,
-            );
-          }
-          if (Math.abs(next[key] - current[key]) >= 1e-12) {
-            changedMemberSet.add(member.id);
-          }
-        }
-        if (spatialUniformKeys.some((k) => Math.abs(next[k]) >= 1e-12)) {
-          updatedUniform.push(next);
-        }
-      }
-      pattern.uniform = updatedUniform;
-    }
-  }
-
+  const plan = planBatchAssignment(project, selection, patternId, spec);
+  for (const member of plan.sectionMembers) member.sectionId = spec.sectionId!;
+  for (const node of plan.supportNodes)
+    for (const { dof, fixed } of plan.actions) node.restraints[dof] = fixed;
+  plan.pattern.nodal = plan.nodal.rows;
+  plan.pattern.uniform = plan.uniform.rows;
   return {
-    changedNodes: changedNodeSet.size,
-    changedMembers: changedMemberSet.size,
+    changedNodes: plan.nodes.length,
+    changedMembers: plan.members.length,
   };
 }
 
@@ -414,20 +425,16 @@ export function previewBatchAssignment(
   patternId: string,
   spec: BatchAssignmentSpec,
 ): BatchPreview {
-  const errors = validateSpec(project, patternId, spec);
-  if (errors.length) {
-    return { ok: false, errors };
+  let plan: ReturnType<typeof planBatchAssignment>;
+  try {
+    plan = planBatchAssignment(project, selection, patternId, spec);
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [error instanceof Error ? error.message : String(error)],
+    };
   }
-
-  const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
-  const clone = structuredClone(project);
-  const { changedNodes, changedMembers } = applyBatchAssignment(
-    clone,
-    selection,
-    patternId,
-    spec,
-  );
-  const hasChanges = changedNodes > 0 || changedMembers > 0;
+  const { pattern, nodes, members } = plan;
   const lines: string[] = [];
 
   if (spec.sectionId) {
@@ -445,14 +452,14 @@ export function previewBatchAssignment(
           `${dof.toUpperCase()} (${action === "restrict" ? "restringir" : "liberar"})`,
       )
       .join(", ");
-    lines.push(`Apoios: ${desc}.`);
+    lines.push(`Apoios nos eixos de cada nó: ${desc}.`);
   }
 
   if (spec.uniformLoad) {
     const { operation, values, removeKeys = [] } = spec.uniformLoad;
     if (operation === "remove" && removeKeys.length > 0) {
       lines.push(
-        `Cargas em barras (${pattern.name}): remover ${removeKeys.map((k) => k.toUpperCase()).join(", ")}.`,
+        `Cargas globais em barras (${pattern.name}): remover ${removeKeys.map((k) => k.toUpperCase()).join(", ")}.`,
       );
     } else {
       const entries = Object.entries(values).filter(
@@ -461,9 +468,14 @@ export function previewBatchAssignment(
       if (entries.length > 0) {
         const opText = operation === "add" ? "somar" : "substituir por";
         const desc = entries
-          .map(([k, v]) => `${k[0]}${k[1].toUpperCase()} = ${formatKn(v)} kN/m`)
+          .map(
+            ([k, v]) =>
+              `${k[0]}${k[1].toUpperCase()} = ${formatBatchLoad(v)} kN/m`,
+          )
           .join(", ");
-        lines.push(`Cargas em barras (${pattern.name}): ${opText} ${desc}.`);
+        lines.push(
+          `Cargas globais em barras (${pattern.name}): ${opText} ${desc}.`,
+        );
       }
     }
   }
@@ -472,7 +484,7 @@ export function previewBatchAssignment(
     const { operation, values, removeKeys = [] } = spec.nodalLoad;
     if (operation === "remove" && removeKeys.length > 0) {
       lines.push(
-        `Cargas nodais (${pattern.name}): remover ${removeKeys.map((k) => k.toUpperCase()).join(", ")}.`,
+        `Cargas nodais globais (${pattern.name}): remover ${removeKeys.map((k) => k.toUpperCase()).join(", ")}.`,
       );
     } else {
       const entries = Object.entries(values).filter(
@@ -483,19 +495,23 @@ export function previewBatchAssignment(
         const desc = entries
           .map(
             ([k, v]) =>
-              `${k[0] === "f" ? "F" : "M"}${k[1].toUpperCase()} = ${formatKn(v)} ${k[0] === "f" ? "kN" : "kN·m"}`,
+              `${k[0] === "f" ? "F" : "M"}${k[1].toUpperCase()} = ${formatBatchLoad(v)} ${k[0] === "f" ? "kN" : "kN·m"}`,
           )
           .join(", ");
-        lines.push(`Cargas nodais (${pattern.name}): ${opText} ${desc}.`);
+        lines.push(
+          `Cargas nodais globais (${pattern.name}): ${opText} ${desc}.`,
+        );
       }
     }
   }
 
   return {
     ok: true,
-    hasChanges,
-    affectedNodes: changedNodes,
-    affectedMembers: changedMembers,
+    hasChanges: nodes.length > 0 || members.length > 0,
+    affectedNodes: nodes.length,
+    affectedMembers: members.length,
+    nodeNames: nodes.map((n) => n.name),
+    memberNames: members.map((m) => m.name),
     patternName: pattern.name,
     lines,
   };
