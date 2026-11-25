@@ -87,7 +87,9 @@ export function rigidJointEquations(
         : (terms.find((t) => t.node === masterNumber && t.dof === k)?.weight ??
           0),
     );
-    const norm = Math.hypot(...row);
+    const fullNorm = Math.hypot(
+      ...terms.filter((t) => t.node === masterNumber).map((t) => t.weight),
+    );
     for (const v of independent) {
       const projection = v.reduce((sum, vk, k) => sum + vk * row[k], 0);
       v.forEach((vk, k) => {
@@ -95,7 +97,7 @@ export function rigidJointEquations(
       });
     }
     const remaining = Math.hypot(...row);
-    if (!norm || remaining <= 1e-10 * norm) {
+    if (remaining <= 1e-10 * fullNorm) {
       throw new Error(
         `Vínculo ${key.toUpperCase()} em ${joint.name} redundante no trecho rígido ligado a ${master.name}. As reações individuais são indeterminadas.`,
       );

@@ -219,6 +219,14 @@ describe.skipIf(!executable)("KS-23 · OOFEM real", () => {
     expect(() => exportOofem(p, "EL")).toThrow(
       /reações individuais são indeterminadas/i,
     );
+    // With a hinge at A, a horizontal roller at C repeats the restrained UX.
+    // cos(90°) leaves a tiny floating-point projection on the free rotation.
+    p.nodes[0].restraints.ry = false;
+    p.nodes[1].restraints.uz = true;
+    p.nodes[2].supportFrame = { kind: "planar", angle: 90 };
+    expect(() => exportOofem(p, "EL")).toThrow(
+      /reações individuais são indeterminadas/i,
+    );
   });
   it.each([0.25, 0.5, 3])(
     "liga um nó interno a %s m no trecho rígido, na face ou no trecho deformável",
