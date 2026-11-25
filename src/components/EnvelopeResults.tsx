@@ -3,6 +3,8 @@ import { FileDown } from "lucide-react";
 import type { Project, ResultEnvelope } from "../domain/model";
 import type { MemberForceComponent } from "../solver/combinations";
 import { exportFile } from "../solver/desktop";
+import { DEFAULT_UNITS, fromSI, type UnitPreferences } from "../units";
+import { useUnits } from "./Units";
 import type {
   EnvelopeSection,
   MemberEnvelopeResult,
@@ -10,8 +12,10 @@ import type {
 import {
   encodeCsv,
   forceColumns,
-  forceLabels,
+  forceQuantity,
+  getForceLabel,
   formatResult,
+  formatResultQuantity,
   sectionSide,
 } from "./resultFormatting";
 
@@ -19,6 +23,68 @@ const bounds = [
   ["min", "Mínimo"],
   ["max", "Máximo"],
 ] as const;
+
+export function buildEnvelopeCsv(
+  project: Project,
+  envelope: ResultEnvelope,
+  result: MemberEnvelopeResult,
+  component: MemberForceComponent,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  const columns = forceColumns[project.mode];
+  const included = JSON.stringify(envelope.combinationIds);
+  const combinations = new Map(
+    project.resultCombinations.map((item) => [item.id, item]),
+  );
+  const rows = project.members.flatMap((member) =>
+    result[member.id].flatMap((station) =>
+      bounds.map(([bound, label]) => {
+        const { combinationId, forces } = station.ranges[component][bound];
+        const combination = combinations.get(combinationId)!;
+        return [
+          envelope.name,
+          envelope.id,
+          included,
+          member.name,
+          member.id,
+          station.t,
+          getForceLabel(component, units).symbol,
+          label,
+          combination.name,
+          combinationId,
+          ...columns.map((key) =>
+            fromSI(forces[key], forceQuantity(key), units),
+          ),
+          JSON.stringify(combination.factors),
+          ...(project.meshConnections.length
+            ? [sectionSide(station.side)]
+            : []),
+        ];
+      }),
+    ),
+  );
+  return encodeCsv([
+    [
+      "Envelope",
+      "ID do envelope",
+      "IDs das combinações no envelope",
+      "Barra",
+      "ID da barra",
+      "x/L",
+      "Componente governante",
+      "Extremo",
+      "Combinação governante",
+      "ID da combinação",
+      ...columns.map((key) => {
+        const { symbol, unit } = getForceLabel(key, units);
+        return `${symbol} (${unit})`;
+      }),
+      "Parcelas (ID do caso e fator)",
+      ...(project.meshConnections.length ? ["Lado da seção"] : []),
+    ],
+    ...rows,
+  ]);
+}
 
 export default function EnvelopeResults({
   project,
@@ -37,10 +103,11 @@ export default function EnvelopeResults({
   problem: string;
   onSection: (section: EnvelopeSection) => void;
 }) {
+  const { units } = useUnits();
   const [exportError, setExportError] = useState("");
   const columns: readonly MemberForceComponent[] = forceColumns[project.mode];
   const headers = columns.map((key) => {
-    const { symbol, unit } = forceLabels[key];
+    const { symbol, unit } = getForceLabel(key, units);
     return `${symbol} (${unit})`;
   });
   const combinations = new Map(
@@ -51,57 +118,9 @@ export default function EnvelopeResults({
   const exportCsv = () => {
     if (!result) return;
     setExportError("");
-    const included = JSON.stringify(envelope.combinationIds);
-    const factors = new Map(
-      project.resultCombinations.map(({ id, factors }) => [
-        id,
-        JSON.stringify(factors),
-      ]),
-    );
-    const rows = project.members.flatMap((member) =>
-      result[member.id].flatMap((station) =>
-        bounds.map(([bound, label]) => {
-          const { combinationId, forces } = station.ranges[component][bound];
-          return [
-            envelope.name,
-            envelope.id,
-            included,
-            member.name,
-            member.id,
-            station.t,
-            forceLabels[component].symbol,
-            label,
-            combinations.get(combinationId)!.name,
-            combinationId,
-            ...columns.map((key) => forces[key] / 1000),
-            factors.get(combinationId)!,
-            ...(project.meshConnections.length
-              ? [sectionSide(station.side)]
-              : []),
-          ];
-        }),
-      ),
-    );
     void exportFile(
       `kstruct-envelope-${envelope.id}-${component}.csv`,
-      encodeCsv([
-        [
-          "Envelope",
-          "ID do envelope",
-          "IDs das combinações no envelope",
-          "Barra",
-          "ID da barra",
-          "x/L",
-          "Componente governante",
-          "Extremo",
-          "Combinação governante",
-          "ID da combinação",
-          ...headers,
-          "Parcelas (ID do caso e fator)",
-          ...(project.meshConnections.length ? ["Lado da seção"] : []),
-        ],
-        ...rows,
-      ]),
+      buildEnvelopeCsv(project, envelope, result, component, units),
       "text/csv",
     ).catch((error) => setExportError(String(error)));
   };
@@ -113,7 +132,7 @@ export default function EnvelopeResults({
     >
       <div className="results-heading">
         <span className="envelope-title" title={envelope.name}>
-          {envelope.name} · {forceLabels[component].symbol}
+          {envelope.name} · {getForceLabel(component, units).symbol}
         </span>
         {section && stations && (
           <div className="result-actions">
@@ -200,7 +219,11 @@ export default function EnvelopeResults({
                           key === component ? "governing-force" : undefined
                         }
                       >
-                        {formatResult(forces[key] / 1000)}
+                        {formatResultQuantity(
+                          forces[key],
+                          forceQuantity(key),
+                          units,
+                        )}
                       </td>
                     ))}
                   </tr>

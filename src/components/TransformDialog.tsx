@@ -16,6 +16,12 @@ import {
 import type { Transform } from "../domain/transformGeometry";
 import { parseNumberInput } from "./numberInput";
 import TransformPreview from "./TransformPreview";
+import {
+  formatUnitInput,
+  parseUnitInput,
+  type UnitPreferences,
+} from "../units";
+import { useUnits } from "./Units";
 
 type Fields = Record<Coordinate, string>;
 const fields = (v: Point3): Fields => ({
@@ -28,18 +34,32 @@ const values = (f: Fields): Point3 => ({
   y: parseNumberInput(f.y),
   z: parseNumberInput(f.z),
 });
+const lengthFields = (v: Point3, units: UnitPreferences): Fields => ({
+  x: formatUnitInput(v.x, "length", units),
+  y: formatUnitInput(v.y, "length", units),
+  z: formatUnitInput(v.z, "length", units),
+});
+const lengthValues = (
+  f: Fields,
+  units: UnitPreferences,
+  original: Point3,
+): Point3 => ({
+  x: parseUnitInput(f.x, "length", units, original.x) ?? NaN,
+  y: parseUnitInput(f.y, "length", units, original.y) ?? NaN,
+  z: parseUnitInput(f.z, "length", units, original.z) ?? NaN,
+});
 function VectorFields({
   name,
   value,
   onChange,
   planar,
-  metres = false,
+  lengthUnit,
 }: {
   name: string;
   value: Fields;
   onChange: (v: Fields) => void;
   planar: boolean;
-  metres?: boolean;
+  lengthUnit?: string;
 }) {
   return (
     <div className="replica-fields">
@@ -49,7 +69,7 @@ function VectorFields({
           <label key={k}>
             {name}
             {k.toUpperCase()}
-            {metres ? " (m)" : ""}
+            {lengthUnit ? ` (${lengthUnit})` : ""}
             <input
               inputMode="decimal"
               value={value[k]}
@@ -79,6 +99,7 @@ export default function TransformDialog({
   onApply: (plan: TransformPlan) => string | null;
   onClose: () => void;
 }) {
+  const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const el = dialog.current!;
@@ -87,8 +108,8 @@ export default function TransformDialog({
   }, []);
   const planar = project.mode === "planar";
   const [kind, setKind] = useState<Transform["kind"]>("translate");
-  const [offset, setOffset] = useState(fields(initial)),
-    [center, setCenter] = useState(fields(origin));
+  const [offset, setOffset] = useState(() => lengthFields(initial, units)),
+    [center, setCenter] = useState(() => lengthFields(origin, units));
   const [axis, setAxis] = useState(planar ? "y" : "z"),
     [normal, setNormal] = useState("x");
   const [direction, setDirection] = useState(fields({ x: 1, y: 0, z: 1 }));
@@ -103,16 +124,20 @@ export default function TransformDialog({
     setSubmitError("");
   }
   const preview = useMemo(() => {
-    const c = values(center),
+    const c = lengthValues(center, units, origin),
       d = values(direction),
       n = parseNumberInput(copies);
     let spec: Transform;
     switch (kind) {
       case "move":
-        spec = { kind, offset: values(offset) };
+        spec = { kind, offset: lengthValues(offset, units, initial) };
         break;
       case "translate":
-        spec = { kind, offset: values(offset), copies: n };
+        spec = {
+          kind,
+          offset: lengthValues(offset, units, initial),
+          copies: n,
+        };
         break;
       case "rotate":
         spec = {
@@ -164,6 +189,8 @@ export default function TransformDialog({
     supports,
     patterns,
     conflicts,
+    units,
+    initial,
   ]);
   const plan = preview.plan;
   return (
@@ -214,7 +241,7 @@ export default function TransformDialog({
                 value={offset}
                 onChange={setOffset}
                 planar={planar}
-                metres
+                lengthUnit={units.length}
               />
             ) : (
               <>
@@ -223,7 +250,7 @@ export default function TransformDialog({
                   value={center}
                   onChange={setCenter}
                   planar={planar}
-                  metres
+                  lengthUnit={units.length}
                 />
                 {kind === "rotate" ? (
                   <>

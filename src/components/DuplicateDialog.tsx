@@ -8,16 +8,26 @@ import {
   type Merge,
 } from "../domain/duplicateGeometry";
 import {
-  loadText,
   named,
   noRepairs,
   planRepair,
   supportText,
   type Decisions,
 } from "../domain/duplicateRepair";
-import type { Project, SelectedObject } from "../domain/model";
+import type {
+  NodalLoad,
+  Project,
+  SelectedObject,
+  UniformLoad,
+} from "../domain/model";
 import GeometryPreview, { drawing } from "./GeometryPreview";
-import { parseNumberInput } from "./numberInput";
+import {
+  formatQuantity,
+  formatUnitInput,
+  parseUnitInput,
+  type UnitPreferences,
+} from "../units";
+import { useUnits } from "./Units";
 
 type Focus = { kind: "node" | "member"; ids: string[] };
 type Props = {
@@ -101,14 +111,30 @@ function PairList<T extends Pair>({
     </section>
   );
 }
-function objectDetails(p: Project, focus: Focus) {
+function displayLoad(row: NodalLoad | UniformLoad, units: UnitPreferences) {
+  if ("nodeId" in row) {
+    const forces = [row.fx, row.fy, row.fz].map((value) =>
+      formatQuantity(value, "force", units),
+    );
+    const moments = [row.mx, row.my, row.mz].map((value) =>
+      formatQuantity(value, "moment", units),
+    );
+    return `F (${units.force}) = [${forces.join(", ")}], M (${units.moment}) = [${moments.join(", ")}]`;
+  }
+  const values = [row.qx, row.qy, row.qz].map((value) =>
+    formatQuantity(value, "distributedLoad", units),
+  );
+  return `q (${units.distributedLoad}) = [${values.join(", ")}]`;
+}
+
+function objectDetails(p: Project, focus: Focus, units: UnitPreferences) {
   const details: string[] = [];
   for (const id of focus.ids) {
     if (focus.kind === "node") {
       const n = p.nodes.find((n) => n.id === id)!;
       const bars = p.members.filter((m) => m.start === id || m.end === id);
       details.push(
-        `${named(n)} · XYZ (${[n.x, n.y, n.z].map(number).join(" / ")}) m · apoio ${supportText(n)} · barras: ${bars.map(named).join(", ") || "nenhuma"}`,
+        `${named(n)} · XYZ (${[n.x, n.y, n.z].map((value) => formatQuantity(value, "length", units)).join(" / ")}) ${units.length} · apoio ${supportText(n)} · barras: ${bars.map(named).join(", ") || "nenhuma"}`,
       );
     } else {
       const m = p.members.find((m) => m.id === id)!,
@@ -123,7 +149,7 @@ function objectDetails(p: Project, focus: Focus) {
           ? pat.nodal.filter((l) => l.nodeId === id)
           : pat.uniform.filter((l) => l.memberId === id);
       details.push(
-        ...loads.map((l) => `${id} · ${named(pat)} · ${loadText(l)}`),
+        ...loads.map((l) => `${id} · ${named(pat)} · ${displayLoad(l, units)}`),
       );
     }
     for (const group of p.selectionGroups)
@@ -139,7 +165,7 @@ function objectDetails(p: Project, focus: Focus) {
       Math.max(distance(a[0], b[1]), distance(a[1], b[0])),
     );
     details.push(
-      `Maior distância entre extremidades correspondentes no modelo original: ${number(gap)} m.`,
+      `Maior distância entre extremidades correspondentes no modelo original: ${formatQuantity(gap, "length", units)} ${units.length}.`,
     );
   }
   return details;
@@ -175,17 +201,18 @@ export default function DuplicateDialog({
   onApply,
   onHighlight,
 }: Props) {
+  const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const el = dialog.current!;
     el.showModal();
     return () => el.close();
   }, []);
-  const [tol, setTol] = useState("0,001"),
+  const [tol, setTol] = useState(() => formatUnitInput(0.001, "length", units)),
     [choices, setChoices] = useState<Decisions>(noRepairs);
   const [focus, setFocus] = useState<Focus | null>(null),
     [submitError, setSubmitError] = useState("");
-  const limit = parseNumberInput(tol);
+  const limit = parseUnitInput(tol, "length", units, 0.001) ?? NaN;
   const scan = useMemo(
     () => attempt(() => nearNodes(project, limit)),
     [project, limit],
@@ -196,8 +223,13 @@ export default function DuplicateDialog({
   );
   const stage = geometry.value;
   const preview = useMemo(
-    () => (stage ? attempt(() => planRepair(stage, choices)) : undefined),
-    [stage, choices],
+    () =>
+      stage
+        ? attempt(() =>
+            planRepair(stage, choices, (row) => displayLoad(row, units)),
+          )
+        : undefined,
+    [stage, choices, units],
   );
   const plan = preview?.value;
   const byNode = useMemo(
@@ -214,8 +246,8 @@ export default function DuplicateDialog({
   const targets = focus?.kind === "node" ? choices.nodes : choices.members;
   const picked = targets.find((m) => pairKey(m.drop, m.keep) === indexedFocus);
   const focusDetails = useMemo(
-    () => (focus ? objectDetails(project, focus) : []),
-    [project, focus],
+    () => (focus ? objectDetails(project, focus, units) : []),
+    [project, focus, units],
   );
   function highlight(item: Focus | null) {
     setFocus(item);
@@ -249,7 +281,7 @@ export default function DuplicateDialog({
     >
       <h2 id="duplicate-title">Diagnóstico de duplicidades</h2>
       <label>
-        Tolerância de distância (m)
+        Tolerância de distância ({units.length})
         <input
           inputMode="decimal"
           value={tol}
@@ -271,7 +303,7 @@ export default function DuplicateDialog({
           chosen={choices.nodes}
           focus={focus?.kind === "node" ? indexedFocus : ""}
           label={(p) =>
-            `${named(byNode.get(p.a)!)} ↔ ${named(byNode.get(p.b)!)} · ${number(p.distance)} m`
+            `${named(byNode.get(p.a)!)} ↔ ${named(byNode.get(p.b)!)} · ${formatQuantity(p.distance, "length", units)} ${units.length}`
           }
           onSelect={(p) => select("node", p)}
         />

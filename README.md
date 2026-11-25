@@ -13,6 +13,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
 - Editar coordenadas, apoios em referenciais globais ou inclinados, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
+- Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - Salvar e reabrir `.kstruct.json` no esquema v11, com migração dos projetos v1 a v10 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
@@ -65,13 +66,19 @@ Para transformar a seleção, abra **Replicar** no modelo espacial ou **Transfor
 
 As cópias preservam seção e orientação. Por padrão, os novos nós ficam livres e sem carga. Marque **Copiar apoios** e os padrões que deseja levar. Ao reutilizar um nó com dados conflitantes, escolha entre conservar os dados existentes ou unir vínculos e somar cargas dentro do mesmo padrão. Uma cópia girada ou espelhada conserva a direção física do vínculo. Se essa direção for oblíqua, o novo nó recebe um referencial local. Confirme para aplicar toda a operação em uma edição, que pode ser desfeita de uma só vez.
 
-Em **Modelo → Duplicidades**, informe uma tolerância em metros e selecione um par para destacá-lo nas vistas. Por exemplo, 0,001 m corresponde a 1 mm. Escolha o nó ou a barra que conservará o ID. A lista de barras considera as uniões de nós já marcadas e reconhece extremidades invertidas. Confira os apoios, as incidências, as seções, as cargas por padrão e os grupos na prévia. **Aplicar correções** registra uma edição no histórico. **Cancelar** descarta as escolhas. Ao reabrir o diagnóstico, os pares mantidos independentes voltam a aparecer.
+Em **Modelo → Duplicidades**, informe a tolerância na unidade de comprimento selecionada e selecione um par para destacá-lo nas vistas. Por exemplo, 0,001 m corresponde a 1 mm. Escolha o nó ou a barra que conservará o ID. A lista de barras considera as uniões de nós já marcadas e reconhece extremidades invertidas. Confira os apoios, as incidências, as seções, as cargas por padrão e os grupos na prévia. **Aplicar correções** registra uma edição no histórico. **Cancelar** descarta as escolhas. Ao reabrir o diagnóstico, os pares mantidos independentes voltam a aparecer.
 
 Em **Modelo → Editar barras**, selecione uma barra para **Dividir**, **Aparar** ou **Prolongar**. Na divisão, a distância parte do nó inicial i. Para ajustar uma ponta, indique i ou j e escolha um nó, uma coordenada global ou outra barra como referência. Quando o corte atinge o interior de outra barra, a prévia inclui seus novos trechos e ambos usam o mesmo nó. Para **Unir**, selecione as barras com `Ctrl` e abra o comando. Confira as extensões, os padrões de carga e as resultantes antes de aplicar. Uma operação corresponde a um passo de desfazer.
 
 Em **Barra** (`B`), escolha o **Traçado**. **Dois pontos** lança uma barra por par de cliques. **Em cadeia** aproveita a última extremidade para o próximo trecho. **Vão entre eixos** destaca o intervalo entre duas guias consecutivas e o lança com um clique. Aponte para o interior do vão para indicar a direção. Escolha a seção ativa e, em XYZ, a rotação em graus. `Esc` encerra o lançamento e **Desfazer** remove um trecho por vez.
 
-Em **Modelo** → **Tabela de nós**, edite as coordenadas em metros de vários nós em um único passo. A tabela mostra X e Z no modelo plano e X, Y e Z no espacial. Use vírgula ou ponto para decimais e corrija as células destacadas antes de clicar em **Aplicar**. **Cancelar** descarta o rascunho. **Desfazer** e **Refazer** atuam sobre o lote inteiro. Após aplicar uma alteração, analise novamente para atualizar os resultados.
+Em **Modelo** → **Tabela de nós**, edite as coordenadas de vários nós na unidade de comprimento selecionada (metros por padrão). A tabela mostra X e Z no modelo plano e X, Y e Z no espacial. Use vírgula ou ponto para decimais e corrija as células destacadas antes de clicar em **Aplicar**. **Cancelar** descarta o rascunho. **Desfazer** e **Refazer** atuam sobre o lote inteiro. Após aplicar uma alteração, analise novamente para atualizar os resultados.
+
+Em **Colar planilha (TSV)**, escolha a unidade das coordenadas copiadas e cole os nós e as barras. Confira os IDs e os comprimentos na prévia antes de aplicar. Uma barra pode usar nós criados no mesmo lote.
+
+Nos modos **Nó** e **Barra**, aproxime o cursor do ponto médio de uma barra ou da perpendicular a partir do último ponto. Para posicionar a próxima extremidade por incremento, informe os dois valores Δ na unidade exibida e pressione **Enter**.
+
+Em **Exibição → Unidades**, selecione as unidades para cada grandeza e clique em **Aplicar unidades**. Por exemplo, o vão de 6 m aparece como 600 cm ou 6000 mm, e E = 200 GPa aparece como 200000 MPa. Os campos, eixos, pavimentos, réplicas, modelos paramétricos, vistas e tabelas acompanham a escolha. A troca preserva o modelo, o histórico e os resultados da revisão atual. O arquivo do projeto e a entrada OOFEM continuam em SI. O CSV identifica as unidades selecionadas e conserva o formato existente ao usar as preferências padrão. Rotações das tabelas continuam em mrad; pressão da laje em kN/m² e momentos da laje por metro de largura mantêm unidades explícitas.
 
 Em **Exibição → Arranjo de vistas**, escolha **Planta + elevação + perspectiva** para acompanhar um pórtico espacial nos três painéis. Clique ou dê foco ao painel em que quer trabalhar. A faixa acima do desenho identifica a vista ativa e sua cota. Os controles de plano e eixo atuam nessa vista. Zoom, enquadramento, nomes, grelha e cargas podem ser ajustados em cada painel. Trocar de vista cancela o trecho em andamento e preserva as peças já lançadas. No projeto plano, use a elevação XZ sozinha ou ao lado da perspectiva.
 
@@ -101,20 +108,20 @@ Analise o caso e abra **Reações**. Quando houver um apoio local com reação, 
 
 ### Materiais do projeto
 
-Em **Modelo → Materiais**, cadastre o módulo E em GPa, o coeficiente de Poisson ν, a massa específica ρ em kg/m³ e a dilatação linear α em 1/K. Ao editar um material compartilhado, confira em **Uso no projeto** os nomes e a quantidade de seções e lajes afetadas. **Salvar material** aplica a alteração a esses usos.
+Em **Modelo → Materiais**, cadastre o módulo E na unidade selecionada (GPa por padrão), o coeficiente de Poisson ν, a massa específica ρ em kg/m³ e a dilatação linear α em 1/K. Ao editar um material compartilhado, confira em **Uso no projeto** os nomes e a quantidade de seções e lajes afetadas. **Salvar material** aplica a alteração a esses usos.
 
 Para testar outro módulo, selecione o material, clique em **Duplicar material**, edite a cópia e salve. Escolha a seção em **Seção ou laje de destino** e clique em **Atribuir material**. Se várias barras usam a mesma seção e apenas uma deve mudar, use **Duplicar seção**, atribua o novo material à seção copiada e escolha essa seção no inspetor da barra. Cada atribuição pode ser desfeita. Para excluir um material em uso, reatribua primeiro as seções e lajes listadas.
 
 ### Seções de barras
 
-No explorador do **Modelo**, expanda **Seções** e clique no nome de um perfil. O botão **Catálogo de seções** também abre o catálogo pelo inspetor de uma barra. Em **Nova seção**, escolha a forma e o material, dê um nome e informe as dimensões em cm. O tubo usa diâmetro externo e espessura de parede. O perfil I usa altura total, largura das mesas e espessuras de mesa e alma.
+No explorador do **Modelo**, expanda **Seções** e clique no nome de um perfil. O botão **Catálogo de seções** também abre o catálogo pelo inspetor de uma barra. Em **Nova seção**, escolha a forma e o material, dê um nome e informe as dimensões na unidade de seção selecionada (cm por padrão). O tubo usa diâmetro externo e espessura de parede. O perfil I usa altura total, largura das mesas e espessuras de mesa e alma.
 
-Para aplicar o perfil, selecione a barra e altere **Seção da barra**. Para lançamentos novos, use **Seção ativa**. O inspetor mostra o contorno, os eixos locais, a área em cm² e Iy, Iz e J em cm⁴. Editar uma seção compartilhada atualiza todas as barras que a referenciam. Analise novamente o modelo para obter os resultados da nova revisão.
+Para aplicar o perfil, selecione a barra e altere **Seção da barra**. Para lançamentos novos, use **Seção ativa**. O inspetor mostra o contorno, os eixos locais, a área e as propriedades Iy, Iz e J na unidade de seção elevada à segunda e à quarta potência, respectivamente. Editar uma seção compartilhada atualiza todas as barras que a referenciam. Analise novamente o modelo para obter os resultados da nova revisão.
 
 ### Laje retangular isolada
 
 1. Abra **Novo pórtico espacial**, deixe a **Planta XY** ativa e selecione o pavimento. Ative **Laje** (`L`) e clique em dois cantos opostos do painel.
-2. Nas propriedades, informe os lados em metros, a espessura em centímetros, o material, as bordas com apoio simples, as subdivisões em X/Y e a **Pressão pZ** em kN/m² para o padrão escolhido. O sinal negativo indica pressão para baixo. Em **Elemento de placa**, o quadrilateral **QDKT** usa apoio simples nas quatro bordas. O triangular **DKT** permite liberar bordas e requer pelo menos duas apoiadas.
+2. Nas propriedades, informe os lados e a espessura nas unidades selecionadas (m e cm por padrão), o material, as bordas com apoio simples, as subdivisões em X/Y e a **Pressão pZ** em kN/m² para o padrão escolhido. O sinal negativo indica pressão para baixo. Em **Elemento de placa**, o quadrilateral **QDKT** usa apoio simples nas quatro bordas. O triangular **DKT** permite liberar bordas e requer pelo menos duas apoiadas.
 3. Salve o projeto. No desktop, selecione o caso estático e clique em **Analisar**. O seletor de visualização oferece os mapas de **Flecha UZ**, **Momento local Mx** e **Momento local My**. O painel de resultados mostra os valores no centro e a soma de reações em Z.
 4. Para reproduzir a [placa de referência QDKT](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada), use 4 × 3 m, espessura de 10 cm, E = 30 GPa, ν = 0,20, as quatro bordas apoiadas e pZ = −5 kN/m². Repita com 8 × 6, 16 × 12 e 32 × 24 subdivisões.
 

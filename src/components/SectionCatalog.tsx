@@ -14,8 +14,9 @@ import {
   type Dimension,
   type SectionShape,
 } from "../domain/sections";
-import { parseNumberInput } from "./numberInput";
 import SectionPreview from "./SectionPreview";
+import { formatQuantity, formatUnitInput, parseUnitInput } from "../units";
+import { useUnits } from "./Units";
 
 type Edit = (fn: (draft: Project) => void) => string | null;
 
@@ -30,6 +31,7 @@ function SectionForm({
   onSave: (section: Section) => string | null;
   onCancel: () => void;
 }) {
+  const { units } = useUnits();
   const [name, setName] = useState(initial.name);
   const [materialId, setMaterialId] = useState(initial.materialId);
   const [shape, setShape] = useState<SectionShape>(initial.shape);
@@ -38,10 +40,12 @@ function SectionForm({
   const base = shape === initial.shape ? initial : defaultGeometry[shape];
   const geometry = { ...base };
   // Keep the original SI values for every untouched field, including when renaming.
-  for (const { key } of dimensions(base)) {
+  for (const { key, value } of dimensions(base)) {
     const raw = draft[key];
     if (raw !== undefined)
-      Object.assign(geometry, { [key]: parseNumberInput(raw) / 100 });
+      Object.assign(geometry, {
+        [key]: parseUnitInput(raw, "section", units, value) ?? NaN,
+      });
   }
   const errors = geometryErrors(geometry),
     valid = !Object.keys(errors).length;
@@ -109,12 +113,10 @@ function SectionForm({
         {dimensions(base).map(({ key, label, value }) => (
           <div key={key}>
             <label>
-              {label} (cm)
+              {label} ({units.section})
               <input
                 inputMode="decimal"
-                value={
-                  draft[key] ?? String(Number((value * 100).toPrecision(12)))
-                }
+                value={draft[key] ?? formatUnitInput(value, "section", units)}
                 aria-invalid={!!errors[key]}
                 aria-describedby={
                   errors[key] ? `section-error-${key}` : undefined
@@ -133,13 +135,12 @@ function SectionForm({
       {geometry.shape === "tube" && valid && (
         <p className="help">
           Diâmetro interno:{" "}
-          {Number(
-            (
-              (geometry.outerDiameter - 2 * geometry.thickness) *
-              100
-            ).toPrecision(10),
-          ).toLocaleString("pt-BR")}{" "}
-          cm.
+          {formatQuantity(
+            geometry.outerDiameter - 2 * geometry.thickness,
+            "section",
+            units,
+          )}{" "}
+          {units.section}.
         </p>
       )}
       {shape === "i" && (

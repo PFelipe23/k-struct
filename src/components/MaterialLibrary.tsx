@@ -10,6 +10,8 @@ import {
 import type { Material, Project, SelectedObject } from "../domain/model";
 import MaterialProperties, { materialFields } from "./MaterialProperties";
 import { parseNumberInput } from "./numberInput";
+import { formatUnitInput, parseUnitInput, unitLabel } from "../units";
+import { useUnits } from "./Units";
 
 type Edit = (change: (draft: Project) => void) => string | null;
 type MaterialEdit = { mode: "create" | "edit"; material: Material };
@@ -59,10 +61,11 @@ function MaterialForm({
   onSave: (values: Material) => string | null;
   onCancel: () => void;
 }) {
+  const { units } = useUnits();
   const initial = editor.material;
   const [name, setName] = useState(initial.name);
   const [fields, setFields] = useState(() => ({
-    E: String(initial.E / 1e9),
+    E: formatUnitInput(initial.E, "modulus", units),
     nu: String(initial.nu),
     density: String(initial.density),
     alpha: String(initial.alpha),
@@ -75,10 +78,12 @@ function MaterialForm({
       onSubmit={(event) => {
         event.preventDefault();
         const material = { ...initial, name };
-        for (const { key, scale } of materialFields) {
+        for (const { key, quantity } of materialFields) {
           // Renaming a material must preserve every unchanged SI value exactly.
-          if (fields[key] !== String(initial[key] / scale))
-            material[key] = parseNumberInput(fields[key]) * scale;
+          material[key] = quantity
+            ? (parseUnitInput(fields[key], quantity, units, initial[key]) ??
+              NaN)
+            : parseNumberInput(fields[key]);
         }
         setError(onSave(material) ?? "");
       }}
@@ -93,10 +98,11 @@ function MaterialForm({
         />
       </label>
       <div className="material-fields">
-        {materialFields.map(({ key, label, unit }) => (
+        {materialFields.map(({ key, label, unit, quantity }) => (
           <label key={key}>
             {label}
-            {unit && ` (${unit})`}
+            {(quantity || unit) &&
+              ` (${quantity ? unitLabel(quantity, units) : unit})`}
             <input
               inputMode="decimal"
               value={fields[key]}

@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   applyBatchAssignment,
-  formatBatchLoad,
   planarDofs,
   planarNodalKeys,
   planarUniformKeys,
@@ -19,7 +18,13 @@ import {
   type ValueSummary,
 } from "../domain/batchAssign";
 import type { Project, SelectedObject } from "../domain/model";
-import { parseNumberInput } from "./numberInput";
+import { useUnits } from "./Units";
+import {
+  formatQuantity,
+  parseUnitInput,
+  type UnitPreferences,
+  type UnitQuantity,
+} from "../units";
 import { coordinates } from "../domain/geometry";
 import { supportBasis, type SupportFrame } from "../domain/supports";
 import { formatResult } from "./resultFormatting";
@@ -42,12 +47,14 @@ function describeFrame(frame?: SupportFrame) {
 
 const describeSummary = (
   summary: ValueSummary | undefined,
-  unit: string,
+  quantity: UnitQuantity,
+  units: UnitPreferences,
 ): string => {
+  const unit = units[quantity];
   if (!summary) return `0 ${unit}`;
   if (summary.kind === "uniform")
-    return `${formatBatchLoad(summary.value)} ${unit}`;
-  return `Misto (${formatBatchLoad(summary.min)} a ${formatBatchLoad(summary.max)} ${unit})`;
+    return `${formatQuantity(summary.value, quantity, units)} ${unit}`;
+  return `Misto (${formatQuantity(summary.min, quantity, units)} a ${formatQuantity(summary.max, quantity, units)} ${unit})`;
 };
 
 export default function BatchAssignPanel({
@@ -61,6 +68,7 @@ export default function BatchAssignPanel({
   patternId: string;
   edit: (fn: (p: Project) => void) => string | null | void;
 }) {
+  const { units } = useUnits();
   const spatial = project.mode === "spatial";
   const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
 
@@ -112,8 +120,8 @@ export default function BatchAssignPanel({
     for (const key of activeUniformKeys) {
       const raw = uniformDraft[key] ?? "";
       if (!raw.trim()) continue;
-      const parsed = parseNumberInput(raw) * 1000;
-      if (!Number.isFinite(parsed)) invalidUniform.add(key);
+      const parsed = parseUnitInput(raw, "distributedLoad", units);
+      if (parsed === null) invalidUniform.add(key);
       else uniformValues[key] = parsed;
     }
   }
@@ -124,8 +132,12 @@ export default function BatchAssignPanel({
     for (const key of activeNodalKeys) {
       const raw = nodalDraft[key] ?? "";
       if (!raw.trim()) continue;
-      const parsed = parseNumberInput(raw) * 1000;
-      if (!Number.isFinite(parsed)) invalidNodal.add(key);
+      const parsed = parseUnitInput(
+        raw,
+        key[0] === "f" ? "force" : "moment",
+        units,
+      );
+      if (parsed === null) invalidNodal.add(key);
       else nodalValues[key] = parsed;
     }
   }
@@ -153,7 +165,13 @@ export default function BatchAssignPanel({
         : undefined,
   };
 
-  const preview = previewBatchAssignment(project, selection, patternId, spec);
+  const preview = previewBatchAssignment(
+    project,
+    selection,
+    patternId,
+    spec,
+    units,
+  );
 
   const apply = () => {
     if (hasFieldError || !preview.ok) return;
@@ -296,7 +314,12 @@ export default function BatchAssignPanel({
                     />
                     <span>
                       Remover {label} (
-                      {describeSummary(summary.uniform[key], "kN/m")})
+                      {describeSummary(
+                        summary.uniform[key],
+                        "distributedLoad",
+                        units,
+                      )}
+                      )
                     </span>
                   </label>
                 );
@@ -306,7 +329,11 @@ export default function BatchAssignPanel({
             activeUniformKeys.map((key) => {
               const label = `q${key[1].toUpperCase()}`;
               const invalid = invalidUniform.has(key);
-              const currentDesc = describeSummary(summary.uniform[key], "kN/m");
+              const currentDesc = describeSummary(
+                summary.uniform[key],
+                "distributedLoad",
+                units,
+              );
               return (
                 <label className="number-field" key={key}>
                   <span>
@@ -332,7 +359,7 @@ export default function BatchAssignPanel({
                         setNotice("");
                       }}
                     />
-                    <small>kN/m</small>
+                    <small>{units.distributedLoad}</small>
                   </div>
                   {invalid && <em>Informe um valor numérico finito.</em>}
                 </label>
@@ -366,7 +393,7 @@ export default function BatchAssignPanel({
             <div className="batch-checks">
               {activeNodalKeys.map((key) => {
                 const label = `${key[0] === "f" ? "Força" : "Momento"} ${key[1].toUpperCase()}`;
-                const unit = key[0] === "f" ? "kN" : "kN·m";
+                const quantity = key[0] === "f" ? "force" : "moment";
                 return (
                   <label key={key}>
                     <input
@@ -385,7 +412,7 @@ export default function BatchAssignPanel({
                     />
                     <span>
                       Remover {label} (
-                      {describeSummary(summary.nodal[key], unit)})
+                      {describeSummary(summary.nodal[key], quantity, units)})
                     </span>
                   </label>
                 );
@@ -394,9 +421,13 @@ export default function BatchAssignPanel({
           ) : (
             activeNodalKeys.map((key) => {
               const label = `${key[0] === "f" ? "Força" : "Momento"} ${key[1].toUpperCase()}`;
-              const unit = key[0] === "f" ? "kN" : "kN·m";
+              const quantity = key[0] === "f" ? "force" : "moment";
               const invalid = invalidNodal.has(key);
-              const currentDesc = describeSummary(summary.nodal[key], unit);
+              const currentDesc = describeSummary(
+                summary.nodal[key],
+                quantity,
+                units,
+              );
               return (
                 <label className="number-field" key={key}>
                   <span>
@@ -422,7 +453,7 @@ export default function BatchAssignPanel({
                         setNotice("");
                       }}
                     />
-                    <small>{unit}</small>
+                    <small>{units[quantity]}</small>
                   </div>
                   {invalid && <em>Informe um valor numérico finito.</em>}
                 </label>

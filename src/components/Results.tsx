@@ -10,10 +10,19 @@ import type {
 } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
 import {
+  DEFAULT_UNITS,
+  fromSI,
+  unitLabel,
+  type UnitPreferences,
+} from "../units";
+import { useUnits } from "./Units";
+import {
   encodeCsv,
   forceColumns,
-  forceLabels,
+  forceQuantity,
+  getForceLabel,
   formatResult,
+  resultFractionDigits,
   sectionSide,
 } from "./resultFormatting";
 
@@ -25,6 +34,145 @@ type ResultView =
       result: StructuralResult | null;
       problem: string;
     };
+
+export function buildResultTable(
+  project: Project,
+  tab: string,
+  result: StructuralResult | null,
+  forceMemberId = "",
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  const spatial = project.mode === "spatial";
+  const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
+  const memberNames = new Map(project.members.map((m) => [m.id, m.name]));
+  let rows: (string | number)[][] = [],
+    headers: string[] = [];
+  if (tab === "reactions") {
+    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
+      ? ["fx", "fy", "fz", "mx", "my", "mz"]
+      : ["fx", "fz", "my"];
+    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
+    const hasLocal = (result?.reactions ?? []).some(
+      ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
+    );
+    const quantity = (key: (typeof keys)[number]) =>
+      key.startsWith("f") ? "force" : "moment";
+    const componentHeaders = (frame: "global" | "local") =>
+      keys.map((key) => {
+        const [kind, axis] = key.toUpperCase();
+        return `${kind === "F" ? "R" : "M"}${axis} ${frame} (${unitLabel(quantity(key), units)})`;
+      });
+    headers = ["Nó", ...componentHeaders("global")];
+    if (hasLocal)
+      headers.push(...componentHeaders("local"), "Referencial do apoio");
+    rows = (result?.reactions ?? []).map((r) => {
+      const row: (string | number)[] = [
+        nodeNames.get(r.nodeId) ?? r.nodeId,
+        ...keys.map((key) => fromSI(r[key], quantity(key), units)),
+      ];
+      if (hasLocal) {
+        const node = nodes.get(r.nodeId)!;
+        const basis = supportBasis(node.supportFrame);
+        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
+        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
+        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
+        row.push(
+          ...keys.map((key) => {
+            const axis = key[1] as "x" | "y" | "z";
+            return node.restraints[`${key[0] === "f" ? "u" : "r"}${axis}`]
+              ? fromSI(local[key], quantity(key), units)
+              : 0;
+          }),
+          node.supportFrame ? "Local" : "Global",
+        );
+      }
+      return row;
+    });
+  } else if (tab === "displacements") {
+    const values = (d: Displacement) => [
+      ...[d.ux, ...(spatial ? [d.uy] : []), d.uz].map((value) =>
+        fromSI(value, "displacement", units),
+      ),
+      ...(spatial ? [d.rx, d.ry, d.rz] : [d.ry]).map((value) => value * 1000),
+    ];
+    const displacement = unitLabel("displacement", units);
+    headers = [
+      "Nó / estação",
+      ...["UX", ...(spatial ? ["UY"] : []), "UZ"].map(
+        (label) => `${label} (${displacement})`,
+      ),
+      ...(spatial ? ["RX", "RY", "RZ"] : ["RY"]).map(
+        (label) => `${label} (mrad)`,
+      ),
+    ];
+    rows = [
+      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => [
+        nodeNames.get(id) ?? id,
+        ...values(d),
+      ]),
+      ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
+        stations
+          .slice(1, -1)
+          .filter((s) => s.side !== "right")
+          .map((s) => [
+            `${memberNames.get(id) ?? id} · x/L ${s.t}`,
+            ...values(s),
+          ]),
+      ),
+    ];
+  } else if (tab === "forces") {
+    const components = forceColumns[project.mode];
+    headers = [
+      "Barra",
+      "x/L",
+      ...components.map((key) => {
+        const { symbol, unit } = getForceLabel(key, units);
+        return `${symbol} (${unit})`;
+      }),
+      ...(project.meshConnections.length
+        ? ["Lado da seção", "ID da barra"]
+        : []),
+    ];
+    rows = Object.entries(result?.members ?? {})
+      .filter(([id]) => !forceMemberId || id === forceMemberId)
+      .flatMap(([id, stations]) =>
+        stations.map((s) => [
+          memberNames.get(id) ?? id,
+          s.t,
+          ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
+          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
+        ]),
+      );
+  }
+  return { headers, rows };
+}
+
+export function buildResultCsv(
+  project: Project,
+  view: ResultView,
+  tab: string,
+  forceMemberId = "",
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  const { headers, rows } = buildResultTable(
+    project,
+    tab,
+    view.result,
+    forceMemberId,
+    units,
+  );
+  const { definition } = view;
+  const combination = view.kind === "combination" ? view.definition : null;
+  const sourceHeaders = combination
+    ? ["Combinação", "ID da combinação", "Parcelas (ID do caso e fator)"]
+    : ["Caso", "ID do caso"];
+  const source = [definition.name, definition.id];
+  if (combination) source.push(JSON.stringify(combination.factors));
+  return encodeCsv([
+    [...headers, ...sourceHeaders],
+    ...rows.map((row) => [...row, ...source]),
+  ]);
+}
 
 export default function Results({
   project,
@@ -45,6 +193,7 @@ export default function Results({
   cancelling: boolean;
   openRunHistory?: () => void;
 }) {
+  const { units } = useUnits();
   const [tab, setTab] = useState("log");
   const [exportError, setExportError] = useState("");
   const { definition, result } = view;
@@ -69,105 +218,13 @@ export default function Results({
       setExportError(String(e)),
     );
   };
-  const spatial = project.mode === "spatial";
-  const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
-  const memberNames = new Map(project.members.map((m) => [m.id, m.name]));
-  let rows: (string | number)[][] = [],
-    headers: string[] = [];
-  if (tab === "reactions") {
-    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
-      ? ["fx", "fy", "fz", "mx", "my", "mz"]
-      : ["fx", "fz", "my"];
-    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
-    const hasLocal = (result?.reactions ?? []).some(
-      ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
-    );
-    const componentHeaders = (frame: "global" | "local") =>
-      keys.map((key) => {
-        const [kind, axis] = key.toUpperCase();
-        return `${kind === "F" ? "R" : "M"}${axis} ${frame} (${kind === "F" ? "kN" : "kN·m"})`;
-      });
-    headers = ["Nó", ...componentHeaders("global")];
-    if (hasLocal)
-      headers.push(...componentHeaders("local"), "Referencial do apoio");
-    rows = (result?.reactions ?? []).map((r) => {
-      const row: (string | number)[] = [
-        nodeNames.get(r.nodeId) ?? r.nodeId,
-        ...keys.map((k) => r[k] / 1000),
-      ];
-      if (hasLocal) {
-        const node = nodes.get(r.nodeId)!;
-        const basis = supportBasis(node.supportFrame);
-        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
-        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
-        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
-        row.push(
-          ...keys.map((k) => {
-            const axis = k[1] as "x" | "y" | "z";
-            return node.restraints[`${k[0] === "f" ? "u" : "r"}${axis}`]
-              ? local[k] / 1000
-              : 0;
-          }),
-          node.supportFrame ? "Local" : "Global",
-        );
-      }
-      return row;
-    });
-  } else if (tab === "displacements") {
-    const values = (d: Displacement) =>
-      (spatial ? [d.ux, d.uy, d.uz, d.rx, d.ry, d.rz] : [d.ux, d.uz, d.ry]).map(
-        (v) => v * 1000,
-      );
-    headers = spatial
-      ? [
-          "Nó / estação",
-          "UX (mm)",
-          "UY (mm)",
-          "UZ (mm)",
-          "RX (mrad)",
-          "RY (mrad)",
-          "RZ (mrad)",
-        ]
-      : ["Nó / estação", "UX (mm)", "UZ (mm)", "RY (mrad)"];
-    rows = [
-      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => [
-        nodeNames.get(id) ?? id,
-        ...values(d),
-      ]),
-      ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
-        stations
-          .slice(1, -1)
-          .filter((s) => s.side !== "right")
-          .map((s) => [
-            `${memberNames.get(id) ?? id} · x/L ${s.t}`,
-            ...values(s),
-          ]),
-      ),
-    ];
-  } else if (tab === "forces") {
-    const components = forceColumns[project.mode];
-    headers = [
-      "Barra",
-      "x/L",
-      ...components.map((key) => {
-        const { symbol, unit } = forceLabels[key];
-        return `${symbol} (${unit})`;
-      }),
-      ...(project.meshConnections.length
-        ? ["Lado da seção", "ID da barra"]
-        : []),
-    ];
-    rows = Object.entries(result?.members ?? {})
-      .filter(([id]) => !forceMemberId || id === forceMemberId)
-      .flatMap(([id, stations]) =>
-        stations.map((s) => [
-          memberNames.get(id) ?? id,
-          s.t,
-          ...components.map((key) => s[key] / 1000),
-          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
-        ]),
-      );
-  }
+  const { headers, rows } = buildResultTable(
+    project,
+    tab,
+    result,
+    forceMemberId,
+    units,
+  );
   return (
     <section className="results">
       <div className="results-heading">
@@ -239,22 +296,9 @@ export default function Results({
               {tab !== "log" && (
                 <button
                   onClick={() => {
-                    const sourceHeaders = combination
-                      ? [
-                          "Combinação",
-                          "ID da combinação",
-                          "Parcelas (ID do caso e fator)",
-                        ]
-                      : ["Caso", "ID do caso"];
-                    const source = [definition.name, definition.id];
-                    if (combination)
-                      source.push(JSON.stringify(combination.factors));
                     download(
                       `kstruct-${combination ? "combinacao-" : ""}${definition.id}-${tab}.csv`,
-                      encodeCsv([
-                        [...headers, ...sourceHeaders],
-                        ...rows.map((row) => [...row, ...source]),
-                      ]),
+                      buildResultCsv(project, view, tab, forceMemberId, units),
                       "text/csv",
                     );
                   }}
@@ -310,7 +354,16 @@ export default function Results({
                 <tr key={i}>
                   {r.map((v, j) => (
                     <td key={j}>
-                      {typeof v === "number" ? formatResult(v) : v}
+                      {typeof v === "number"
+                        ? formatResult(
+                            v,
+                            tab === "displacements" &&
+                              j > 0 &&
+                              j <= (project.mode === "spatial" ? 3 : 2)
+                              ? resultFractionDigits("displacement", units)
+                              : 5,
+                          )
+                        : v}
                     </td>
                   ))}
                 </tr>

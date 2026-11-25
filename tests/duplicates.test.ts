@@ -16,6 +16,7 @@ import { addMember } from "../src/domain/editing";
 import { origin } from "../src/domain/geometry";
 import { nearNodes, stagedMembers } from "../src/domain/duplicateGeometry";
 import {
+  loadText,
   noRepairs,
   planRepair,
   type Decisions,
@@ -71,6 +72,30 @@ function fixture() {
   return p;
 }
 describe("diagnóstico e correção de duplicidades", () => {
+  it("personaliza as notas de cargas sem alterar decisões ou valores SI da correção", () => {
+    const p = fixture();
+    const snapshot = structuredClone(p);
+    const decisions = noRepairs();
+    decisions.nodes = [{ drop: "C", keep: "A" }];
+    decisions.members = [{ drop: "V2", keep: "V1" }];
+    const stage = stagedMembers(p, 0.001, decisions.nodes);
+    for (const question of planRepair(stage, decisions).questions)
+      decisions.answers[question.key] = question.options[0].value;
+    const baseline = planRepair(stage, decisions);
+    expect(baseline.project).not.toBeNull();
+    expect(planRepair(stage, decisions, loadText)).toEqual(baseline);
+    const received: number[] = [];
+    const displayed = planRepair(stage, decisions, (row) => {
+      const value = "nodeId" in row ? row.fx : row.qz;
+      received.push(value);
+      return `valor apresentado: ${value / 1000} kN`;
+    });
+    expect(received).toContain(20);
+    expect(received).toContain(-10000);
+    expect(displayed.notes.join(" ")).toContain("valor apresentado: -10 kN");
+    expect({ ...displayed, notes: baseline.notes }).toEqual(baseline);
+    expect(p).toEqual(snapshot);
+  });
   it("busca com distância XYZ, inclui o limite e distingue cota e cruzamento em planta", () => {
     const p = createProject("spatial");
     const a = addPoint(p, origin),

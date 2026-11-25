@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { tolerance } from "../domain/geometry";
-import { parseNumberInput } from "./numberInput";
 import { createProject, type Project } from "../domain/model";
+import {
+  formatQuantity,
+  formatUnitInput,
+  parseUnitInput,
+  unitLabel,
+} from "../units";
+import { useUnits } from "./Units";
 import {
   generateParametricProject,
   inspectParametricTemplate,
@@ -14,15 +20,6 @@ type TemplateChoice =
   | "empty-spatial"
   | "continuous-beam"
   | "regular-frame";
-
-const isValidPositive = (value: string): boolean => {
-  const parsed = parseNumberInput(value);
-  return Number.isFinite(parsed) && parsed > tolerance;
-};
-
-const formatMeters = new Intl.NumberFormat("pt-BR", {
-  maximumFractionDigits: 9,
-}).format;
 
 function DimensionListEditor({
   title,
@@ -41,20 +38,23 @@ function DimensionListEditor({
   defaultNewValue: string;
   onChange: (next: string[]) => void;
 }) {
+  const { units } = useUnits();
+  const lengthUnit = unitLabel("length", units);
   return (
     <fieldset className="template-group">
       <legend>{title}</legend>
       <div className="template-list">
         {values.map((raw, index) => {
-          const invalid = !isValidPositive(raw);
+          const valueSI = parseUnitInput(raw, "length", units);
+          const invalid = valueSI === null || valueSI <= tolerance;
           return (
             <div className="template-row" key={`${itemLabel}-${index}`}>
               <label>
                 <span>
-                  {itemLabel} {index + 1} (m)
+                  {itemLabel} {index + 1} ({lengthUnit})
                 </span>
                 <input
-                  aria-label={`${itemLabel} ${index + 1} (m)`}
+                  aria-label={`${itemLabel} ${index + 1} (${lengthUnit})`}
                   aria-invalid={invalid}
                   inputMode="decimal"
                   value={raw}
@@ -91,6 +91,10 @@ function DimensionListEditor({
 }
 
 function BeamPreviewSvg({ preview }: { preview: ParametricPreview }) {
+  const { units } = useUnits();
+  const lengthUnit = unitLabel("length", units);
+  const formatLength = (valueSI: number) =>
+    formatQuantity(valueSI, "length", units);
   const width = 340;
   const height = 104;
   const padX = 28;
@@ -124,7 +128,7 @@ function BeamPreviewSvg({ preview }: { preview: ParametricPreview }) {
             textAnchor="middle"
             className="preview-dim"
           >
-            {formatMeters(span)} m
+            {formatLength(span)} {lengthUnit}
           </text>
         );
       })}
@@ -139,19 +143,23 @@ function BeamPreviewSvg({ preview }: { preview: ParametricPreview }) {
               textAnchor="middle"
               className="preview-coord"
             >
-              {formatMeters(x)}
+              {formatLength(x)}
             </text>
           </g>
         );
       })}
       <text x={padX} y={16} className="preview-caption">
-        Elevação XZ · abscissas X (m)
+        Elevação XZ · abscissas X ({lengthUnit})
       </text>
     </svg>
   );
 }
 
 function FrameElevationSvg({ preview }: { preview: ParametricPreview }) {
+  const { units } = useUnits();
+  const lengthUnit = unitLabel("length", units);
+  const formatLength = (valueSI: number) =>
+    formatQuantity(valueSI, "length", units);
   const width = 260;
   const height = 148;
   const padX = 26;
@@ -203,14 +211,18 @@ function FrameElevationSvg({ preview }: { preview: ParametricPreview }) {
         )),
       )}
       <text x={8} y={14} className="preview-caption">
-        Elevação XZ ({formatMeters(preview.totalLengthX)} ×{" "}
-        {formatMeters(preview.totalHeightZ)} m)
+        Elevação XZ ({formatLength(preview.totalLengthX)} ×{" "}
+        {formatLength(preview.totalHeightZ)} {lengthUnit})
       </text>
     </svg>
   );
 }
 
 function FramePlanSvg({ preview }: { preview: ParametricPreview }) {
+  const { units } = useUnits();
+  const lengthUnit = unitLabel("length", units);
+  const formatLength = (valueSI: number) =>
+    formatQuantity(valueSI, "length", units);
   const width = 260;
   const height = 148;
   const pad = 26;
@@ -261,8 +273,8 @@ function FramePlanSvg({ preview }: { preview: ParametricPreview }) {
         )),
       )}
       <text x={8} y={14} className="preview-caption">
-        Planta XY ({formatMeters(preview.totalLengthX)} ×{" "}
-        {formatMeters(preview.totalLengthY)} m)
+        Planta XY ({formatLength(preview.totalLengthX)} ×{" "}
+        {formatLength(preview.totalLengthY)} {lengthUnit})
       </text>
     </svg>
   );
@@ -275,34 +287,56 @@ export default function NewProjectDialog({
   onCreate: (project: Project) => void;
   onClose: () => void;
 }) {
+  const { units } = useUnits();
+  const lengthUnit = unitLabel("length", units);
+  const formatLength = (valueSI: number) =>
+    formatQuantity(valueSI, "length", units);
+  const inputLength = (valueSI: number) =>
+    formatUnitInput(valueSI, "length", units);
   const [choice, setChoice] = useState<TemplateChoice>("empty-planar");
-  const [beamSpans, setBeamSpans] = useState<string[]>(["4", "6"]);
+  const [beamSpans, setBeamSpans] = useState<string[]>(() =>
+    [4, 6].map(inputLength),
+  );
   const [frameMode, setFrameMode] = useState<Project["mode"]>("planar");
-  const [frameSpansX, setFrameSpansX] = useState<string[]>(["4", "4"]);
-  const [frameSpansY, setFrameSpansY] = useState<string[]>(["4", "4"]);
-  const [frameHeightsZ, setFrameHeightsZ] = useState<string[]>(["3", "3"]);
+  const [frameSpansX, setFrameSpansX] = useState<string[]>(() =>
+    [4, 4].map(inputLength),
+  );
+  const [frameSpansY, setFrameSpansY] = useState<string[]>(() =>
+    [4, 4].map(inputLength),
+  );
+  const [frameHeightsZ, setFrameHeightsZ] = useState<string[]>(() =>
+    [3, 3].map(inputLength),
+  );
 
   const spec: ParametricTemplateSpec | null = useMemo(() => {
+    const parseLength = (raw: string) =>
+      parseUnitInput(raw, "length", units) ?? Number.NaN;
     if (choice === "continuous-beam") {
       return {
         kind: "continuous-beam",
-        spansX: beamSpans.map(parseNumberInput),
+        spansX: beamSpans.map(parseLength),
       };
     }
     if (choice === "regular-frame") {
       return {
         kind: "regular-frame",
         mode: frameMode,
-        spansX: frameSpansX.map(parseNumberInput),
+        spansX: frameSpansX.map(parseLength),
         spansY:
-          frameMode === "spatial"
-            ? frameSpansY.map(parseNumberInput)
-            : undefined,
-        heightsZ: frameHeightsZ.map(parseNumberInput),
+          frameMode === "spatial" ? frameSpansY.map(parseLength) : undefined,
+        heightsZ: frameHeightsZ.map(parseLength),
       };
     }
     return null;
-  }, [choice, beamSpans, frameMode, frameSpansX, frameSpansY, frameHeightsZ]);
+  }, [
+    choice,
+    beamSpans,
+    frameMode,
+    frameSpansX,
+    frameSpansY,
+    frameHeightsZ,
+    units,
+  ]);
 
   const validation = useMemo(
     () => (spec ? inspectParametricTemplate(spec) : null),
@@ -336,9 +370,9 @@ export default function NewProjectDialog({
       >
         <h2 id="new-project-title">Novo projeto</h2>
         <p>
-          Escolha iniciar um projeto vazio ou gerar uma geometria paramétrica em
-          metros (m). As peças geradas usam os mesmos nós, barras, seções e
-          comandos do lançamento manual.
+          Escolha iniciar um projeto vazio ou gerar uma geometria paramétrica.
+          Informe os comprimentos em {lengthUnit}. As peças geradas usam os
+          mesmos nós, barras, seções e comandos do lançamento manual.
         </p>
 
         <div
@@ -387,7 +421,7 @@ export default function NewProjectDialog({
                   addLabel="Adicionar vão"
                   removePrefix="Remover vão"
                   values={beamSpans}
-                  defaultNewValue="4"
+                  defaultNewValue={inputLength(4)}
                   onChange={setBeamSpans}
                 />
               )}
@@ -419,7 +453,7 @@ export default function NewProjectDialog({
                     addLabel="Adicionar vão X"
                     removePrefix="Remover vão X"
                     values={frameSpansX}
-                    defaultNewValue="4"
+                    defaultNewValue={inputLength(4)}
                     onChange={setFrameSpansX}
                   />
                   {frameMode === "spatial" && (
@@ -429,7 +463,7 @@ export default function NewProjectDialog({
                       addLabel="Adicionar vão Y"
                       removePrefix="Remover vão Y"
                       values={frameSpansY}
-                      defaultNewValue="4"
+                      defaultNewValue={inputLength(4)}
                       onChange={setFrameSpansY}
                     />
                   )}
@@ -439,7 +473,7 @@ export default function NewProjectDialog({
                     addLabel="Adicionar pavimento"
                     removePrefix="Remover pavimento"
                     values={frameHeightsZ}
-                    defaultNewValue="3"
+                    defaultNewValue={inputLength(3)}
                     onChange={setFrameHeightsZ}
                   />
                 </>
@@ -460,7 +494,7 @@ export default function NewProjectDialog({
                   </div>
                   <div>
                     <span>Unidades</span>
-                    <b>m (metros)</b>
+                    <b>{lengthUnit}</b>
                   </div>
                   <div>
                     <span>Nós / Barras</span>
@@ -502,30 +536,30 @@ export default function NewProjectDialog({
                     </div>
                     <div>
                       <span>Unidades</span>
-                      <b>{validation.preview.units} (metros)</b>
+                      <b>{lengthUnit}</b>
                     </div>
                     <div>
-                      <span>Eixos X (m)</span>
+                      <span>Eixos X ({lengthUnit})</span>
                       <b>
-                        {validation.preview.axesX.map(formatMeters).join(", ")}
+                        {validation.preview.axesX.map(formatLength).join(", ")}
                       </b>
                     </div>
                     {validation.preview.mode === "spatial" && (
                       <div>
-                        <span>Eixos Y (m)</span>
+                        <span>Eixos Y ({lengthUnit})</span>
                         <b>
                           {validation.preview.axesY
-                            .map(formatMeters)
+                            .map(formatLength)
                             .join(", ")}
                         </b>
                       </div>
                     )}
                     {choice === "regular-frame" && (
                       <div>
-                        <span>Níveis Z (m)</span>
+                        <span>Níveis Z ({lengthUnit})</span>
                         <b>
                           {validation.preview.levelsZ
-                            .map(formatMeters)
+                            .map(formatLength)
                             .join(", ")}
                         </b>
                       </div>

@@ -3,6 +3,8 @@ import {
   shapeNames,
   type SectionGeometry,
 } from "../domain/sections";
+import { formatUnitValue, fromSI } from "../units";
+import { useUnits } from "./Units";
 
 const number = new Intl.NumberFormat("pt-BR", { maximumSignificantDigits: 7 });
 function Outline({ geometry: g }: { geometry: SectionGeometry }) {
@@ -37,6 +39,8 @@ export default function SectionPreview({
   geometry: SectionGeometry;
   roll?: number;
 }) {
+  const { units } = useUnits();
+  const sectionScale = fromSI(1, "section", units);
   const { A, Iy, Iz, J } = sectionProperties(geometry);
   const equal = Math.abs(Iy - Iz) <= 1e-12 * Math.max(Iy, Iz);
   return (
@@ -67,16 +71,17 @@ export default function SectionPreview({
       >
         {(
           [
-            ["A", A, 1e4, "cm²"],
-            ["Iy", Iy, 1e8, "cm⁴"],
-            ["Iz", Iz, 1e8, "cm⁴"],
-            ["J", J, 1e8, "cm⁴"],
+            ["A", A, 2, "²"],
+            ["Iy", Iy, 4, "⁴"],
+            ["Iz", Iz, 4, "⁴"],
+            ["J", J, 4, "⁴"],
           ] as const
-        ).map(([key, value, scale, unit]) => (
+        ).map(([key, value, power, suffix]) => (
           <div key={key}>
             <dt>{key}</dt>
             <dd>
-              {number.format(value * scale)} {unit}
+              {formatUnitValue(value * sectionScale ** power)} {units.section}
+              {suffix}
             </dd>
           </div>
         ))}

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   coordinates,
   distance,
-  scale,
   type Coordinate,
   type PlaneKind,
   type Point3,
@@ -15,9 +14,14 @@ import {
   type MemberEdit,
 } from "../domain/memberOperations";
 import type { Project } from "../domain/model";
-import { formatResult } from "./resultFormatting";
-import { parseNumberInput } from "./numberInput";
+import { formatResultQuantity } from "./resultFormatting";
 import GeometryPreview, { drawing } from "./GeometryPreview";
+import {
+  parseUnitInput,
+  type UnitPreferences,
+  type UnitQuantity,
+} from "../units";
+import { useUnits } from "./Units";
 
 const labels = {
   split: "Dividir",
@@ -25,8 +29,10 @@ const labels = {
   trim: "Aparar",
   extend: "Prolongar",
 };
-const vector = (p: Point3) =>
-  coordinates.map((k) => formatResult(p[k])).join(" / ");
+const vector = (p: Point3, quantity: UnitQuantity, units: UnitPreferences) =>
+  coordinates
+    .map((k) => formatResultQuantity(p[k], quantity, units))
+    .join(" / ");
 function describe(p: Project, ids: string[]) {
   const nodes = new Map(p.nodes.map((n) => [n.id, n])),
     affected = new Set(ids);
@@ -41,6 +47,7 @@ function describe(p: Project, ids: string[]) {
   return { rows, draw: drawing(p, ends, affected) };
 }
 function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
+  const { units } = useUnits();
   const before = describe(plan.source, plan.before),
     after = describe(plan.project, plan.after);
   return (
@@ -58,7 +65,7 @@ function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
           <tr>
             <th>Barra</th>
             <th>i → j</th>
-            <th>Extensão (m)</th>
+            <th>Extensão ({units.length})</th>
           </tr>
         </thead>
         <tbody>
@@ -68,7 +75,7 @@ function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
               <td>
                 {a.name} → {b.name}
               </td>
-              <td>{formatResult(span)}</td>
+              <td>{formatResultQuantity(span, "length", units)}</td>
             </tr>
           ))}
         </tbody>
@@ -83,9 +90,9 @@ function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
             (total, { m, span }) => {
               const q = memberIntensity(pattern, m.id);
               return {
-                x: total.x + (q.x * span) / 1000,
-                y: total.y + (q.y * span) / 1000,
-                z: total.z + (q.z * span) / 1000,
+                x: total.x + q.x * span,
+                y: total.y + q.y * span,
+                z: total.z + q.z * span,
               };
             },
             { x: 0, y: 0, z: 0 },
@@ -98,26 +105,29 @@ function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
               <thead>
                 <tr>
                   <th>Barra</th>
-                  <th>Extensão (m)</th>
-                  <th>qX / qY / qZ (kN/m)</th>
+                  <th>Extensão ({units.length})</th>
+                  <th>qX / qY / qZ ({units.distributedLoad})</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ m, span, q }) => (
                   <tr key={m.id}>
                     <td>{m.name}</td>
-                    <td>{formatResult(span)}</td>
-                    <td>{vector(scale(q, 0.001))}</td>
+                    <td>{formatResultQuantity(span, "length", units)}</td>
+                    <td>{vector(q, "distributedLoad", units)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p>
-              Resultante global em X / Y / Z (kN) nas barras afetadas
+              Resultante global em X / Y / Z ({units.force}) nas barras afetadas
               <br />
               {vector(
                 resultant(before.rows, plan.source.loadPatterns[i]),
-              )} → {vector(resultant(after.rows, pat))}
+                "force",
+                units,
+              )}{" "}
+              → {vector(resultant(after.rows, pat), "force", units)}
             </p>
           </section>
         );
@@ -138,6 +148,7 @@ export default function MemberEditDialog({
   onClose: () => void;
   onApply: (plan: MemberEdit) => string | null;
 }) {
+  const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const el = dialog.current!;
@@ -162,7 +173,7 @@ export default function MemberEditDialog({
     b = project.nodes.find((n) => n.id === bar.end)!;
   const command = useMemo((): MemberCommand => {
     if (kind === "join") return { kind, ids };
-    const value = parseNumberInput(number);
+    const value = parseUnitInput(number, "length", units) ?? NaN;
     if (kind === "split" && refKind === "distance")
       return { kind, id, reference: { kind: "distance", metres: value } };
     const reference: GeometricReference =
@@ -170,14 +181,22 @@ export default function MemberEditDialog({
         ? { kind: refKind, id: refId }
         : { kind: "coordinate", axis, value };
     return { kind, id, end, reference };
-  }, [kind, id, end, refKind, number, refId, axis, ids]);
+  }, [kind, id, end, refKind, number, refId, axis, ids, units]);
   const preview = useMemo(() => {
     try {
+      if (command.kind !== "join") {
+        const ref = command.reference;
+        if (
+          (ref.kind === "distance" && !Number.isFinite(ref.metres)) ||
+          (ref.kind === "coordinate" && !Number.isFinite(ref.value))
+        )
+          throw new Error(`Informe uma posição finita em ${units.length}.`);
+      }
       return { plan: planMemberEdit(project, command) };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [command, project]);
+  }, [command, project, units]);
   const empty =
     kind !== "join" &&
     (refKind === "node" || refKind === "member" ? !refId : !number.trim());
@@ -256,9 +275,13 @@ export default function MemberEditDialog({
                   </select>
                 </label>
                 <p>
-                  i = {a.name} ({vector(a)}) m<br />j = {b.name} ({vector(b)}) m
+                  i = {a.name} ({vector(a, "length", units)}) {units.length}
+                  <br />j = {b.name} ({vector(b, "length", units)}){" "}
+                  {units.length}
                   <br />
-                  Comprimento atual · {formatResult(distance(a, b))} m
+                  Comprimento atual ·{" "}
+                  {formatResultQuantity(distance(a, b), "length", units)}{" "}
+                  {units.length}
                 </p>
                 {kind !== "split" && (
                   <label>
@@ -330,8 +353,8 @@ export default function MemberEditDialog({
                 ) : (
                   <label>
                     {refKind === "distance"
-                      ? "Distância desde i (m)"
-                      : `Coordenada ${axis.toUpperCase()} (m)`}
+                      ? `Distância desde i (${units.length})`
+                      : `Coordenada ${axis.toUpperCase()} (${units.length})`}
                     <input
                       inputMode="decimal"
                       value={number}
