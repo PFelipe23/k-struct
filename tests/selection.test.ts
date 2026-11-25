@@ -122,7 +122,8 @@ describe("seleção de objetos", () => {
   });
   it("migra v6 original e mantém as referências válidas de grupos em arquivos legados", () => {
     const { selectionGroups, ...p } = beamExample();
-    const v6 = { ...p, schemaVersion: 6 };
+    const { meshConnections, ...legacy } = p;
+    const v6 = { ...legacy, schemaVersion: 6 };
     expect(parseProject(JSON.stringify(v6)).selectionGroups).toEqual([]);
     const objects = [
       { kind: "member", id: "V1" },

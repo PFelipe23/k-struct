@@ -13,6 +13,7 @@ import {
   forceColumns,
   forceLabels,
   formatResult,
+  sectionSide,
 } from "./resultFormatting";
 
 type ResultView =
@@ -114,6 +115,7 @@ export default function Results({
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
         stations
           .slice(1, -1)
+          .filter((s) => s.side !== "right")
           .map((s) => [
             `${memberNames.get(id) ?? id} · x/L ${s.t}`,
             ...values(s),
@@ -129,6 +131,9 @@ export default function Results({
         const { symbol, unit } = forceLabels[key];
         return `${symbol} (${unit})`;
       }),
+      ...(project.meshConnections.length
+        ? ["Lado da seção", "ID da barra"]
+        : []),
     ];
     rows = Object.entries(result?.members ?? {})
       .filter(([id]) => !forceMemberId || id === forceMemberId)
@@ -137,6 +142,7 @@ export default function Results({
           memberNames.get(id) ?? id,
           s.t,
           ...components.map((key) => s[key] / 1000),
+          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
         ]),
       );
   }

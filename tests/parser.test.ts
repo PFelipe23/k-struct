@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { beamExample, type ResultCombination } from "../src/domain/model";
 import { combineLinearResults } from "../src/solver/combinations";
+import { internalJointBeam } from "./fixtures/internal-joint";
+import { evaluateMemberEnvelope } from "../src/solver/envelopes";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
 
 const output = readFileSync(
@@ -70,4 +72,45 @@ it("superpõe casos por identidade, ignora fatores nulos e recusa estações inc
   expect(() => combineLinearResults(project, combination, results)).toThrow(
     /intervalo numérico/,
   );
+});
+
+it("remonta os dois lados no mesmo ID e retém o governante de cada lado na malha irregular", async () => {
+  const p = internalJointBeam();
+  const raw = readFileSync(
+    new URL("./fixtures/internal-joint-oofem.txt", import.meta.url),
+    "utf8",
+  );
+  const result = parseOofemOutput(raw, exportOofem(p, "EL"));
+  const cases = new Map([["EL", result]]);
+  const sides = result.members.V1.filter((s) => s.t === 1 / 3);
+  expect(sides.map((s) => [s.side, s.v, s.m])).toEqual([
+    ["left", 6000, 12000],
+    ["right", -3000, 12000],
+  ]);
+  const reversed = combineLinearResults(p, p.resultCombinations[1], cases);
+  expect(
+    reversed.members.V1.filter((s) => s.t === 1 / 3).map((s) => [s.side, s.v]),
+  ).toEqual([
+    ["left", -6000],
+    ["right", 3000],
+  ]);
+  const env = await evaluateMemberEnvelope(p, p.resultEnvelopes[0], cases);
+  const entries = env.V1.filter((s) => s.t === 1 / 3);
+  expect(
+    entries.map((s) => [
+      s.side,
+      s.ranges.v.max.combinationId,
+      s.ranges.v.max.forces.m,
+    ]),
+  ).toEqual([
+    ["left", "POS", 12000],
+    ["right", "NEG", -12000],
+  ]);
+  sides[1].side = "left";
+  expect(() => combineLinearResults(p, p.resultCombinations[0], cases)).toThrow(
+    /estações de malha incompatíveis/,
+  );
+  await expect(
+    evaluateMemberEnvelope(p, p.resultEnvelopes[0], cases),
+  ).rejects.toThrow(/estações de malha incompatíveis/);
 });

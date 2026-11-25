@@ -27,6 +27,7 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
+import { beamStations, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
@@ -117,6 +118,10 @@ export default function WorkPlaneView({
     if (quick) setCursor(null);
   }, [quick, plane.kind, plane.offset, project.id]);
   const { labels } = layers;
+  const mesh = useMemo(
+    () => (layers.mesh ? beamStations(project) : null),
+    [layers.mesh, project],
+  );
   const markerId = useId();
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
@@ -327,7 +332,11 @@ export default function WorkPlaneView({
   useEffect(() => {
     // A project or plane change schedules a new framing. Only cache it after it has been applied.
     if (camera !== cameraBeforeFit.current)
-      savedCamera.current = { projectId: project.id, kind: plane.kind, ...camera };
+      savedCamera.current = {
+        projectId: project.id,
+        kind: plane.kind,
+        ...camera,
+      };
   }, [camera, project.id, plane.kind, savedCamera]);
   const heading = plane.kind === "XY" ? "Planta XY" : `Elevação ${plane.kind}`;
 
@@ -604,10 +613,24 @@ export default function WorkPlaneView({
             const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
             const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
             const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
-            envelope.onSection({
-              memberId: m.id,
-              index: Math.round(t * (envelopeStations.length - 1)),
-            });
+            let index = nearestSection(envelopeStations, t);
+            const station = envelopeStations[index];
+            // On a jump both traces have the same abscissa. Pick the closer force ordinate.
+            if (
+              station.side &&
+              Math.abs(t - station.t) * length * camera.scale <= 2
+            ) {
+              const other = index + (station.side === "left" ? 1 : -1);
+              const toPointer = ([px, py]: readonly [number, number]) =>
+                Math.hypot(
+                  px + bounds.left - event.clientX,
+                  py + bounds.top - event.clientY,
+                );
+              const toCurve = (i: number) =>
+                Math.min(toPointer(band.min[i]), toPointer(band.max[i]));
+              if (toCurve(other) < toCurve(index)) index = other;
+            }
+            envelope.onSection({ memberId: m.id, index });
           };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {
@@ -650,6 +673,28 @@ export default function WorkPlaneView({
                     );
                 }}
               />
+              {mesh
+                ?.get(m.id)
+                ?.slice(1, -1)
+                .map(({ t, nodeId }) => (
+                  <circle
+                    key={t}
+                    data-mesh-station={t}
+                    data-mesh-member={m.id}
+                    data-mesh-joint={nodeId}
+                    cx={sx(u + du * t)}
+                    cy={sy(v + dv * t)}
+                    r={nodeId ? 8 : 3}
+                    fill={nodeId ? "none" : "var(--geometry-deformed)"}
+                    stroke={
+                      nodeId
+                        ? "var(--geometry-support)"
+                        : "var(--geometry-deformed)"
+                    }
+                    strokeWidth={nodeId ? 2 : 1}
+                    pointerEvents="none"
+                  />
+                ))}
               {labels && (
                 <text
                   className="member-label"
@@ -879,7 +924,8 @@ export default function WorkPlaneView({
               y={Math.min(sy(pending.y), sy(cursor.v))}
               width={Math.abs(sx(pending.x) - sx(cursor.u))}
               height={Math.abs(sy(pending.y) - sy(cursor.v))}
-              fill="var(--geometry-selected)" fillOpacity={0.16}
+              fill="var(--geometry-selected)"
+              fillOpacity={0.16}
               stroke="var(--geometry-selected)"
               strokeDasharray="6 4"
               pointerEvents="none"

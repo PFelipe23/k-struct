@@ -59,6 +59,8 @@ function selectedGeometry(source: Project, selection: SelectedObject[]) {
     nodeIds.add(m.start);
     nodeIds.add(m.end);
   }
+  for (const link of source.meshConnections)
+    if (memberIds.has(link.memberId)) nodeIds.add(link.nodeId);
   const nodes = source.nodes.filter((n) => nodeIds.has(n.id));
   if (members.length !== memberIds.size || nodes.length !== nodeIds.size)
     throw new Error("A seleção contém um objeto que já não existe.");
@@ -259,6 +261,14 @@ export function planTransform(
       map.members.set(m.id, bar.id);
       plan.selected.push({ kind: "member", id: bar.id });
     }
+    for (const link of source.meshConnections) {
+      const memberId = map.members.get(link.memberId);
+      if (memberId)
+        project.meshConnections.push({
+          memberId,
+          nodeId: map.nodes.get(link.nodeId)!,
+        });
+    }
     copyAssignments(plan, options, map, i, vector, parity, nodes, targets);
   }
   plan.selected = [
@@ -289,5 +299,6 @@ export function replicate(
   // Keep existing object references for callers holding nodes and members.
   p.nodes.push(...plan.project.nodes.slice(p.nodes.length));
   p.members.push(...plan.project.members.slice(p.members.length));
+  p.meshConnections = plan.project.meshConnections;
   return plan.selected;
 }

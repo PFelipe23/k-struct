@@ -35,6 +35,7 @@ import {
   PanelRight,
   Scissors,
   ScanSearch,
+  Waypoints,
 } from "lucide-react";
 import {
   addPoint,
@@ -52,7 +53,7 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, addSlab, connectIntersections } from "./domain/editing";
+import { addMember, addSlab } from "./domain/editing";
 import {
   onPlane,
   origin,
@@ -78,6 +79,7 @@ import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
 import DuplicateDialog from "./components/DuplicateDialog";
+import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
 import type { TransformPlan } from "./domain/transform";
@@ -131,6 +133,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v8") ??
       localStorage.getItem("kstruct.draft.v7") ??
       localStorage.getItem("kstruct.draft.v6") ??
       localStorage.getItem("kstruct.draft.v5") ??
@@ -195,6 +198,7 @@ export default function App() {
   const [launchDialog, setLaunchDialog] = useState<
     | "guides"
     | "replicate"
+    | "mesh"
     | "member-edit"
     | "duplicates"
     | "nodes"
@@ -376,7 +380,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v7", serialized);
+      localStorage.setItem("kstruct.draft.v8", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -709,20 +713,6 @@ export default function App() {
         : []),
     ]);
   };
-  const connect = () => {
-    let report: ReturnType<typeof connectIntersections> | undefined;
-    const error = edit((p) => {
-      report = connectIntersections(p);
-    });
-    if (error || !report) return;
-    changeTool("select");
-    if (report.divided) setSelection([]);
-    setMessage(
-      report.divided
-        ? `${report.divided} barras subdivididas · ${report.joints} novos nós.`
-        : "Nenhuma interseção ou nó interno pendente de conexão.",
-    );
-  };
   const applyGeometry = (plan: TransformPlan | MemberEdit) => {
     if (("ready" in plan && !plan.ready) || current.current !== plan.source)
       return "O modelo mudou. Reabra a prévia para confirmar.";
@@ -731,6 +721,7 @@ export default function App() {
       draft.members = plan.project.members;
       draft.loadPatterns = plan.project.loadPatterns;
       draft.selectionGroups = plan.project.selectionGroups;
+      draft.meshConnections = plan.project.meshConnections;
     });
     if (!error) {
       changeTool("select");
@@ -986,6 +977,15 @@ export default function App() {
                 </button>
                 <button
                   className="tool-button"
+                  disabled={!p.members.length}
+                  onClick={() => setLaunchDialog("mesh")}
+                  title="Conectar nós e inspecionar as estações de análise"
+                >
+                  <Waypoints size={20} />
+                  <span>Conexões da malha</span>
+                </button>
+                <button
+                  className="tool-button"
                   onClick={() => {
                     setDiagnosticHighlight([]);
                     setLaunchDialog("duplicates");
@@ -1151,7 +1151,7 @@ export default function App() {
               <span>
                 {slab
                   ? `Placa delgada DKT · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
-                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} elementos por barra`}
+                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
                 {slab
@@ -1526,7 +1526,7 @@ export default function App() {
               }}
               selectPlane={selectPlane}
               replicate={() => setLaunchDialog("replicate")}
-              connect={connect}
+              connect={() => setLaunchDialog("mesh")}
             />
           )}
           <div className={`viewports ${layout}`}>
@@ -1853,6 +1853,7 @@ export default function App() {
               draft.members = next.members;
               draft.loadPatterns = next.loadPatterns;
               draft.selectionGroups = next.selectionGroups;
+              draft.meshConnections = next.meshConnections;
             });
             if (!error) {
               changeTool("select");
@@ -1863,6 +1864,14 @@ export default function App() {
             }
             return error;
           }}
+        />
+      )}
+      {launchDialog === "mesh" && (
+        <MeshConnections
+          project={p}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "member-edit" && (

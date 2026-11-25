@@ -1,3 +1,8 @@
+import {
+  beamStations,
+  sectionLocations,
+  type BeamStation,
+} from "../domain/beamMesh";
 import type { Project, ResultCombination } from "../domain/model";
 import type { AnalysisResult, Station, StructuralResult } from "./oofem";
 
@@ -92,20 +97,24 @@ function weightedCases(
   }));
 }
 
-function sumStations<K extends keyof Station>(
+function sumStations<K extends (typeof stationComponents)[number]>(
   components: readonly K[],
   cases: WeightedCase[],
-  segments: number,
+  layout: Map<string, BeamStation[]>,
   memberId: string,
 ) {
-  return Array.from({ length: segments + 1 }, (_, index) => {
-    const t = index / segments;
+  const expected = sectionLocations(layout.get(memberId)!);
+  return expected.map((location, index) => {
     const values = sumComponents(components, cases, ({ result }) => {
       const stations = result.members[memberId];
-      if (stations?.length === segments + 1 && stations[index]?.t === t)
+      if (
+        stations?.length === expected.length &&
+        stations[index]?.t === location.t &&
+        stations[index]?.side === location.side
+      )
         return stations[index];
     });
-    return { t, ...values };
+    return { ...location, ...values };
   });
 }
 
@@ -113,11 +122,11 @@ export function prepareMemberForces(
   project: Project,
   combination: ResultCombination,
   caseResults: ReadonlyMap<string, AnalysisResult>,
+  layout: Map<string, BeamStation[]>,
 ) {
   const cases = weightedCases(project, combination, caseResults);
-  const segments = project.mesh.segmentsPerMember;
   return (memberId: string) =>
-    sumStations(memberForceComponents, cases, segments, memberId);
+    sumStations(memberForceComponents, cases, layout, memberId);
 }
 
 // The caller supplies parsed linear-static results from the current model revision.
@@ -152,11 +161,11 @@ export function combineLinearResults(
         term.reactions.get(id),
       ),
     }));
-  const segments = project.mesh.segmentsPerMember;
+  const layout = beamStations(project);
   const members = Object.fromEntries(
     project.members.map(({ id }) => [
       id,
-      sumStations(stationComponents, cases, segments, id),
+      sumStations(stationComponents, cases, layout, id),
     ]),
   );
   return { displacements, reactions, members };

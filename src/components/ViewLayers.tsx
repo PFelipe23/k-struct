@@ -1,10 +1,11 @@
-import { Grid2X2, ArrowDownToLine, Tags } from "lucide-react";
+import { Grid2X2, ArrowDownToLine, Tags, Waypoints } from "lucide-react";
 import { useState } from "react";
 
 export function useViewLayers(showAnnotations = true) {
   return useState({
     labels: showAnnotations,
     grid: true,
+    mesh: false,
     loads: showAnnotations,
   });
 }
@@ -19,6 +20,7 @@ export function ViewLayers({ layers, setLayers }: LayerControls) {
     ["labels", "Nomes dos objetos", Tags],
     ["grid", "Grelha", Grid2X2],
     ["loads", "Cargas", ArrowDownToLine],
+    ["mesh", "Malha de análise", Waypoints],
   ] as const;
   return items.map(([key, label, Icon]) => (
     <button

@@ -1,3 +1,4 @@
+import { beamStations, type SectionLocation } from "../domain/beamMesh";
 import type { Project, ResultEnvelope } from "../domain/model";
 import {
   memberForceComponents,
@@ -10,8 +11,7 @@ import type { AnalysisResult } from "./oofem";
 
 export type EnvelopeExtreme = { combinationId: string; forces: MemberForces };
 type ForceRange = { min: EnvelopeExtreme; max: EnvelopeExtreme };
-export type EnvelopeStation = {
-  t: number;
+export type EnvelopeStation = SectionLocation & {
   ranges: Record<MemberForceComponent, ForceRange>;
 };
 export type MemberEnvelopeResult = Record<string, EnvelopeStation[]>;
@@ -39,9 +39,10 @@ export async function evaluateMemberEnvelope(
     combinations.flatMap((item) => item.factors),
     caseResults,
   );
+  const layout = beamStations(project);
   const sources = combinations.map((item) => ({
     id: item.id,
-    memberForces: prepareMemberForces(project, item, caseResults),
+    memberForces: prepareMemberForces(project, item, caseResults, layout),
   }));
 
   const result: MemberEnvelopeResult = {};
@@ -50,7 +51,7 @@ export async function evaluateMemberEnvelope(
     const stations: EnvelopeStation[] = [];
     for (const combination of sources) {
       // Every bound retains the full vector of a single combination at this station.
-      for (const [index, { t, ...forces }] of combination
+      for (const [index, { t, side, ...forces }] of combination
         .memberForces(id)
         .entries()) {
         const extreme = { combinationId: combination.id, forces };
@@ -62,7 +63,7 @@ export async function evaluateMemberEnvelope(
               { min: extreme, max: extreme },
             ]),
           ) as EnvelopeStation["ranges"];
-          stations.push({ t, ranges });
+          stations.push({ t, ...(side && { side }), ranges });
           continue;
         }
         for (const key of memberForceComponents) {

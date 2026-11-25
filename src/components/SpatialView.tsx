@@ -5,6 +5,7 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { beamStations } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import { formatResult } from "./resultFormatting";
 import { Maximize, Plus, Minus } from "lucide-react";
@@ -40,6 +41,11 @@ function createModelMaterials() {
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
+    meshStation: new THREE.PointsMaterial({
+      size: 5,
+      sizeAttenuation: false,
+      depthTest: false,
+    }),
     node: new THREE.MeshStandardMaterial(),
     selectedNode: new THREE.MeshStandardMaterial(),
     support: new THREE.MeshStandardMaterial({ wireframe: true }),
@@ -191,6 +197,7 @@ export default function SpatialView({
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
       materials.deformed.color.set(color("--geometry-deformed"));
+      materials.meshStation.color.set(color("--geometry-deformed"));
       materials.node.color.set(color("--scene-node"));
       materials.selectedNode.color.set(color("--geometry-selected"));
       materials.support.color.set(color("--geometry-support"));
@@ -352,6 +359,35 @@ export default function SpatialView({
         selectedIds.has(`slab:${slab.id}`),
       );
     }
+    if (layers.mesh) {
+      const layout = beamStations(project);
+      const regular: THREE.Vector3[] = [];
+      const joints = new Set<string>();
+      for (const m of project.members) {
+        const a = nodes.get(m.start)!,
+          b = nodes.get(m.end)!;
+        for (const { t, nodeId } of layout.get(m.id)!.slice(1, -1)) {
+          if (nodeId) joints.add(nodeId);
+          else regular.push(scenePoint(interpolate(a, b, t)));
+        }
+      }
+      if (regular.length) {
+        const markers = new THREE.Points(
+          new THREE.BufferGeometry().setFromPoints(regular),
+          s.materials.meshStation,
+        );
+        markers.renderOrder = 2;
+        s.model.add(markers);
+      }
+      for (const id of joints) {
+        const element = document.createElement("span");
+        element.className = "scene-mesh-joint";
+        element.dataset.meshJoint = id;
+        const ring = new CSS2DObject(element);
+        ring.position.copy(scenePoint(nodes.get(id)!));
+        s.model.add(ring);
+      }
+    }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
@@ -436,6 +472,7 @@ export default function SpatialView({
     patternId,
     layers.labels,
     layers.loads,
+    layers.mesh,
   ]);
   useEffect(() => {
     const s = state.current;

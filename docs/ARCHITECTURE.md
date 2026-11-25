@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v7, migração v1 a v6, geometria, validação e histórico       | `src/domain`                 |
+| Domínio           | Formato v8, migração v1 a v7, geometria, validação e histórico      | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,11 +19,15 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v7 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v8 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
-IDs do projeto são persistentes. IDs numéricos do OOFEM são reconstruídos a cada exportação. Uma barra é dividida em oito elementos por padrão. Nós intermediários da análise não aparecem como objetos editáveis. A propriedade `segmentsPerMember` aceita de 2 a 32 segmentos. Versões futuras precisam avaliar convergência e melhorar a amostragem dos diagramas.
+IDs do projeto são persistentes. O esquema v8 guarda em `meshConnections` os pares de IDs da barra e do nó interno. A migração de v7 cria uma lista vazia e conserva todas as peças e seus IDs. Um cruzamento confirmado em XYZ cria ou reutiliza um nó editável ao qual se podem atribuir apoios, cargas ou outras incidências.
+
+`beamStations` ordena os nós internos pela projeção sobre o eixo físico i → j e intercala as estações regulares de `segmentsPerMember` (2 a 32, padrão 8). A tolerância geométrica é de 10⁻⁶ m. Uma incidência próxima a uma estação regular substitui essa estação na sua posição real. Conexões internas distintas na mesma estação são rejeitadas. Na exportação cada nó editável recebe um único número OOFEM e os nós de refinamento são privados de cada barra. O pré-processador verifica os apoios por componente conectado. A intensidade uniforme em N/m acompanha os elementos do membro e o OOFEM a integra em cada comprimento.
+
+Em cada conexão interna, o parser conserva o esforço de extremidade final do elemento que chega (lado i) e o inicial do seguinte (lado j). Os dois registros compartilham `memberId`, `t = x/L` e deslocamento. Combinações e envelopes verificam a mesma sequência de posições e lados em todos os casos. Os diagramas unem os dois limites na mesma abscissa e o CSV identifica o lado da seção.
 
 O painel de laje tem ID persistente, origem XY, lados, referência ao pavimento, material, espessura, quatro condições de borda e subdivisões independentes em X/Y. `meshSlab` numera os nós em linhas de X crescente. Em QDKT cada célula forma um quadrilátero. Em DKT a diagonal do canto inferior esquerdo ao superior direito define dois triângulos anti-horários. As bordas referenciam os mesmos nós da conectividade. A malha e os resultados são derivados do painel na revisão atual. A análise de laje aceita um painel isolado por projeto.
 
@@ -58,7 +62,8 @@ Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interf
 - O Tauri reserva a execução antes de habilitar o cancelamento e publica o resultado em um canal IPC. Os registros locais têm escrita atômica e retenção de 30 execuções.
 - Pacotes desktop usam o OOFEM integrado com manifesto e conferência de SHA-256. O caminho explícito nas preferências permite outro executável. A distribuição e seu autoteste estão descritos em [DISTRIBUTION.md](DISTRIBUTION.md).
 - O parser exige término, passo único, deslocamentos e esforços completos, reações dos vínculos e equilíbrio global. Erros não geram resultados parciais.
-- **Conectar interseções** subdivide cruzamentos reais e barras com nós internos, preservando a intensidade das cargas distribuídas em cada trecho. A operação é uma edição única no histórico. Nós no interior de uma barra bloqueiam a análise até a subdivisão. Cruzamentos sem nó compartilhado são barras independentes.
+- **Conexões da malha** liga um nó existente ao interior de uma barra ou um par de barras que se cruzam em XYZ. Um cruzamento apenas em projeção permanece independente. A camada **Malha de análise** identifica as estações de refinamento e destaca as incidências confirmadas.
+- Desconectar remove só a incidência escolhida e conserva o nó e suas atribuições. Um nó isolado aparece no diagnóstico antes da análise. Excluir um nó ou uma barra limpa suas incidências na mesma edição. Mover um nó ao longo da barra ou alterar uma extremidade recalcula x/L. Para afastar o nó do eixo ou encurtar a barra além dele, desconecte-o primeiro. Transformar a barra leva os seus nós internos junto, e uma cópia registra as incidências da nova barra. Dividir fisicamente redistribui incidências pelos trechos. No próprio ponto do corte, o nó vira extremidade compartilhada. O refinamento mantém os IDs, conexões e seleção. Edições, desfazer e refazer invalidam os resultados.
 
 ### Edição das barras físicas
 
