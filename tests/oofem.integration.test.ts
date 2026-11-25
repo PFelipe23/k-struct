@@ -25,7 +25,9 @@ import {
   saveMaterial,
 } from "../src/domain/materials";
 import { internalJointBeam } from "./fixtures/internal-joint";
-import { origin } from "../src/domain/geometry";
+import { inclinedBeam } from "./fixtures/inclined-beam";
+import { origin, type Point3 } from "../src/domain/geometry";
+import { sectionRoll } from "../src/domain/transformGeometry";
 import { combineLinearResults } from "../src/solver/combinations";
 import { evaluateMemberEnvelope } from "../src/solver/envelopes";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
@@ -59,6 +61,137 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("KS-20 · rolete XZ transmite somente a reação normal", () => {
+    const p = inclinedBeam();
+    const r = solve(p);
+    const [a, b] = r.reactions;
+    expect(a.fx).toBeCloseTo(-22500, 2);
+    expect(a.fz).toBeCloseTo(30000, 2);
+    expect(b.fx).toBeCloseTo(22500, 2);
+    expect(b.fz).toBeCloseTo(30000, 2);
+    expect(0.6 * b.fx + 0.8 * b.fz).toBeCloseTo(37500, 2);
+    expect(0.8 * b.fx - 0.6 * b.fz).toBeCloseTo(0, 2);
+    const tip = r.displacements.B;
+    expect(0.6 * tip.ux + 0.8 * tip.uz).toBeCloseTo(0, 12);
+    expect(tip.ux).toBeCloseTo((22500 * 6) / (2e11 * 0.03), 12);
+    expect(tip.uz).toBeCloseTo(-0.75 * tip.ux, 12);
+    expect(r.members.V1.at(-1)).toMatchObject(tip);
+    expect(r.rawOutput).toMatch(/Node\s+2 iDof\s+3 reaction\s+3\.7500e\+04/);
+
+    p.loadPatterns[0].nodal = [
+      { ...nodalLoad("B"), fx: 3000, fz: -4000, my: 1200 },
+    ];
+    const result = solve(p);
+    expect(result.reactions[0].fx).toBeCloseTo(-28650, 2);
+    expect(result.reactions[0].fz).toBeCloseTo(29800, 2);
+    expect(result.reactions[1].fx).toBeCloseTo(25650, 2);
+    expect(result.reactions[1].fz).toBeCloseTo(34200, 2);
+    const combined = combineLinearResults(
+      p,
+      {
+        id: "C",
+        name: "Dobrada",
+        type: "linear",
+        factors: [{ caseId: "EL", factor: 2 }],
+      },
+      new Map([["EL", result]]),
+    );
+    p.analysisCases[0].factors[0].factor = 2;
+    const direct = solve(p);
+    expect(combined.reactions[1].fx).toBeCloseTo(direct.reactions[1].fx, 2);
+    expect(combined.reactions[1].fz).toBeCloseTo(direct.reactions[1].fz, 2);
+    expect(combined.displacements.B.uz).toBeCloseTo(
+      direct.displacements.B.uz,
+      11,
+    );
+  });
+
+  it("KS-20 · rolete de ângulo zero reproduz o apoio global legado", () => {
+    const p = beamExample();
+    const global = solve(p);
+    p.nodes[1].supportFrame = { kind: "planar", angle: 0 };
+    const local = solve(p);
+    expect(local.reactions).toEqual(global.reactions);
+    expect(local.displacements).toEqual(global.displacements);
+    expect(local.members).toEqual(global.members);
+  });
+
+  it("KS-20 · apoio XYZ oblíquo equivale à rotação global de um balanço de referência", () => {
+    const p = beamExample();
+    p.mode = "spatial";
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints.rx = true;
+    p.loadPatterns[0].nodal = [
+      {
+        ...nodalLoad("B"),
+        fx: 1200,
+        fy: 700,
+        fz: -900,
+        mx: 500,
+        my: -220,
+        mz: 80,
+      },
+    ];
+    const original = solve(p);
+    const rotate = ({ x, y, z }: Point3) => ({
+      x: (x + 2 * y - 2 * z) / 3,
+      y: (2 * x + y + 2 * z) / 3,
+      z: (2 * x - 2 * y - z) / 3,
+    });
+    const [a, b] = p.nodes;
+    Object.assign(b, rotate(b));
+    b.supportFrame = {
+      kind: "spatial",
+      x: { x: 1, y: 2, z: 2 },
+      y: { x: 3, y: 3, z: 0 },
+    };
+    p.members[0].roll = sectionRoll(a, b, rotate({ x: 0, y: 0, z: 1 }));
+    const pad = p.loadPatterns[0];
+    const [load] = pad.nodal;
+    const f = rotate({ x: load.fx, y: load.fy, z: load.fz });
+    const m = rotate({ x: load.mx, y: load.my, z: load.mz });
+    pad.nodal[0] = {
+      nodeId: "B",
+      fx: f.x,
+      fy: f.y,
+      fz: f.z,
+      mx: m.x,
+      my: m.y,
+      mz: m.z,
+    };
+    const q = rotate({ x: 0, y: 0, z: -10000 });
+    pad.uniform[0] = { memberId: "V1", qx: q.x, qy: q.y, qz: q.z };
+    const rotated = solve(p);
+    for (const [i, reaction] of original.reactions.entries()) {
+      const force = rotate({ x: reaction.fx, y: reaction.fy, z: reaction.fz });
+      const moment = rotate({ x: reaction.mx, y: reaction.my, z: reaction.mz });
+      for (const k of ["x", "y", "z"] as const) {
+        expect(Math.abs(rotated.reactions[i][`f${k}`] - force[k])).toBeLessThan(
+          2,
+        );
+        expect(
+          Math.abs(rotated.reactions[i][`m${k}`] - moment[k]),
+        ).toBeLessThan(2);
+      }
+    }
+    for (const [i, station] of original.members.V1.entries()) {
+      const u = rotate({ x: station.ux, y: station.uy, z: station.uz });
+      const r = rotate({ x: station.rx, y: station.ry, z: station.rz });
+      for (const k of ["x", "y", "z"] as const) {
+        expect(rotated.members.V1[i][`u${k}`]).toBeCloseTo(u[k], 9);
+        expect(rotated.members.V1[i][`r${k}`]).toBeCloseTo(r[k], 9);
+      }
+      for (const k of ["n", "vy", "vz", "mx", "my", "mz"] as const)
+        expect(Math.abs(rotated.members.V1[i][k] - station[k])).toBeLessThan(2);
+    }
+  });
   it.each([
     {
       geometry: defaultGeometry.circle,

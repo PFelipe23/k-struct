@@ -13,6 +13,7 @@ import {
   type Point3,
 } from "./geometry";
 import { free, type Project, type StructuralNode } from "./model";
+import { supportBasis, type SupportFrame } from "./supports";
 
 export type Transform =
   | { kind: "move"; offset: Point3 }
@@ -147,6 +148,18 @@ export function mapRestraints(node: StructuralNode, vector: VectorMap) {
     }
   }
   return out;
+}
+
+export function mapSupportFrame(
+  frame: SupportFrame,
+  vector: VectorMap,
+): SupportFrame {
+  const basis = supportBasis(frame);
+  const x = vector(basis.x);
+  if (frame.kind === "planar")
+    return { kind: "planar", angle: (Math.atan2(x.z, x.x) * 180) / Math.PI };
+  // Rebuild z from x × y after reflections too. Signs do not affect the fixed subspace.
+  return { kind: "spatial", x, y: vector(basis.y) };
 }
 
 export function assertLength(a: Point3, b: Point3, name: string) {

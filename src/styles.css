@@ -1320,6 +1320,22 @@ button.primary {
   font-size: 10px;
   color: var(--text);
 }
+.support-frame { margin-bottom: 12px; }
+.support-frame-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.support-frame-inputs input { min-width: 0; width: 100%; }
+.support-frame-preview { width: 100%; max-height: 94px; background: var(--surface-view); }
+.support-frame-preview path { fill: none; stroke: currentColor; stroke-width: 1.6px; }
+.support-frame-preview text { fill: currentColor; text-anchor: middle; dominant-baseline: central; font-size: 10px; }
+.support-frame-preview .support-frame-grid { stroke: var(--line-strong); stroke-width: 0.8px; }
+.support-frame-grid-label { color: var(--muted); }
+.support-frame-t { color: var(--axis-x); }
+.support-frame-n, .inclined-support { color: var(--geometry-support); }
+.support-frame-error { color: var(--danger); font-size: 11px; }
+.support-basis { display: grid; gap: 5px; font-size: 10px; }
+.support-basis div { display: flex; justify-content: space-between; gap: 4px; }
+.support-basis dd { margin: 0; font-variant-numeric: tabular-nums; }
+.inclined-support { pointer-events: none; stroke: currentColor; fill: var(--geometry-node-fill); }
+.inclined-support text { fill: currentColor; stroke: var(--surface-view); stroke-width: 2px; paint-order: stroke; font-size: 10px; }
 .restraints label {
   display: flex;
   align-items: center;

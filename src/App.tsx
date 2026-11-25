@@ -137,6 +137,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v11") ??
       localStorage.getItem("kstruct.draft.v10") ??
       localStorage.getItem("kstruct.draft.v9") ??
       localStorage.getItem("kstruct.draft.v8") ??
@@ -393,7 +394,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v10", serialized);
+      localStorage.setItem("kstruct.draft.v11", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
