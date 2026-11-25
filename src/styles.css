@@ -2189,3 +2189,91 @@ button.primary {
 @media (max-width: 620px) {
   .material-columns, .material-fields { grid-template-columns: 1fr; }
 }
+
+.batch-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+.batch-panel h4 {
+  margin: 10px 0 2px;
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.batch-row span {
+  color: var(--text);
+}
+
+.batch-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.batch-row select {
+  font-size: 10px;
+  padding: 4px 20px 4px 6px;
+}
+
+.batch-checks {
+  display: grid;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text);
+}
+
+.batch-checks label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.batch-preview {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 9px;
+  background: var(--surface-input);
+  font-size: 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.batch-preview b {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+.batch-preview ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text);
+  display: grid;
+  gap: 3px;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.batch-actions button {
+  border: 1px solid var(--line-strong);
+  font-size: 10px;
+  padding: 6px 10px;
+}
+
+.batch-actions button.primary {
+  padding: 6px 12px;
+}

@@ -1,0 +1,459 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  applyBatchAssignment,
+  planarDofs,
+  planarNodalKeys,
+  planarUniformKeys,
+  previewBatchAssignment,
+  spatialDofs,
+  spatialNodalKeys,
+  spatialUniformKeys,
+  summarizeBatchSelection,
+  type BatchAssignmentSpec,
+  type DofKey,
+  type LoadOperation,
+  type NodalLoadKey,
+  type SupportAction,
+  type UniformLoadKey,
+  type ValueSummary,
+} from "../domain/batchAssign";
+import type { Project, SelectedObject } from "../domain/model";
+import { parseNumberInput } from "./numberInput";
+
+const formatKn = (valueN: number): string =>
+  (valueN / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+
+const describeSummary = (
+  summary: ValueSummary | undefined,
+  unit: string,
+): string => {
+  if (!summary) return `0 ${unit}`;
+  if (summary.kind === "uniform") return `${formatKn(summary.value)} ${unit}`;
+  return `Misto (${formatKn(summary.min)} a ${formatKn(summary.max)} ${unit})`;
+};
+
+export default function BatchAssignPanel({
+  project,
+  selection,
+  patternId,
+  edit,
+}: {
+  project: Project;
+  selection: SelectedObject[];
+  patternId: string;
+  edit: (fn: (p: Project) => void) => string | null | void;
+}) {
+  const spatial = project.mode === "spatial";
+  const pattern = project.loadPatterns.find((p) => p.id === patternId)!;
+  const selectionKey = selection.map((s) => `${s.kind}:${s.id}`).join("|");
+
+  const [sectionId, setSectionId] = useState("");
+  const [restraints, setRestraints] = useState<
+    Partial<Record<DofKey, SupportAction>>
+  >({});
+  const [uniformOp, setUniformOp] = useState<LoadOperation>("add");
+  const [uniformDraft, setUniformDraft] = useState<Record<string, string>>({});
+  const [uniformRemove, setUniformRemove] = useState<Set<UniformLoadKey>>(
+    () => new Set(),
+  );
+  const [nodalOp, setNodalOp] = useState<LoadOperation>("add");
+  const [nodalDraft, setNodalDraft] = useState<Record<string, string>>({});
+  const [nodalRemove, setNodalRemove] = useState<Set<NodalLoadKey>>(
+    () => new Set(),
+  );
+  const [notice, setNotice] = useState("");
+
+  const resetDraft = () => {
+    setSectionId("");
+    setRestraints({});
+    setUniformOp("add");
+    setUniformDraft({});
+    setUniformRemove(new Set());
+    setNodalOp("add");
+    setNodalDraft({});
+    setNodalRemove(new Set());
+    setNotice("");
+  };
+
+  useEffect(() => {
+    resetDraft();
+  }, [selectionKey, patternId, project.mode]);
+
+  const summary = useMemo(
+    () => summarizeBatchSelection(project, selection, patternId),
+    [project, selection, patternId],
+  );
+
+  if (summary.nodeIds.length === 0 && summary.memberIds.length === 0) {
+    return null;
+  }
+
+  const activeDofs = spatial ? spatialDofs : planarDofs;
+  const activeUniformKeys = spatial ? spatialUniformKeys : planarUniformKeys;
+  const activeNodalKeys = spatial ? spatialNodalKeys : planarNodalKeys;
+
+  const invalidUniform = new Set<UniformLoadKey>();
+  const uniformValues: Partial<Record<UniformLoadKey, number>> = {};
+  if (uniformOp !== "remove") {
+    for (const key of activeUniformKeys) {
+      const raw = uniformDraft[key] ?? "";
+      if (!raw.trim()) continue;
+      const parsed = parseNumberInput(raw);
+      if (!Number.isFinite(parsed)) invalidUniform.add(key);
+      else uniformValues[key] = parsed * 1000;
+    }
+  }
+
+  const invalidNodal = new Set<NodalLoadKey>();
+  const nodalValues: Partial<Record<NodalLoadKey, number>> = {};
+  if (nodalOp !== "remove") {
+    for (const key of activeNodalKeys) {
+      const raw = nodalDraft[key] ?? "";
+      if (!raw.trim()) continue;
+      const parsed = parseNumberInput(raw);
+      if (!Number.isFinite(parsed)) invalidNodal.add(key);
+      else nodalValues[key] = parsed * 1000;
+    }
+  }
+
+  const hasFieldError = invalidUniform.size > 0 || invalidNodal.size > 0;
+
+  const spec: BatchAssignmentSpec = {
+    sectionId: sectionId || undefined,
+    restraints,
+    uniformLoad:
+      summary.memberIds.length > 0
+        ? {
+            operation: uniformOp,
+            values: uniformValues,
+            removeKeys: uniformOp === "remove" ? [...uniformRemove] : undefined,
+          }
+        : undefined,
+    nodalLoad:
+      summary.nodeIds.length > 0
+        ? {
+            operation: nodalOp,
+            values: nodalValues,
+            removeKeys: nodalOp === "remove" ? [...nodalRemove] : undefined,
+          }
+        : undefined,
+  };
+
+  const preview = previewBatchAssignment(project, selection, patternId, spec);
+
+  const apply = () => {
+    if (hasFieldError || !preview.ok) return;
+    if (!preview.hasChanges) {
+      setNotice("Nenhuma alteração efetiva para aplicar no lote.");
+      return;
+    }
+    const problem = edit((draft) => {
+      applyBatchAssignment(draft, selection, patternId, spec);
+    });
+    if (typeof problem === "string" && problem) {
+      setNotice(problem);
+      return;
+    }
+    resetDraft();
+  };
+
+  const secSummary = summary.section;
+  const currentSectionLabel =
+    secSummary.kind === "mixed"
+      ? "Misto"
+      : secSummary.kind === "uniform"
+        ? (project.sections.find((s) => s.id === secSummary.sectionId)?.name ??
+          "")
+        : "";
+
+  return (
+    <section className="batch-panel" aria-label="Atribuição em lote">
+      <h4>Atribuição em lote</h4>
+      <p className="help">
+        Alvo: {summary.nodeIds.length} nós · {summary.memberIds.length} barras.
+        Campos vazios ou em &quot;Manter&quot; preservam os valores atuais.
+      </p>
+
+      {summary.memberIds.length > 0 && (
+        <>
+          <label className="stack-field">
+            Seção das barras ({currentSectionLabel})
+            <select
+              aria-label="Seção em lote"
+              value={sectionId}
+              onChange={(e) => {
+                setSectionId(e.target.value);
+                setNotice("");
+              }}
+            >
+              <option value="">Manter seção atual</option>
+              {project.sections.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+
+      {summary.nodeIds.length > 0 && (
+        <>
+          <h4>Apoios dos nós</h4>
+          {activeDofs.map((dof) => {
+            const state = summary.restraints[dof] ?? "free";
+            const stateText =
+              state === "mixed"
+                ? "Misto"
+                : state === "restricted"
+                  ? "Restringido"
+                  : "Livre";
+            return (
+              <label className="batch-row" key={dof}>
+                <span>
+                  {dof[0] === "r" ? "Rotação" : "Translação"}{" "}
+                  {dof[1].toUpperCase()}
+                  <small>{stateText}</small>
+                </span>
+                <select
+                  aria-label={`Apoio em lote ${dof}`}
+                  value={restraints[dof] ?? "keep"}
+                  onChange={(e) => {
+                    setRestraints((prev) => ({
+                      ...prev,
+                      [dof]: e.target.value as SupportAction,
+                    }));
+                    setNotice("");
+                  }}
+                >
+                  <option value="keep">Manter</option>
+                  <option value="restrict">Restringir</option>
+                  <option value="release">Liberar</option>
+                </select>
+              </label>
+            );
+          })}
+        </>
+      )}
+
+      {summary.memberIds.length > 0 && (
+        <>
+          <h4>
+            Carga distribuída em lote <span>{pattern.name}</span>
+          </h4>
+          <label className="stack-field">
+            Operação de carga distribuída
+            <select
+              aria-label="Operação de carga distribuída"
+              value={uniformOp}
+              onChange={(e) => {
+                setUniformOp(e.target.value as LoadOperation);
+                setNotice("");
+              }}
+            >
+              <option value="add">Somar</option>
+              <option value="replace">Substituir</option>
+              <option value="remove">Remover</option>
+            </select>
+          </label>
+          {uniformOp === "remove" ? (
+            <div className="batch-checks">
+              {activeUniformKeys.map((key) => {
+                const label = `q${key[1].toUpperCase()}`;
+                return (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Remover ${label}`}
+                      checked={uniformRemove.has(key)}
+                      onChange={(e) => {
+                        setUniformRemove((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(key);
+                          else next.delete(key);
+                          return next;
+                        });
+                        setNotice("");
+                      }}
+                    />
+                    <span>
+                      Remover {label} (
+                      {describeSummary(summary.uniform[key], "kN/m")})
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            activeUniformKeys.map((key) => {
+              const label = `q${key[1].toUpperCase()}`;
+              const invalid = invalidUniform.has(key);
+              const currentDesc = describeSummary(summary.uniform[key], "kN/m");
+              return (
+                <label className="number-field" key={key}>
+                  <span>
+                    Lote {label}
+                    <small style={{ position: "static", display: "block" }}>
+                      {currentDesc}
+                    </small>
+                  </span>
+                  <div>
+                    <input
+                      aria-label={`Lote ${label}`}
+                      aria-invalid={invalid}
+                      inputMode="decimal"
+                      placeholder={
+                        summary.uniform[key]?.kind === "mixed"
+                          ? "Misto"
+                          : "Manter"
+                      }
+                      value={uniformDraft[key] ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setUniformDraft((prev) => ({ ...prev, [key]: val }));
+                        setNotice("");
+                      }}
+                    />
+                    <small>kN/m</small>
+                  </div>
+                  {invalid && <em>Informe um valor numérico finito.</em>}
+                </label>
+              );
+            })
+          )}
+        </>
+      )}
+
+      {summary.nodeIds.length > 0 && (
+        <>
+          <h4>
+            Carga nodal em lote <span>{pattern.name}</span>
+          </h4>
+          <label className="stack-field">
+            Operação de carga nodal
+            <select
+              aria-label="Operação de carga nodal"
+              value={nodalOp}
+              onChange={(e) => {
+                setNodalOp(e.target.value as LoadOperation);
+                setNotice("");
+              }}
+            >
+              <option value="add">Somar</option>
+              <option value="replace">Substituir</option>
+              <option value="remove">Remover</option>
+            </select>
+          </label>
+          {nodalOp === "remove" ? (
+            <div className="batch-checks">
+              {activeNodalKeys.map((key) => {
+                const label = `${key[0] === "f" ? "Força" : "Momento"} ${key[1].toUpperCase()}`;
+                const unit = key[0] === "f" ? "kN" : "kN·m";
+                return (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Remover ${label}`}
+                      checked={nodalRemove.has(key)}
+                      onChange={(e) => {
+                        setNodalRemove((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(key);
+                          else next.delete(key);
+                          return next;
+                        });
+                        setNotice("");
+                      }}
+                    />
+                    <span>
+                      Remover {label} (
+                      {describeSummary(summary.nodal[key], unit)})
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            activeNodalKeys.map((key) => {
+              const label = `${key[0] === "f" ? "Força" : "Momento"} ${key[1].toUpperCase()}`;
+              const unit = key[0] === "f" ? "kN" : "kN·m";
+              const invalid = invalidNodal.has(key);
+              const currentDesc = describeSummary(summary.nodal[key], unit);
+              return (
+                <label className="number-field" key={key}>
+                  <span>
+                    Lote {label}
+                    <small style={{ position: "static", display: "block" }}>
+                      {currentDesc}
+                    </small>
+                  </span>
+                  <div>
+                    <input
+                      aria-label={`Lote ${label}`}
+                      aria-invalid={invalid}
+                      inputMode="decimal"
+                      placeholder={
+                        summary.nodal[key]?.kind === "mixed"
+                          ? "Misto"
+                          : "Manter"
+                      }
+                      value={nodalDraft[key] ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNodalDraft((prev) => ({ ...prev, [key]: val }));
+                        setNotice("");
+                      }}
+                    />
+                    <small>{unit}</small>
+                  </div>
+                  {invalid && <em>Informe um valor numérico finito.</em>}
+                </label>
+              );
+            })
+          )}
+        </>
+      )}
+
+      <div className="batch-preview" aria-label="Prévia da atribuição em lote">
+        <b>Prévia do lote ({pattern.name})</b>
+        {hasFieldError ? (
+          <p role="alert" className="launch-error">
+            Corrija os campos destacados antes de aplicar o lote.
+          </p>
+        ) : !preview.ok ? (
+          <p role="alert" className="launch-error">
+            {preview.errors.join(" ")}
+          </p>
+        ) : preview.hasChanges ? (
+          <>
+            <span>
+              Afeta {preview.affectedNodes} nós · {preview.affectedMembers}{" "}
+              barras
+            </span>
+            <ul>
+              {preview.lines.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <span>{notice || "Nenhuma alteração pendente no lote."}</span>
+        )}
+      </div>
+
+      <div className="batch-actions">
+        <button type="button" onClick={resetDraft}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={hasFieldError || !preview.ok}
+          onClick={apply}
+        >
+          Aplicar lote
+        </button>
+      </div>
+    </section>
+  );
+}
