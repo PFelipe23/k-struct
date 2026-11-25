@@ -58,7 +58,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(10);
+    expect(p.schemaVersion).toBe(11);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -137,7 +137,9 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 11 })),
+      parseProject(
+        JSON.stringify({ ...p, schemaVersion: p.schemaVersion + 1 }),
+      ),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),

@@ -1,6 +1,7 @@
 import { sectionProperties } from "../domain/sections";
 import {
   add,
+  coordinates,
   cross,
   distance,
   interpolate,
@@ -18,6 +19,7 @@ import {
   type Project,
 } from "../domain/model";
 import { beamStations, type SectionLocation } from "../domain/beamMesh";
+import { supportBasis, supportToGlobal } from "../domain/supports";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
@@ -119,6 +121,11 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   }));
   const elements: MeshElement[] = [];
   const modelNodes = new Map(nodes.map((n) => [n.objectId!, n]));
+  const frames = new Map(
+    p.nodes.flatMap(({ id, supportFrame }) =>
+      supportFrame ? [[id, supportBasis(supportFrame)] as const] : [],
+    ),
+  );
   const nodeNumber = (id: string) => modelNodes.get(id)!.number;
   const axes = new Map<string, ReturnType<typeof beamAxes>>();
   const sectionElements = new Map(
@@ -188,7 +195,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const values = scaleLoad(dofs.map(([, , key]) => l[key]));
       if (!values.some(Boolean)) continue;
       bcs.push(
-        `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")} set ${set(`nodes 1 ${nodeNumber(l.nodeId)}`)}`,
+        `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(l.nodeId) ? " cstype 0" : ""} set ${set(`nodes 1 ${nodeNumber(l.nodeId)}`)}`,
       );
     }
     for (const l of pat.uniform) {
@@ -213,7 +220,13 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
     `ndofman ${nodes.length} nelem ${elements.length} ncrosssect ${cs.length} nmat ${p.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
-    ...nodes.map((n) => `Node ${n.number} coords 3 ${n.x} ${n.y} ${n.z}`),
+    ...nodes.map((n) => {
+      const basis = n.objectId && frames.get(n.objectId);
+      const lcs = basis
+        ? ` lcs 6 ${basis.x.x} ${basis.x.y} ${basis.x.z} ${basis.y.x} ${basis.y.y} ${basis.y.z}`
+        : "";
+      return `Node ${n.number} coords 3 ${n.x} ${n.y} ${n.z}${lcs}`;
+    }),
     ...elements.map((e) => {
       if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
       const z = axes.get(e.memberId)![2];
@@ -293,17 +306,33 @@ export function parseOofemOutput(
 
   const spatial = input.project.mode === "spatial";
   const dofs = spatial ? spatialDofs : planarDofs;
+  const modelNumbers = new Map(input.nodes.map((n) => [n.objectId, n.number]));
+  const frames = new Map(
+    input.project.nodes.flatMap(({ id, supportFrame }) =>
+      supportFrame
+        ? [[modelNumbers.get(id)!, supportBasis(supportFrame)] as const]
+        : [],
+    ),
+  );
   const d = new Map<number, Displacement>();
   for (const [number, values] of nodeOutput) {
-    if (dofs.every(([, k]) => values.has(k)))
-      d.set(number, {
-        ux: values.get(1)!,
-        uy: spatial ? values.get(2)! : 0,
-        uz: values.get(3)!,
-        rx: spatial ? values.get(4)! : 0,
-        ry: values.get(5)!,
-        rz: spatial ? values.get(6)! : 0,
-      });
+    if (!dofs.every(([, k]) => values.has(k))) continue;
+    const basis = frames.get(number);
+    let u = {
+      x: values.get(1)!,
+      y: spatial ? values.get(2)! : 0,
+      z: values.get(3)!,
+    };
+    let r = {
+      x: spatial ? values.get(4)! : 0,
+      y: values.get(5)!,
+      z: spatial ? values.get(6)! : 0,
+    };
+    if (basis) {
+      u = supportToGlobal(u, basis);
+      r = supportToGlobal(r, basis);
+    }
+    d.set(number, { ux: u.x, uy: u.y, uz: u.z, rx: r.x, ry: r.y, rz: r.z });
   }
   for (const n of input.nodes)
     if (!d.has(n.number))
@@ -347,7 +376,7 @@ export function parseOofemOutput(
     stations.push(end);
   }
   const reactions: Reaction[] = [];
-  const modelNumbers = new Map(input.nodes.map((n) => [n.objectId, n.number]));
+  const printedLocalReactions: Reaction[] = [];
   for (const n of input.project.nodes) {
     if (!Object.values(n.restraints).some(Boolean)) continue;
     const num = modelNumbers.get(n.id)!;
@@ -360,9 +389,34 @@ export function parseOofemOutput(
         result[axis] = value;
       }
     }
-    reactions.push(result);
+    const basis = frames.get(num);
+    if (basis) {
+      printedLocalReactions.push(result);
+      const force = supportToGlobal(
+        { x: result.fx, y: result.fy, z: result.fz },
+        basis,
+      );
+      const moment = supportToGlobal(
+        { x: result.mx, y: result.my, z: result.mz },
+        basis,
+      );
+      reactions.push({
+        nodeId: n.id,
+        fx: force.x,
+        fy: force.y,
+        fz: force.z,
+        mx: moment.x,
+        my: moment.y,
+        mz: moment.z,
+      });
+    } else reactions.push(result);
   }
-  checkEquilibrium(input.project, input.caseId, reactions);
+  checkEquilibrium(
+    input.project,
+    input.caseId,
+    reactions,
+    printedLocalReactions,
+  );
   return {
     ...metadata,
     displacements: Object.fromEntries(
@@ -375,16 +429,42 @@ export function parseOofemOutput(
   };
 }
 
+// OOFEM 3.0 prints reactions with %.4e. Bound the half-unit of the last digit
+// before projecting local components, which can cancel along a global axis.
+function reactionPrintError(value: number) {
+  return value === 0
+    ? 0
+    : 0.5 * 10 ** (Math.floor(Math.log10(Math.abs(value))) - 4);
+}
+
 export function checkEquilibrium(
   p: Project,
   caseId: string,
   reactions: Reaction[],
+  printedLocalReactions: readonly Reaction[] = [],
 ) {
   const sum = [0, 0, 0, 0, 0, 0];
   const magnitudes = [1, 1, 1, 1, 1, 1];
   const reference = p.nodes[0] ?? origin;
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
   const members = new Map(p.members.map((m) => [m.id, m]));
+  const rounding = [0, 0, 0, 0, 0, 0];
+  for (const local of printedLocalReactions) {
+    const node = byId.get(local.nodeId)!;
+    const basis = supportBasis(node.supportFrame);
+    const lever = subtract(node, reference);
+    for (const key of coordinates) {
+      const axis = basis[key];
+      const arm = cross(lever, axis);
+      const df = reactionPrintError(local[`f${key}`]);
+      const dm = reactionPrintError(local[`m${key}`]);
+      for (const [i, global] of coordinates.entries()) {
+        rounding[i] += Math.abs(axis[global]) * df;
+        rounding[i + 3] +=
+          Math.abs(arm[global]) * df + Math.abs(axis[global]) * dm;
+      }
+    }
+  }
   const accumulate = (force: Point3, moment: Point3, point: Point3) => {
     const lever = subtract(point, reference);
     const induced = cross(lever, force);
@@ -435,7 +515,8 @@ export function checkEquilibrium(
   }
   if (
     sum.some(
-      (v, i) => !Number.isFinite(v) || Math.abs(v) > 1e-3 * magnitudes[i],
+      (v, i) =>
+        !Number.isFinite(v) || Math.abs(v) > 1e-3 * magnitudes[i] + rounding[i],
     )
   )
     throw new Error(

@@ -17,7 +17,9 @@ import {
   type UniformLoad,
   type Member,
   type Project,
+  type StructuralNode,
 } from "./model";
+import { sameSupportAxes } from "./supports";
 
 export type Decisions = {
   nodes: Merge[];
@@ -41,11 +43,16 @@ export type Question = {
 type Item = { id: string; name: string };
 export const named = (item: Item) => `${item.name} [${item.id}]`;
 const dofs = Object.keys(free()) as (keyof ReturnType<typeof free>)[];
-export const supportText = (r: ReturnType<typeof free>) =>
-  dofs
-    .filter((k) => r[k])
+const hasRestraints = (n: StructuralNode) => dofs.some((k) => n.restraints[k]);
+export const supportText = (node: StructuralNode) => {
+  const keys = dofs
+    .filter((k) => node.restraints[k])
     .map((k) => k.toUpperCase())
-    .join(", ") || "livre";
+    .join(", ");
+  return keys
+    ? `${keys} · ${node.supportFrame ? "referencial local" : "referencial global"}`
+    : "livre";
+};
 export const loadText = (row: NodalLoad | UniformLoad) =>
   "nodeId" in row
     ? `F (N) = [${[row.fx, row.fy, row.fz].join(", ")}], M (N·m) = [${[row.mx, row.my, row.mz].join(", ")}]`
@@ -161,10 +168,15 @@ export function planRepair(
       label = named(dst),
       supports = ids.map((id) => nodes.get(id)!);
     for (const n of supports)
-      notes.push(
-        `Apoio · ${named(n)} → ${label} · ${supportText(n.restraints)}`,
-      );
+      notes.push(`Apoio · ${named(n)} → ${label} · ${supportText(n)}`);
+    const restrained = supports.filter(hasRestraints);
+    const targetFrame = (hasRestraints(dst) ? dst : restrained[0])
+      ?.supportFrame;
+    const canUnion = restrained.every((n) =>
+      sameSupportAxes(n.supportFrame, targetFrame),
+    );
     if (
+      !canUnion ||
       supports.some((n) =>
         dofs.some((k) => n.restraints[k] !== dst.restraints[k]),
       )
@@ -173,17 +185,29 @@ export function planRepair(
         ["supports", ...ids],
         `Vínculos diferentes em ${label}`,
         [
-          { value: "union", label: "Unir os graus de liberdade restringidos" },
+          ...(canUnion
+            ? [
+                {
+                  value: "union",
+                  label: "Unir os graus de liberdade restringidos",
+                },
+              ]
+            : []),
           ...supports.map(sourceOption),
         ],
       );
-      if (value === "union")
+      if (value === "union") {
+        if (targetFrame) dst.supportFrame = targetFrame;
+        else delete dst.supportFrame;
         for (const k of dofs)
           dst.restraints[k] = supports.some((n) => n.restraints[k]);
-      else if (value)
-        dst.restraints = { ...nodes.get(value.slice(4))!.restraints };
-      if (value)
-        notes.push(`Apoio final · ${label} · ${supportText(dst.restraints)}`);
+      } else if (value) {
+        const chosen = nodes.get(value.slice(4))!;
+        dst.restraints = { ...chosen.restraints };
+        if (chosen.supportFrame) dst.supportFrame = chosen.supportFrame;
+        else delete dst.supportFrame;
+      }
+      if (value) notes.push(`Apoio final · ${label} · ${supportText(dst)}`);
     }
     for (const pat of p.loadPatterns)
       pat.nodal = resolveRows(pat.nodal, ids, nodes, "nodeId", pat);

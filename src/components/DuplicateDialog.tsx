@@ -108,7 +108,7 @@ function objectDetails(p: Project, focus: Focus) {
       const n = p.nodes.find((n) => n.id === id)!;
       const bars = p.members.filter((m) => m.start === id || m.end === id);
       details.push(
-        `${named(n)} · XYZ (${[n.x, n.y, n.z].map(number).join(" / ")}) m · apoio ${supportText(n.restraints)} · barras: ${bars.map(named).join(", ") || "nenhuma"}`,
+        `${named(n)} · XYZ (${[n.x, n.y, n.z].map(number).join(" / ")}) m · apoio ${supportText(n)} · barras: ${bars.map(named).join(", ") || "nenhuma"}`,
       );
     } else {
       const m = p.members.find((m) => m.id === id)!,

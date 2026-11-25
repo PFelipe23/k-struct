@@ -13,6 +13,7 @@ import {
   type Point3,
 } from "./geometry";
 import { free, type Project, type StructuralNode } from "./model";
+import { supportBasis, type SupportFrame } from "./supports";
 
 export type Transform =
   | { kind: "move"; offset: Point3 }
@@ -122,9 +123,8 @@ export function movedRoll(
   return sectionRoll(A, B, Z);
 }
 
-// A constrained subspace is representable iff its orthogonal projector is diagonal
-// in global XYZ. Signs (including reflection parity for rotations) cancel in P.
-export function mapRestraints(node: StructuralNode, vector: VectorMap) {
+// Global flags suffice when the rotated constraint projector is diagonal in XYZ.
+function globalRestraints(node: StructuralNode, vector: VectorMap) {
   const out = free();
   for (const prefix of ["u", "r"] as const) {
     const basis = coordinates
@@ -140,13 +140,30 @@ export function mapRestraints(node: StructuralNode, vector: VectorMap) {
               angularTolerance,
         )
       )
-        throw new Error(
-          `Apoio de ${node.name}: direção inclinada não representável pelos vínculos globais. Desmarque “Copiar apoios” ou altere a transformação.`,
-        );
+        return undefined;
       out[`${prefix}${k}`] = diagonal > 0.5;
     }
   }
   return out;
+}
+
+export function mapSupport(
+  node: StructuralNode,
+  vector: VectorMap,
+  mode: Project["mode"],
+) {
+  if (!node.supportFrame) {
+    const restraints = globalRestraints(node, vector);
+    if (restraints) return { restraints, frame: undefined };
+  }
+  const basis = supportBasis(node.supportFrame);
+  const x = vector(basis.x);
+  // Rebuilding z from x × y after a reflection preserves the fixed subspace.
+  const frame: SupportFrame =
+    mode === "planar"
+      ? { kind: "planar", angle: (Math.atan2(x.z, x.x) * 180) / Math.PI }
+      : { kind: "spatial", x, y: vector(basis.y) };
+  return { restraints: node.restraints, frame };
 }
 
 export function assertLength(a: Point3, b: Point3, name: string) {

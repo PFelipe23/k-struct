@@ -13,12 +13,13 @@ import {
 import {
   assertLength,
   mapping,
-  mapRestraints,
+  mapSupport,
   movedRoll,
   sectionRoll,
   type Transform,
   type VectorMap,
 } from "./transformGeometry";
+import { sameSupportAxes } from "./supports";
 
 export type CopyOptions = {
   supports: boolean;
@@ -100,8 +101,20 @@ function copyAssignments(
           `Cópia ${i} · ${node.name} → ${dest.name} · apoio existente`,
         );
       if (!occupied || options.conflicts === "combine") {
-        const next = mapRestraints(node, vector);
-        for (const k of dofs) dest.restraints[k] ||= next[k];
+        const { restraints, frame } = mapSupport(
+          node,
+          vector,
+          plan.project.mode,
+        );
+        if (occupied && !sameSupportAxes(dest.supportFrame, frame))
+          throw new Error(
+            `Apoios de ${dest.name} usam referenciais diferentes. Escolha conservar o apoio existente.`,
+          );
+        if (!occupied) {
+          if (frame) dest.supportFrame = frame;
+          else delete dest.supportFrame;
+        }
+        for (const k of dofs) dest.restraints[k] ||= restraints[k];
         plan.restraints++;
       }
     }

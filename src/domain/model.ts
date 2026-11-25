@@ -2,10 +2,15 @@ import { z } from "zod";
 import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
+import { supportBasis } from "./supports";
 import {
+  coordinates,
+  cross,
   distance,
   interiorParameter,
   subtract,
+  origin,
+  scale,
   tolerance,
   type Point3,
 } from "./geometry";
@@ -264,9 +269,28 @@ export const sectionSchema = z
     for (const [field, message] of Object.entries(geometryErrors(section)))
       ctx.addIssue({ code: "custom", path: [field], message });
   });
-export const projectSchema = projectV9.extend({
+const projectV10 = projectV9.extend({
   schemaVersion: z.literal(10),
   sections: z.array(sectionSchema).min(1).max(sectionLimit),
+});
+const directionSchema = z.object({ x: finite, y: finite, z: finite }).strict();
+const supportFrameSchema = z.discriminatedUnion("kind", [
+  z
+    .object({ kind: z.literal("planar"), angle: finite.min(-360).max(360) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("spatial"),
+      x: directionSchema,
+      y: directionSchema,
+    })
+    .strict(),
+]);
+export const projectSchema = projectV10.extend({
+  schemaVersion: z.literal(11),
+  nodes: z
+    .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
+    .max(1000),
 });
 export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
@@ -333,7 +357,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 10,
+    schemaVersion: 11,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -608,10 +632,19 @@ export function parseProject(source: string): Project {
         sections: old.data.sections.map((s) => ({ ...s, shape: "rectangle" })),
       };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 10
+  ) {
+    const old = projectV10.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 11 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 10, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 11, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -674,6 +707,20 @@ export function referenceErrors(p: Project): string[] {
       );
   }
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  for (const n of p.nodes) {
+    if (!n.supportFrame) continue;
+    if (n.supportFrame.kind !== p.mode) {
+      errors.push(
+        `${n.name}: o referencial do apoio precisa corresponder ao modo do projeto.`,
+      );
+      continue;
+    }
+    try {
+      supportBasis(n.supportFrame);
+    } catch (error) {
+      errors.push(`${n.name}: ${(error as Error).message}`);
+    }
+  }
   for (const m of p.members) {
     if (!nodes.has(m.start) || !nodes.has(m.end))
       errors.push(`${m.name}: nó de extremidade inexistente.`);
@@ -900,21 +947,16 @@ export function analysisErrors(p: Project): string[] {
     );
     const constraints: number[][] = [];
     for (const n of component) {
-      const pos = subtract(n, seed);
-      const [x, y, z] = [pos.x / span, pos.y / span, pos.z / span];
-      const r = n.restraints;
-      if (p.mode === "planar") {
-        if (r.ux) constraints.push([1, 0, z]);
-        if (r.uz) constraints.push([0, 1, -x]);
-        if (r.ry) constraints.push([0, 0, 1]);
-      } else {
-        // Restrict translation plus rotation cross the node's relative position.
-        if (r.ux) constraints.push([1, 0, 0, 0, z, -y]);
-        if (r.uy) constraints.push([0, 1, 0, -z, 0, x]);
-        if (r.uz) constraints.push([0, 0, 1, y, -x, 0]);
-        if (r.rx) constraints.push([0, 0, 0, 1, 0, 0]);
-        if (r.ry) constraints.push([0, 0, 0, 0, 1, 0]);
-        if (r.rz) constraints.push([0, 0, 0, 0, 0, 1]);
+      const pos = scale(subtract(n, seed), 1 / span);
+      const basis = supportBasis(n.supportFrame);
+      const row = (u: Point3, r: Point3) =>
+        p.mode === "planar" ? [u.x, u.z, r.y] : [u.x, u.y, u.z, r.x, r.y, r.z];
+      for (const k of coordinates) {
+        const axis = basis[k];
+        // a·(u + ω × r) = a·u + (r × a)·ω.
+        if (n.restraints[`u${k}`])
+          constraints.push(row(axis, cross(pos, axis)));
+        if (n.restraints[`r${k}`]) constraints.push(row(origin, axis));
       }
     }
     const dofs = p.mode === "planar" ? 3 : 6;
