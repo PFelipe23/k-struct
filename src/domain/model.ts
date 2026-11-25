@@ -68,19 +68,20 @@ const legacyNodal = z
 const legacyUniform = z
   .object({ memberId: id, qx: finite, qz: finite })
   .strict();
+export const patternLoadLimit = 5000;
 const legacyPattern = z
   .object({
     id,
     name: text,
-    nodal: z.array(legacyNodal).max(5000),
-    uniform: z.array(legacyUniform).max(5000),
+    nodal: z.array(legacyNodal).max(patternLoadLimit),
+    uniform: z.array(legacyUniform).max(patternLoadLimit),
   })
   .strict();
 const patternSchema = legacyPattern.extend({
   nodal: z
     .array(legacyNodal.extend({ fy: finite, mx: finite, mz: finite }))
-    .max(5000),
-  uniform: z.array(legacyUniform.extend({ qy: finite })).max(5000),
+    .max(patternLoadLimit),
+  uniform: z.array(legacyUniform.extend({ qy: finite })).max(patternLoadLimit),
 });
 const guideSchema = z.object({ id, name: text, position: finite }).strict();
 const legacySchema = z

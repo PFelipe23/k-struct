@@ -118,6 +118,39 @@ async function bridge(
   );
 }
 
+test("cancelar ou repetir um lote preserva as reações e o histórico", async ({
+  page,
+}) => {
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await button("Reações").click();
+  const cells = page.getByRole("cell", { name: "30", exact: true });
+  const explorer = page.locator(".explorer");
+  await explorer.getByRole("button", { name: /^N1/ }).click();
+  await explorer
+    .getByRole("button", { name: /^N2/ })
+    .click({ modifiers: ["Control"] });
+  const batch = page.getByRole("region", { name: "Atribuição em lote" });
+  await batch.getByLabel("Lote Força Z").fill("inválido");
+  await expect(button("Aplicar lote")).toBeDisabled();
+  await batch.getByRole("button", { name: "Cancelar" }).click();
+  await expect(cells).toHaveCount(2);
+  await batch.getByLabel("Apoio em lote uz").selectOption("restrict");
+  await button("Aplicar lote").click();
+  await expect(batch).toContainText("Nenhuma alteração efetiva");
+  await expect(button("Desfazer")).toBeDisabled();
+  await expect(cells).toHaveCount(2);
+  await batch.getByLabel("Apoio em lote ry").selectOption("restrict");
+  await button("Aplicar lote").click();
+  await expect(button("Desfazer")).toBeEnabled();
+  await expect(cells).toHaveCount(0);
+});
+
 test("resultados calculados são apresentados e invalidados após edição", async ({
   page,
 }) => {

@@ -31,6 +31,8 @@ import {
 import { parseNumberInput } from "./numberInput";
 import { formatResult } from "./resultFormatting";
 import SupportFrameEditor from "./SupportFrameEditor";
+import BatchAssignPanel from "./BatchAssignPanel";
+import { selectionKey } from "../domain/selection";
 
 export function NumberField({
   label,
@@ -317,7 +319,7 @@ export default function Inspector({
   project: Project;
   selection: SelectedObject[];
   patternId: string;
-  edit: (fn: (p: Project) => void) => void;
+  edit: (fn: (p: Project) => void) => string | null | void;
   onMaterials: () => void;
   onSections: (id: string) => void;
 }) {
@@ -443,6 +445,13 @@ export default function Inspector({
               {selection.some(({ kind }) => kind === "slab") && " · 1 laje"}
             </p>
             {selectedNodes.size > 0 && supportPresets}
+            <BatchAssignPanel
+              key={JSON.stringify([p.mode, patternId, ...selection.map(selectionKey)])}
+              project={p}
+              selection={selection}
+              patternId={patternId}
+              edit={edit}
+            />
           </>
         )}
         {!selection.length && (

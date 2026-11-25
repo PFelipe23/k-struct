@@ -87,6 +87,12 @@ No inspetor da barra, **Inverter i/j** troca o início e o fim, mantendo o ID, a
 
 Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou **Pórtico regular** para definir vãos e alturas dos pavimentos. No modelo espacial, informe também os vãos em Y. Confira as quantidades de nós e barras na prévia e clique em **Gerar projeto**. Os nós começam livres e as cargas podem ser lançadas no editor.
 
+### Atribuição em lote
+
+Selecione nós e barras com Ctrl ou recupere um grupo em **Seleção e grupos**. Em **Propriedades → Atribuição em lote**, escolha a seção, os graus a restringir ou liberar e as componentes de carga a somar, substituir ou remover no padrão ativo. A prévia identifica os objetos afetados. Quando há apoios inclinados, abra **Referenciais dos nós selecionados** para conferir a direção de cada vínculo. As cargas nodais e distribuídas usam eixos globais.
+
+Por exemplo, em duas barras com qZ de −2 e −3 kN/m, **Somar** −1 kN/m produz −3 e −4 kN/m. **Aplicar lote** registra toda a operação em uma edição. **Desfazer** recupera a seção, os vínculos e as cargas anteriores de cada objeto.
+
 ### Apoios inclinados
 
 Selecione um nó e escolha **Local** em **Propriedades → Apoios e restrições → Referencial do apoio**. Em XZ, informe o ângulo da tangente em graus a partir de +X no sentido de +Z. Confira a prévia e clique em **Aplicar referencial**. Um rolete bloqueia apenas a translação Z local, que corresponde à normal, e deixa livres a translação X local e a rotação Y. Em XYZ, informe a direção de x local e uma direção para y. O editor mostra a base ortonormal de mão direita antes de aplicar. As cargas nodais continuam expressas em XYZ globais.
