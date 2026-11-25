@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { coordinates, type Coordinate, type Point3 } from "../domain/geometry";
+import { inspectNodeCoordinateChanges } from "../domain/editing";
 import type { Project } from "../domain/model";
 import { fromSI, formatUnitInput, parseUnitInput } from "../units";
 import { useUnits } from "./Units";
@@ -61,6 +62,26 @@ export default function NodeTable({
     .flatMap(({ cells }) => cells)
     .find((cell) => cell.reason);
 
+  const changes = new Map<string, Partial<Point3>>();
+  for (const { node, cells } of rows) {
+    const position: Partial<Point3> = {};
+    for (const { axis, value, reason } of cells) {
+      if (!reason && value !== node[axis]) position[axis] = value;
+    }
+    if (Object.keys(position).length) changes.set(node.id, position);
+  }
+  const geometryIssues = firstInvalid
+    ? []
+    : inspectNodeCoordinateChanges(project, changes).issues;
+  const issuesByNode = new Map<string, string[]>();
+  geometryIssues.forEach(({ nodeIds }, index) => {
+    for (const id of nodeIds) {
+      const descriptions = issuesByNode.get(id) ?? [];
+      descriptions.push(`coordinate-geometry-error-${index}`);
+      issuesByNode.set(id, descriptions);
+    }
+  });
+
   const tabularInspection = useMemo(
     () => inspectTabularImport(project, { nodesTsv, membersTsv, unit }),
     [project, nodesTsv, membersTsv, unit],
@@ -77,21 +98,11 @@ export default function NodeTable({
     event.preventDefault();
     if (firstInvalid) {
       setShowErrors(true);
-      event.currentTarget
-        .querySelector<HTMLInputElement>(`#${firstInvalid.id}`)
-        ?.focus();
+      const input = event.currentTarget.elements.namedItem(firstInvalid.id);
+      if (input instanceof HTMLInputElement) input.focus();
       return;
     }
-    const changes = new Map<string, Partial<Point3>>();
-    for (const { node, cells } of rows) {
-      for (const { axis, value } of cells) {
-        if (value !== node[axis]) {
-          const position = changes.get(node.id) ?? {};
-          position[axis] = value;
-          changes.set(node.id, position);
-        }
-      }
-    }
+    if (geometryIssues.length) return;
     const problem = changes.size ? onApply(changes) : null;
     if (problem) setError(problem);
     else onClose();
@@ -159,15 +170,23 @@ export default function NodeTable({
                     <tr key={node.id}>
                       <th scope="row">{node.name}</th>
                       {cells.map(({ id, axis, text, reason }) => {
-                        const invalid = showErrors && Boolean(reason);
+                        const syntaxError = showErrors && Boolean(reason);
+                        const geometryDescription =
+                          changes.get(node.id)?.[axis] !== undefined
+                            ? issuesByNode.get(node.id)?.join(" ")
+                            : undefined;
                         return (
                           <td key={axis}>
                             <input
                               id={id}
                               aria-label={`${axis.toUpperCase()} de ${node.name}`}
-                              aria-invalid={invalid}
+                              aria-invalid={
+                                syntaxError || Boolean(geometryDescription)
+                              }
                               aria-describedby={
-                                invalid ? `${id}-error` : undefined
+                                syntaxError
+                                  ? `${id}-error`
+                                  : geometryDescription
                               }
                               inputMode="decimal"
                               value={text}
@@ -182,7 +201,7 @@ export default function NodeTable({
                                 setError("");
                               }}
                             />
-                            {invalid && (
+                            {syntaxError && (
                               <span
                                 id={`${id}-error`}
                                 className="coordinate-error"
@@ -201,6 +220,15 @@ export default function NodeTable({
           ) : (
             <p>Adicione nós ao modelo para editar as coordenadas.</p>
           )}
+          {geometryIssues.length > 0 && (
+            <ul role="alert" className="launch-error">
+              {geometryIssues.map(({ message }, index) => (
+                <li key={index} id={`coordinate-geometry-error-${index}`}>
+                  {message}
+                </li>
+              ))}
+            </ul>
+          )}
           {(error || (showErrors && firstInvalid)) && (
             <p role="alert" className="launch-error">
               {error || "Corrija as coordenadas destacadas para aplicar."}
@@ -210,7 +238,11 @@ export default function NodeTable({
             <button type="button" onClick={onClose}>
               Cancelar
             </button>
-            <button type="submit" className="primary" disabled={!rows.length}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!rows.length || geometryIssues.length > 0}
+            >
               Aplicar
             </button>
           </div>

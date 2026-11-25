@@ -200,6 +200,67 @@ test("resultados calculados são apresentados e invalidados após edição", asy
   );
 });
 
+test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lote", async ({
+  page,
+}) => {
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  const display = page.getByLabel("Visualização dos resultados");
+  await expect(display).toHaveValue("m");
+  const dialog = page.getByRole("dialog", { name: "Tabela de nós" });
+  const x1 = dialog.getByLabel("X de N1", { exact: true });
+  const x2 = dialog.getByLabel("X de N2", { exact: true });
+  const apply = dialog.getByRole("button", { name: "Aplicar", exact: true });
+  const open = button("Tabela de nós");
+  await open.click();
+  await x2.fill("0");
+  await expect(x2).toHaveAttribute("aria-invalid", "true");
+  await expect(x2).toHaveAccessibleDescription(/B1.*V1.*comprimento nulo/);
+  await expect(x1).toHaveAttribute("aria-invalid", "false");
+  await expect(apply).toBeDisabled();
+  await x2.press("Enter");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await expect(display).toHaveValue("m");
+  await expect(button("Desfazer")).toBeDisabled();
+
+  await open.click();
+  await expect(x2).toHaveValue("6");
+  await x2.fill("0");
+  await expect(apply).toBeDisabled();
+  await x1.fill("6");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(display).toHaveValue("model");
+
+  const positions = () =>
+    page.evaluate(() =>
+      JSON.parse(localStorage.getItem("kstruct.draft.v11")!).nodes.map(
+        (n: { id: string; x: number }) => [n.id, n.x],
+      ),
+    );
+  await expect.poll(positions).toEqual([
+    ["A", 6],
+    ["B", 0],
+  ]);
+  await button("Desfazer").click();
+  await expect.poll(positions).toEqual([
+    ["A", 0],
+    ["B", 6],
+  ]);
+  await expect(button("Desfazer")).toBeDisabled();
+  await button("Refazer").click();
+  await expect.poll(positions).toEqual([
+    ["A", 6],
+    ["B", 0],
+  ]);
+});
+
 test("tabela plana valida, cancela e aplica coordenadas em um único passo", async ({
   page,
 }) => {
