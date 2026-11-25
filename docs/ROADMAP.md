@@ -14,7 +14,7 @@ O destino é uma ferramenta abrangente de análise estrutural. O ponto de partid
 
 ## Escopo já implementado na etapa 01
 
-Modelo próprio, histórico, persistência, editor por clique no XZ, seleção compartilhada, seções retangulares, vínculos e cargas, entrada OOFEM, parser, ponte Tauri, tabelas, CSV, deformada e diagramas amostrados. Casos analíticos automatizados incluem barras horizontais, verticais e inclinadas.
+Modelo próprio, histórico, persistência, editor por clique no XZ, seleção compartilhada, seções retangulares, circulares, tubulares e I, vínculos e cargas, entrada OOFEM, parser, ponte Tauri, tabelas, CSV, deformada e diagramas amostrados. Casos analíticos automatizados incluem barras horizontais, verticais e inclinadas.
 
 ## Escopo implementado na etapa 02
 

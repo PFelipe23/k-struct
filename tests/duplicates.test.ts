@@ -1,3 +1,4 @@
+import { rectangle } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   addPoint,
@@ -33,7 +34,7 @@ function fixture() {
     restraints: { ...free(), ry: true },
   });
   p.sections.push({
-    ...p.sections[0],
+    ...rectangle(p.sections[0]),
     id: "rect2",
     name: "Outra seção",
     height: 0.4,

@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v9, migração v1 a v8, geometria, validação e histórico      | `src/domain`                 |
+| Domínio           | Formato v10, migração v1 a v9, geometria, validação e histórico      | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v9 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v10 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -40,6 +40,8 @@ Cada material do projeto tem um ID estável e quatro propriedades elásticas e t
 O cadastro aceita valores finitos com E > 0 em Pa, 0 ≤ ν < 0,5, ρ > 0 em kg/m³ e α com sinal. O adaptador exporta `IsoLE` com `d`, `E`, `n` e `tAlpha` para barras e para a placa isolada. Os padrões e fatores de carga continuam determinando as ações aplicadas.
 
 ## Unidades e sinais
+
+O esquema v10 discrimina as seções por `shape` e persiste somente os dados de identificação, material e dimensões da forma em metros. Projetos e rascunhos v1 a v9 passam pela migração que identifica os retângulos como `rectangle` e preserva ID, largura, altura e material. As barras continuam vinculadas por `sectionId`. A prévia do catálogo, o inspetor e o adaptador OOFEM usam `sectionProperties` de `src/domain/sections.ts`. O adaptador escreve A e Iy em `Beam2d` e acrescenta Iz e J (`Ik`) em `Beam3d`. A mudança de forma ou de atribuição passa pelo histórico e invalida os resultados da revisão.
 
 Persistência e entrada do solver em N, m, kg, s e rad. A interface converte cargas para kN/kN·m, seção para cm, E para GPa, deslocamentos para mm e rotações para mrad nas tabelas.
 

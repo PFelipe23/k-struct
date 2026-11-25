@@ -80,6 +80,8 @@ import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
 import DuplicateDialog from "./components/DuplicateDialog";
+import SectionCatalog from "./components/SectionCatalog";
+import { shapeNames } from "./domain/sections";
 import MaterialLibrary from "./components/MaterialLibrary";
 import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
@@ -135,6 +137,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v10") ??
       localStorage.getItem("kstruct.draft.v9") ??
       localStorage.getItem("kstruct.draft.v8") ??
       localStorage.getItem("kstruct.draft.v7") ??
@@ -203,6 +206,7 @@ export default function App() {
     | "replicate"
     | "mesh"
     | "materials"
+    | "sections"
     | "member-edit"
     | "duplicates"
     | "nodes"
@@ -210,6 +214,11 @@ export default function App() {
     | "selection"
     | null
   >(null);
+  const [catalogSectionId, setCatalogSectionId] = useState("");
+  const openSections = (id: string) => {
+    setCatalogSectionId(id);
+    setLaunchDialog("sections");
+  };
   const {
     plane,
     guides: planeGuides,
@@ -384,7 +393,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v9", serialized);
+      localStorage.setItem("kstruct.draft.v10", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -605,6 +614,7 @@ export default function App() {
       if (
         loadEditor ||
         launchDialog === "materials" ||
+        launchDialog === "sections" ||
         launchDialog === "nodes" ||
         launchDialog === "selection" ||
         settings ||
@@ -1385,10 +1395,13 @@ export default function App() {
                   Seções <span>{p.sections.length}</span>
                 </summary>
                 {p.sections.map((s) => (
-                  <p key={s.id} className="tree-empty">
-                    {(s.width * 100).toFixed(1)} × {(s.height * 100).toFixed(1)}{" "}
-                    cm
-                  </p>
+                  <button
+                    key={s.id}
+                    title={shapeNames[s.shape]}
+                    onClick={() => openSections(s.id)}
+                  >
+                    {s.name}
+                  </button>
                 ))}
               </details>
               <details>
@@ -1696,6 +1709,7 @@ export default function App() {
         </main>
         {right && (
           <Inspector
+            onSections={openSections}
             onMaterials={() => setLaunchDialog("materials")}
             project={p}
             selection={selection}
@@ -1878,6 +1892,14 @@ export default function App() {
             }
             return error;
           }}
+        />
+      )}
+      {launchDialog === "sections" && (
+        <SectionCatalog
+          initialId={catalogSectionId}
+          project={p}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "materials" && (

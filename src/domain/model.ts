@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
@@ -43,7 +44,7 @@ const legacyMaterial = z
 export const materialSchema = legacyMaterial.extend({ alpha: finite });
 export const materialLimit = 100;
 export const sectionLimit = 100;
-const sectionSchema = z
+const legacySection = z
   .object({
     id,
     name: text,
@@ -87,7 +88,7 @@ const legacySchema = z
     nodes: z.array(legacyNode).max(1000),
     members: z.array(legacyMember).max(1000),
     materials: z.array(legacyMaterial).min(1).max(materialLimit),
-    sections: z.array(sectionSchema).min(1).max(sectionLimit),
+    sections: z.array(legacySection).min(1).max(sectionLimit),
     loadPatterns: z.array(legacyPattern).min(1).max(100),
     analysisCases: z
       .array(
@@ -246,11 +247,28 @@ const projectV8 = projectV7.extend({
     .max(32000),
 });
 
-export const projectSchema = projectV8.extend({
+const projectV9 = projectV8.extend({
   schemaVersion: z.literal(9),
   materials: z.array(materialSchema).min(1).max(materialLimit),
 });
 
+const sectionIdentity = { id, name: text, materialId: id };
+export const sectionSchema = z
+  .discriminatedUnion("shape", [
+    geometrySchemas.rectangle.extend(sectionIdentity),
+    geometrySchemas.circle.extend(sectionIdentity),
+    geometrySchemas.tube.extend(sectionIdentity),
+    geometrySchemas.i.extend(sectionIdentity),
+  ])
+  .superRefine((section, ctx) => {
+    for (const [field, message] of Object.entries(geometryErrors(section)))
+      ctx.addIssue({ code: "custom", path: [field], message });
+  });
+export const projectSchema = projectV9.extend({
+  schemaVersion: z.literal(10),
+  sections: z.array(sectionSchema).min(1).max(sectionLimit),
+});
+export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
 export const defaultElasticProperties = {
   E: 2e11,
@@ -315,7 +333,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 9,
+    schemaVersion: 10,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -334,8 +352,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
         id: "rect",
         name: "Retangular R1",
         materialId: "steel",
-        width: 0.15,
-        height: 0.2,
+        ...defaultGeometry.rectangle,
       },
     ],
     loadPatterns: [
@@ -577,10 +594,24 @@ export function parseProject(source: string): Project {
         })),
       };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 9
+  ) {
+    const old = projectV9.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 10,
+        sections: old.data.sections.map((s) => ({ ...s, shape: "rectangle" })),
+      };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 9, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 10, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
