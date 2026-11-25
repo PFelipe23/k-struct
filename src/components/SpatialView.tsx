@@ -9,8 +9,21 @@ import { beamStations } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import { formatResult } from "./resultFormatting";
 import { Maximize, Plus, Minus } from "lucide-react";
-import { interpolate, type Point3 } from "../domain/geometry";
-import type { Project, SelectedObject, Selection } from "../domain/model";
+import {
+  beamAxes,
+  coordinates,
+  distance,
+  interpolate,
+  tolerance,
+  type Point3,
+} from "../domain/geometry";
+import type {
+  Member,
+  Project,
+  SelectedObject,
+  Selection,
+  StructuralNode,
+} from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
 import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
@@ -29,6 +42,7 @@ interface SceneState {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   model: THREE.Group;
+  memberAxes: THREE.Group;
   materials: ReturnType<typeof createModelMaterials>;
   render: () => void;
   fit: () => void;
@@ -41,6 +55,9 @@ function createModelMaterials() {
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
+    axisX: new THREE.LineBasicMaterial({ depthTest: false }),
+    axisY: new THREE.LineBasicMaterial({ depthTest: false }),
+    axisZ: new THREE.LineBasicMaterial({ depthTest: false }),
     meshStation: new THREE.PointsMaterial({
       size: 5,
       sizeAttenuation: false,
@@ -89,6 +106,61 @@ function annotate(
   label.position.copy(at);
   label.center.set(0, 1);
   model.add(label);
+  return label;
+}
+
+function drawMemberAxes(
+  group: THREE.Group,
+  materials: SceneState["materials"],
+  member: Member,
+  a: StructuralNode,
+  b: StructuralNode,
+  mode: Project["mode"],
+) {
+  const span = distance(a, b);
+  if (span < tolerance) return;
+  const size = Math.min(Math.max(span * 0.24, 0.2), 1.2);
+  const center = scenePoint(interpolate(a, b, 0.5));
+  const basis = beamAxes(a, b, member.roll, mode).map(scenePoint);
+  for (const [i, material] of [
+    materials.axisX,
+    materials.axisY,
+    materials.axisZ,
+  ].entries()) {
+    const axis = basis[i];
+    const name = coordinates[i];
+    const tip = center.clone().addScaledVector(axis, size);
+    const neck = tip.clone().addScaledVector(axis, -size * 0.23);
+    const points = [center, tip];
+    for (const tangent of [basis[(i + 1) % 3], basis[(i + 2) % 3]]) {
+      points.push(tip, neck.clone().addScaledVector(tangent, size * 0.09));
+      points.push(tip, neck.clone().addScaledVector(tangent, -size * 0.09));
+    }
+    const arrow = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(points),
+      material,
+    );
+    arrow.renderOrder = 3;
+    group.add(arrow);
+    const label = annotate(group, tip, [name])!;
+    label.element.classList.add("scene-axis-label", `member-axis-${name}`);
+    label.element.setAttribute(
+      "aria-label",
+      `Eixo local ${name} de ${member.name}`,
+    );
+  }
+  for (const [end, node] of [
+    ["i", a],
+    ["j", b],
+  ] as const) {
+    const label = annotate(group, scenePoint(node), [end])!;
+    label.element.classList.add("scene-axis-label", "scene-member-end");
+    label.center.set(1, 1);
+    label.element.setAttribute(
+      "aria-label",
+      `${member.name}: ${end} ${node.name}`,
+    );
+  }
 }
 
 function loadComponents<T>(
@@ -113,6 +185,7 @@ export default function SpatialView({
   patternId,
   theme,
   project,
+  showMemberAxes,
   selection,
   result,
   onSelect,
@@ -123,6 +196,7 @@ export default function SpatialView({
   patternId: string;
   theme: Theme;
   project: Project;
+  showMemberAxes: boolean;
   selection: SelectedObject[];
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -171,8 +245,9 @@ export default function SpatialView({
     controls.enableDamping = false;
     controls.target.set(3, 0, 0);
     const model = new THREE.Group();
+    const memberAxes = new THREE.Group();
     const materials = createModelMaterials();
-    scene.add(model);
+    scene.add(model, memberAxes);
     const light = new THREE.HemisphereLight(0xffffff, 0x000000, 3);
     scene.add(light);
     const grid = new THREE.GridHelper(30, 30);
@@ -192,6 +267,9 @@ export default function SpatialView({
       light.groundColor.set(color("--scene-light-ground"));
       recolorGrid(grid, color("--scene-grid"), color("--scene-grid-center"));
       axes.setColors(color("--axis-x"), color("--axis-y"), color("--axis-z"));
+      materials.axisX.color.set(color("--axis-x"));
+      materials.axisY.color.set(color("--axis-y"));
+      materials.axisZ.color.set(color("--axis-z"));
       materials.slab.color.set(color("--geometry-member"));
       materials.selectedSlab.color.set(color("--geometry-selected"));
       materials.member.color.set(color("--geometry-member"));
@@ -289,6 +367,7 @@ export default function SpatialView({
       camera,
       controls,
       model,
+      memberAxes,
       materials,
       render,
       fit,
@@ -308,6 +387,7 @@ export default function SpatialView({
       resize.disconnect();
       controls.dispose();
       clearModel(model);
+      clearModel(memberAxes);
       for (const material of Object.values(materials)) material.dispose();
       grid.dispose();
       axes.dispose();
@@ -474,6 +554,29 @@ export default function SpatialView({
     layers.loads,
     layers.mesh,
   ]);
+  useEffect(() => {
+    const s = state.current;
+    if (!s) return;
+    clearModel(s.memberAxes);
+    if (showMemberAxes) {
+      const selected = new Set(
+        selection.filter(({ kind }) => kind === "member").map(({ id }) => id),
+      );
+      const nodes = new Map(project.nodes.map((node) => [node.id, node]));
+      for (const member of project.members) {
+        if (selected.size && !selected.has(member.id)) continue;
+        drawMemberAxes(
+          s.memberAxes,
+          s.materials,
+          member,
+          nodes.get(member.start)!,
+          nodes.get(member.end)!,
+          project.mode,
+        );
+      }
+    }
+    s.render();
+  }, [project, selection, showMemberAxes]);
   useEffect(() => {
     const s = state.current;
     if (s) {

@@ -9,7 +9,14 @@ import {
   SlidersHorizontal,
   Square,
 } from "lucide-react";
-import { coordinates, distance, tolerance } from "../domain/geometry";
+import {
+  beamAxes,
+  coordinates,
+  distance,
+  localComponents,
+  tolerance,
+} from "../domain/geometry";
+import { reverseMember } from "../domain/editing";
 import {
   free,
   nodalLoad,
@@ -22,6 +29,7 @@ import {
   type Slab,
 } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
+import { formatResult } from "./resultFormatting";
 
 export function NumberField({
   label,
@@ -337,6 +345,16 @@ export default function Inspector({
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
   const ul = sumUniform(pattern, member?.id ?? "");
+  const start = member && p.nodes.find((n) => n.id === member.start)!;
+  const end = member && p.nodes.find((n) => n.id === member.end)!;
+  const span = start && end ? distance(start, end) : 0;
+  const localLoad =
+    member && start && end && span >= tolerance
+      ? localComponents(
+          { x: ul.qx, y: ul.qy, z: ul.qz },
+          beamAxes(start, end, member.roll, p.mode),
+        )
+      : undefined;
   const nodeLoad = (key: Exclude<keyof NodalLoad, "nodeId">, value: number) =>
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
@@ -520,23 +538,24 @@ export default function Inspector({
             </label>
             <h4>Conectividade</h4>
             <div className="property-line">
-              <span>Início → fim</span>
+              <span>Sentido i → j</span>
               <b>
-                {p.nodes.find((n) => n.id === member.start)?.name} →{" "}
-                {p.nodes.find((n) => n.id === member.end)?.name}
+                {start?.name} → {end?.name}
               </b>
             </div>
             <div className="property-line">
               <span>Comprimento</span>
-              <b>
-                {(() => {
-                  const a = p.nodes.find((n) => n.id === member.start)!,
-                    b = p.nodes.find((n) => n.id === member.end)!;
-                  return distance(a, b).toFixed(3);
-                })()}{" "}
-                m
-              </b>
+              <b>{span.toFixed(3)} m</b>
             </div>
+            <button
+              onClick={() => edit((draft) => reverseMember(draft, member.id))}
+            >
+              Inverter i/j
+            </button>
+            <p className="help">
+              A inversão conserva a orientação física da seção e as cargas
+              globais.
+            </p>
             <label className="stack-field">
               Seção
               <select
@@ -556,7 +575,7 @@ export default function Inspector({
                 ))}
               </select>
             </label>
-            {spatial && (
+            {spatial ? (
               <NumberField
                 label="Rotação em torno de x local"
                 value={member.roll}
@@ -569,6 +588,11 @@ export default function Inspector({
                   })
                 }
               />
+            ) : (
+              <div className="property-line">
+                <span>Rotação da seção em XZ</span>
+                <b>0°</b>
+              </div>
             )}
             <h4>
               Carga distribuída <span>{pattern.name}</span>
@@ -582,6 +606,26 @@ export default function Inspector({
                 onChange={(v) => setUniformLoad(`q${k}`, v)}
               />
             ))}
+            {localLoad && (
+              <dl
+                className="material-values"
+                aria-label="Projeção local da carga distribuída"
+              >
+                {axes.map((key) => (
+                  <div key={key}>
+                    <dt>q{key} local</dt>
+                    <dd>
+                      {formatResult(
+                        Math.abs(localLoad[key]) < 1e-8
+                          ? 0
+                          : localLoad[key] / 1000,
+                      )}{" "}
+                      kN/m
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             <p className="help">
               Carga uniforme por metro de barra. Use qZ negativo para cargas
               verticais descendentes.

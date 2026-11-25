@@ -43,6 +43,17 @@ export function addMember(
   });
 }
 
+export function reverseMember(p: Project, id: string) {
+  const member = p.members.find((item) => item.id === id);
+  if (!member) throw new Error("A barra selecionada não existe.");
+  [member.start, member.end] = [member.end, member.start];
+  // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
+  // keeps z fixed in global space when x changes sign.
+  if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
+  // Mesh connections refer to physical node IDs and derive x/L from i and j.
+  // Uniform loads are global, and groups and sections refer to the same ID.
+}
+
 export function addSlab(
   p: Project,
   levelId: string,

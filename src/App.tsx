@@ -165,6 +165,7 @@ export default function App() {
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
   const [layout, setLayout] = useState<Layout>("dual");
+  const [showMemberAxes, setShowMemberAxes] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("primary");
   const [planes, setPlanes] = useState(() => initialPlanes(slab?.levelId));
   const primaryLayers = useViewLayers();
@@ -1239,6 +1240,15 @@ export default function App() {
                 </select>
               </label>
             </div>
+            <div className="ribbon-group theme-group">
+              <button
+                aria-pressed={showMemberAxes}
+                className="member-axes-toggle"
+                onClick={() => setShowMemberAxes((show) => !show)}
+              >
+                Eixos locais
+              </button>
+            </div>
           </>
         )}
         <div className="run-group">
@@ -1576,6 +1586,7 @@ export default function App() {
                   active={active}
                   onActivate={() => activatePanel(panel)}
                   project={p}
+                  showMemberAxes={showMemberAxes}
                   plane={view.plane}
                   orthogonal={orthogonal}
                   selection={shownSelection}
@@ -1624,6 +1635,7 @@ export default function App() {
                 patternId={patternId}
                 theme={theme}
                 project={p}
+                showMemberAxes={showMemberAxes}
                 selection={shownSelection}
                 result={visibleDisplay === "deformed" ? result : null}
                 onSelect={selectObject}
@@ -1651,8 +1663,8 @@ export default function App() {
                 {visibleDisplay === "deformed"
                   ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
                   : spatial
-                    ? "Esforços nos eixos locais, na face positiva de x. N positivo em tração. O diagrama é desenhado no plano ativo."
-                    : "Esforços amostrados nos nós da malha. N positivo em tração. M positivo sagente para barras horizontais orientadas +X."}
+                    ? "x/L vai de i (0) a j (1). Esforços nos eixos locais, na face +x. N positivo em tração."
+                    : "x/L vai de i (0) a j (1). N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
               </div>
             )
           )}
