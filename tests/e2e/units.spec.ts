@@ -139,14 +139,26 @@ test("unidades preservam análise, geometria, entrada OOFEM e CSV padrão", asyn
   await page.getByRole("button", { name: "Analisar", exact: true }).click();
   await expect(page.locator(".status-bar")).toContainText("Análise concluída");
   await page.getByLabel("Visualização dos resultados").selectOption("deformed");
-  const geometry = await page
-    .locator(".elevation polyline")
-    .getAttribute("points");
   const before = (await draft(page))!;
   await page.getByRole("button", { name: "Reações", exact: true }).click();
   const csvDefault = await download(page, "CSV");
   await page.getByRole("button", { name: "Análise", exact: true }).click();
   const deckBefore = await download(page, "Entrada OOFEM");
+  await page.getByRole("button", { name: "Exibição", exact: true }).click();
+  // A troca de faixa pode redimensionar o desenho. Compare as estações com
+  // a origem na extremidade i da barra indeformada, conservando a escala da vista.
+  const deformedShape = () =>
+    page.locator(".elevation polyline").evaluate((element) => {
+      const curve = element as SVGPolylineElement;
+      const beam = curve.parentElement!.querySelector<SVGLineElement>(
+        "line[data-member-id]",
+      )!;
+      return Array.from(curve.points, (point) => [
+        point.x - beam.x1.baseVal.value,
+        point.y - beam.y1.baseVal.value,
+      ]);
+    });
+  const geometry = await deformedShape();
   await units(page, {
     length: "cm",
     section: "mm",
@@ -158,8 +170,8 @@ test("unidades preservam análise, geometria, entrada OOFEM e CSV padrão", asyn
   });
   await expect(page.locator(".status-bar")).toContainText("Análise concluída");
   expect(await draft(page)).toBe(before);
-  expect(await page.locator(".elevation polyline").getAttribute("points")).toBe(
-    geometry,
+  expect(await deformedShape()).toEqual(
+    geometry.map(([x, y]) => [expect.closeTo(x, 4), expect.closeTo(y, 4)]),
   );
   await expect(
     page.getByRole("columnheader", { name: "RZ global (N)", exact: true }),
