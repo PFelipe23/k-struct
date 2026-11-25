@@ -5,12 +5,27 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { beamStations } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import { formatResult } from "./resultFormatting";
 import { Maximize, Plus, Minus } from "lucide-react";
-import { interpolate, type Point3 } from "../domain/geometry";
-import type { Project, SelectedObject, Selection } from "../domain/model";
+import {
+  beamAxes,
+  coordinates,
+  distance,
+  interpolate,
+  tolerance,
+  type Point3,
+} from "../domain/geometry";
+import type {
+  Member,
+  Project,
+  SelectedObject,
+  Selection,
+  StructuralNode,
+} from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
+import { restrainedDofs, supportBasis } from "../domain/supports";
 import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
 import { useUnits } from "./Units";
@@ -35,6 +50,7 @@ interface SceneState {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   model: THREE.Group;
+  memberAxes: THREE.Group;
   materials: ReturnType<typeof createModelMaterials>;
   render: () => void;
   fit: () => void;
@@ -47,6 +63,14 @@ function createModelMaterials() {
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
+    axisX: new THREE.LineBasicMaterial({ depthTest: false }),
+    axisY: new THREE.LineBasicMaterial({ depthTest: false }),
+    axisZ: new THREE.LineBasicMaterial({ depthTest: false }),
+    meshStation: new THREE.PointsMaterial({
+      size: 5,
+      sizeAttenuation: false,
+      depthTest: false,
+    }),
     node: new THREE.MeshStandardMaterial(),
     selectedNode: new THREE.MeshStandardMaterial(),
     support: new THREE.MeshStandardMaterial({ wireframe: true }),
@@ -90,6 +114,62 @@ function annotate(
   label.position.copy(at);
   label.center.set(0, 1);
   model.add(label);
+  return label;
+}
+
+function drawMemberAxes(
+  group: THREE.Group,
+  materials: SceneState["materials"],
+  member: Member,
+  a: StructuralNode,
+  b: StructuralNode,
+  mode: Project["mode"],
+) {
+  const span = distance(a, b);
+  if (span < tolerance) return;
+  const size = Math.min(Math.max(span * 0.24, 0.2), 1.2);
+  const center = scenePoint(interpolate(a, b, 0.5));
+  const basis = beamAxes(a, b, member.roll, mode).map(scenePoint);
+  for (const [i, material] of [
+    materials.axisX,
+    materials.axisY,
+    materials.axisZ,
+  ].entries()) {
+    const axis = basis[i];
+    const name = coordinates[i];
+    const tip = center.clone().addScaledVector(axis, size);
+    const neck = tip.clone().addScaledVector(axis, -size * 0.23);
+    const points = [center, tip];
+    for (const tangent of [basis[(i + 1) % 3], basis[(i + 2) % 3]]) {
+      points.push(tip, neck.clone().addScaledVector(tangent, size * 0.09));
+      points.push(tip, neck.clone().addScaledVector(tangent, -size * 0.09));
+    }
+    const arrow = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(points),
+      material,
+    );
+    arrow.renderOrder = 3;
+    group.add(arrow);
+    const label = annotate(group, tip, [name])!;
+    label.element.classList.add("scene-axis-label", `member-axis-${name}`);
+    label.element.setAttribute(
+      "aria-label",
+      `Eixo local ${name} de ${member.name}`,
+    );
+  }
+  for (const [end, node, other] of [
+    ["i", a, b],
+    ["j", b, a],
+  ] as const) {
+    const anchor = scenePoint(interpolate(node, other, 0.12));
+    const label = annotate(group, anchor, [end])!;
+    label.element.classList.add("scene-axis-label", "scene-member-end");
+    label.center.set(0.5, 1);
+    label.element.setAttribute(
+      "aria-label",
+      `${member.name}: ${end} ${node.name}`,
+    );
+  }
 }
 
 function loadComponents<T>(
@@ -117,6 +197,7 @@ export default function SpatialView({
   patternId,
   theme,
   project,
+  showMemberAxes,
   selection,
   result,
   onSelect,
@@ -127,6 +208,7 @@ export default function SpatialView({
   patternId: string;
   theme: Theme;
   project: Project;
+  showMemberAxes: boolean;
   selection: SelectedObject[];
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -176,8 +258,9 @@ export default function SpatialView({
     controls.enableDamping = false;
     controls.target.set(3, 0, 0);
     const model = new THREE.Group();
+    const memberAxes = new THREE.Group();
     const materials = createModelMaterials();
-    scene.add(model);
+    scene.add(model, memberAxes);
     const light = new THREE.HemisphereLight(0xffffff, 0x000000, 3);
     scene.add(light);
     const grid = new THREE.GridHelper(30, 30);
@@ -197,11 +280,15 @@ export default function SpatialView({
       light.groundColor.set(color("--scene-light-ground"));
       recolorGrid(grid, color("--scene-grid"), color("--scene-grid-center"));
       axes.setColors(color("--axis-x"), color("--axis-y"), color("--axis-z"));
+      materials.axisX.color.set(color("--axis-x"));
+      materials.axisY.color.set(color("--axis-y"));
+      materials.axisZ.color.set(color("--axis-z"));
       materials.slab.color.set(color("--geometry-member"));
       materials.selectedSlab.color.set(color("--geometry-selected"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
       materials.deformed.color.set(color("--geometry-deformed"));
+      materials.meshStation.color.set(color("--geometry-deformed"));
       materials.node.color.set(color("--scene-node"));
       materials.selectedNode.color.set(color("--geometry-selected"));
       materials.support.color.set(color("--geometry-support"));
@@ -293,6 +380,7 @@ export default function SpatialView({
       camera,
       controls,
       model,
+      memberAxes,
       materials,
       render,
       fit,
@@ -312,6 +400,7 @@ export default function SpatialView({
       resize.disconnect();
       controls.dispose();
       clearModel(model);
+      clearModel(memberAxes);
       for (const material of Object.values(materials)) material.dispose();
       grid.dispose();
       axes.dispose();
@@ -362,6 +451,35 @@ export default function SpatialView({
         ],
         selectedIds.has(`slab:${slab.id}`),
       );
+    }
+    if (layers.mesh) {
+      const layout = beamStations(project);
+      const regular: THREE.Vector3[] = [];
+      const joints = new Set<string>();
+      for (const m of project.members) {
+        const a = nodes.get(m.start)!,
+          b = nodes.get(m.end)!;
+        for (const { t, nodeId } of layout.get(m.id)!.slice(1, -1)) {
+          if (nodeId) joints.add(nodeId);
+          else regular.push(scenePoint(interpolate(a, b, t)));
+        }
+      }
+      if (regular.length) {
+        const markers = new THREE.Points(
+          new THREE.BufferGeometry().setFromPoints(regular),
+          s.materials.meshStation,
+        );
+        markers.renderOrder = 2;
+        s.model.add(markers);
+      }
+      for (const id of joints) {
+        const element = document.createElement("span");
+        element.className = "scene-mesh-joint";
+        element.dataset.meshJoint = id;
+        const ring = new CSS2DObject(element);
+        ring.position.copy(scenePoint(nodes.get(id)!));
+        s.model.add(ring);
+      }
     }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
@@ -424,6 +542,7 @@ export default function SpatialView({
       const loads = layers.loads
         ? (pattern?.nodal.filter((load) => load.nodeId === n.id) ?? [])
         : [];
+      const blocked = restrainedDofs(n.restraints);
       annotate(
         s.model,
         sphere.position,
@@ -431,15 +550,36 @@ export default function SpatialView({
           ...(layers.labels ? [n.name] : []),
           ...loadComponents(loads, ["fx", "fy", "fz"], "force", units),
           ...loadComponents(loads, ["mx", "my", "mz"], "moment", units),
+          ...(n.supportFrame && blocked.length && (layers.labels || selected)
+            ? [`${blocked.map((key) => key.toUpperCase()).join(", ")} local`]
+            : []),
         ],
         selected,
       );
-      if (Object.values(n.restraints).some(Boolean)) {
+      if (blocked.length) {
+        const translations = (["z", "x", "y"] as const).filter(
+          (axis) => n.restraints[`u${axis}`],
+        );
+        const rotation = n.supportFrame && !translations.length;
         const support = new THREE.Mesh(
-          new THREE.ConeGeometry(0.16, 0.22, 4),
+          rotation
+            ? new THREE.TorusGeometry(0.09, 0.009, 4, 12)
+            : new THREE.ConeGeometry(0.16, 0.22, 4),
           s.materials.support,
         );
-        support.position.set(n.x, n.z - 0.13, -n.y);
+        if (n.supportFrame) {
+          const basis = supportBasis(n.supportFrame);
+          const axis =
+            translations[0] ??
+            (n.restraints.rz ? "z" : n.restraints.rx ? "x" : "y");
+          const normal = scenePoint(basis[axis]).normalize();
+          support.quaternion.setFromUnitVectors(
+            rotation ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0),
+            normal,
+          );
+          support.position.copy(sphere.position);
+          if (!rotation) support.position.addScaledVector(normal, -0.13);
+        } else support.position.set(n.x, n.z - 0.13, -n.y);
         s.model.add(support);
       }
     }
@@ -453,7 +593,31 @@ export default function SpatialView({
     layers.labels,
     layers.loads,
     units,
+    layers.mesh,
   ]);
+  useEffect(() => {
+    const s = state.current;
+    if (!s) return;
+    clearModel(s.memberAxes);
+    if (showMemberAxes) {
+      const selected = new Set(
+        selection.filter(({ kind }) => kind === "member").map(({ id }) => id),
+      );
+      const nodes = new Map(project.nodes.map((node) => [node.id, node]));
+      for (const member of project.members) {
+        if (selected.size && !selected.has(member.id)) continue;
+        drawMemberAxes(
+          s.memberAxes,
+          s.materials,
+          member,
+          nodes.get(member.start)!,
+          nodes.get(member.end)!,
+          project.mode,
+        );
+      }
+    }
+    s.render();
+  }, [project, selection, showMemberAxes]);
   useEffect(() => {
     const s = state.current;
     if (s) {

@@ -27,6 +27,7 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
+import { beamStations, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
@@ -34,6 +35,13 @@ import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 import { formatQuantity, fromSI } from "../units";
 import { useUnits } from "./Units";
+import MemberAxes2D from "./MemberAxes2D";
+import {
+  forceQuantity,
+  formatResultQuantity,
+  getForceLabel,
+} from "./resultFormatting";
+import InclinedSupport2D from "./InclinedSupport2D";
 
 export type PlaneCamera = {
   projectId: string;
@@ -48,6 +56,7 @@ export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
 interface Props {
   project: Project;
+  showMemberAxes: boolean;
   plane: WorkPlane;
   orthogonal: boolean;
   selection: SelectedObject[];
@@ -85,6 +94,7 @@ export default function WorkPlaneView({
   layers,
   setLayers,
   project,
+  showMemberAxes,
   plane,
   orthogonal,
   selection,
@@ -120,6 +130,10 @@ export default function WorkPlaneView({
     if (quick) setCursor(null);
   }, [quick, plane.kind, plane.offset, project.id]);
   const { labels } = layers;
+  const mesh = useMemo(
+    () => (layers.mesh ? beamStations(project) : null),
+    [layers.mesh, project],
+  );
   const markerId = useId();
   const spatial = project.mode === "spatial";
   const [axisU, axisV, normal] = planeCoordinates[plane.kind];
@@ -131,6 +145,7 @@ export default function WorkPlaneView({
     (m) => nodeMap.has(m.start) && nodeMap.has(m.end),
   );
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
+  const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
   const slab =
     plane.kind === "XY"
@@ -612,10 +627,24 @@ export default function WorkPlaneView({
             const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
             const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
             const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
-            envelope.onSection({
-              memberId: m.id,
-              index: Math.round(t * (envelopeStations.length - 1)),
-            });
+            let index = nearestSection(envelopeStations, t);
+            const station = envelopeStations[index];
+            // On a jump both traces have the same abscissa. Pick the closer force ordinate.
+            if (
+              station.side &&
+              Math.abs(t - station.t) * length * camera.scale <= 2
+            ) {
+              const other = index + (station.side === "left" ? 1 : -1);
+              const toPointer = ([px, py]: readonly [number, number]) =>
+                Math.hypot(
+                  px + bounds.left - event.clientX,
+                  py + bounds.top - event.clientY,
+                );
+              const toCurve = (i: number) =>
+                Math.min(toPointer(band.min[i]), toPointer(band.max[i]));
+              if (toCurve(other) < toCurve(index)) index = other;
+            }
+            envelope.onSection({ memberId: m.id, index });
           };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {
@@ -658,6 +687,28 @@ export default function WorkPlaneView({
                     );
                 }}
               />
+              {mesh
+                ?.get(m.id)
+                ?.slice(1, -1)
+                .map(({ t, nodeId }) => (
+                  <circle
+                    key={t}
+                    data-mesh-station={t}
+                    data-mesh-member={m.id}
+                    data-mesh-joint={nodeId}
+                    cx={sx(u + du * t)}
+                    cy={sy(v + dv * t)}
+                    r={nodeId ? 8 : 3}
+                    fill={nodeId ? "none" : "var(--geometry-deformed)"}
+                    stroke={
+                      nodeId
+                        ? "var(--geometry-support)"
+                        : "var(--geometry-deformed)"
+                    }
+                    strokeWidth={nodeId ? 2 : 1}
+                    pointerEvents="none"
+                  />
+                ))}
               {labels && (
                 <text
                   className="member-label"
@@ -756,6 +807,70 @@ export default function WorkPlaneView({
                   })}
                 </g>
               )}
+              {showMemberAxes &&
+                (!hasMemberSelection || active) &&
+                length >= tolerance && (
+                  <MemberAxes2D
+                    member={m}
+                    a={a}
+                    b={b}
+                    mode={project.mode}
+                    plane={plane.kind}
+                    sx={sx}
+                    sy={sy}
+                  />
+                )}
+              {showMemberAxes &&
+                active &&
+                diagram &&
+                display !== "deformed" &&
+                display !== "model" &&
+                stations?.length && (
+                  <g className="member-axes diagram-ends">
+                    {(
+                      [
+                        ["i", stations[0]],
+                        ["j", stations.at(-1)!],
+                      ] as const
+                    ).map(([end, station]) => {
+                      const value = station[display];
+                      const [x, y] = forcePoint(station.t, value);
+                      const { symbol, unit } = getForceLabel(display, units);
+                      const formatted = formatResultQuantity(
+                        value,
+                        forceQuantity(display),
+                        units,
+                      );
+                      const towardSpan = end === "i" ? 1 : -1;
+                      const dx = (towardSpan * du) / length;
+                      const dy = (-towardSpan * dv) / length;
+                      const gap = Math.min(12, length * camera.scale * 0.12);
+                      return (
+                        <g
+                          key={end}
+                          role="img"
+                          aria-label={`${m.name}, ${end}, ${symbol} ${formatted} ${unit}`}
+                        >
+                          <circle cx={x} cy={y} r={3} />
+                          <text
+                            x={x + dx * gap}
+                            y={y + 13 + dy * gap}
+                            style={{
+                              textAnchor:
+                                dx > 0.3
+                                  ? "start"
+                                  : dx < -0.3
+                                    ? "end"
+                                    : "middle",
+                            }}
+                          >
+                            {end} · {formatted} {unit}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                )}
             </g>
           );
         })}
@@ -805,14 +920,24 @@ export default function WorkPlaneView({
                 onSelect({ kind: "node", id: n.id }, additiveSelection(e));
               }}
             >
-              {fixed && (
+              {hasSupport && n.supportFrame && (
+                <InclinedSupport2D
+                  node={n}
+                  x={x}
+                  y={y}
+                  u={axisU}
+                  v={axisV}
+                  showLabel={labels || active}
+                />
+              )}
+              {!n.supportFrame && fixed && (
                 <path
                   d={`M${x - 11} ${y + 7}h22m-20 0l-4 6m12-6l-4 6m12-6l-4 6`}
                   stroke="var(--geometry-support)"
                   fill="none"
                 />
               )}
-              {!fixed && hasSupport && (
+              {!n.supportFrame && !fixed && hasSupport && (
                 <g
                   stroke="var(--geometry-support)"
                   fill="var(--geometry-node-fill)"

@@ -1,3 +1,4 @@
+import { projectV8 } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   addPoint,
@@ -21,12 +22,9 @@ import {
 import { nodalLoad, uniformLoad } from "../src/domain/model";
 import { slabBenchmarkProject } from "./fixtures/slab-benchmark";
 
-function beforeSlabs({
-  selectionGroups,
-  slabs,
-  loadPatterns,
-  ...project
-}: Project) {
+function beforeSlabs(current: Project) {
+  const { meshConnections, selectionGroups, slabs, loadPatterns, ...project } =
+    projectV8(current);
   return {
     ...project,
     loadPatterns: loadPatterns.map(({ pressure, ...pattern }) => pattern),
@@ -60,7 +58,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(7);
+    expect(p.schemaVersion).toBe(11);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -139,7 +137,9 @@ describe("projeto versionado e edição", () => {
   it("recusa versões futuras, propriedades estranhas e referências quebradas", () => {
     const p = beamExample();
     expect(() =>
-      parseProject(JSON.stringify({ ...p, schemaVersion: 8 })),
+      parseProject(
+        JSON.stringify({ ...p, schemaVersion: p.schemaVersion + 1 }),
+      ),
     ).toThrow();
     expect(() =>
       parseProject(JSON.stringify({ ...p, executable: "/tmp/code" })),
@@ -176,7 +176,7 @@ describe("laje retangular isolada", () => {
   it("migra os dois formatos v5 e mantém a cota livre e as pressões por padrão", () => {
     const original = slabBenchmarkProject();
     const { formulation, ...triangle } = original.slabs[0];
-    const { selectionGroups, ...legacy } = original;
+    const { selectionGroups, meshConnections, ...legacy } = projectV8(original);
     const v5 = { ...legacy, schemaVersion: 5, slabs: [triangle] };
     expect(parseProject(JSON.stringify(v5))).toEqual(original);
     const { levelId, divisionsX, divisionsY, ...geometry } = triangle;

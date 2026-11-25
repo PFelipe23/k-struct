@@ -16,6 +16,7 @@ import {
   getForceLabel,
   formatResult,
   formatResultQuantity,
+  sectionSide,
 } from "./resultFormatting";
 
 const bounds = [
@@ -55,6 +56,9 @@ export function buildEnvelopeCsv(
             fromSI(forces[key], forceQuantity(key), units),
           ),
           JSON.stringify(combination.factors),
+          ...(project.meshConnections.length
+            ? [sectionSide(station.side)]
+            : []),
         ];
       }),
     ),
@@ -76,6 +80,7 @@ export function buildEnvelopeCsv(
         return `${symbol} (${unit})`;
       }),
       "Parcelas (ID do caso e fator)",
+      ...(project.meshConnections.length ? ["Lado da seção"] : []),
     ],
     ...rows,
   ]);
@@ -156,9 +161,10 @@ export default function EnvelopeResults({
                   onSection({ ...section, index: Number(event.target.value) })
                 }
               >
-                {stations.map(({ t }, index) => (
+                {stations.map(({ t, side }, index) => (
                   <option key={index} value={index}>
                     {formatResult(t)}
+                    {side && ` · ${sectionSide(side)}`}
                   </option>
                 ))}
               </select>

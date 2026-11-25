@@ -24,15 +24,15 @@ Os cinco benchmarks também passaram contra a tag exata 3.0 no [primeiro workflo
 
 Os testes de `units.test.ts` verificam ida e volta de cada grandeza, leitura com ponto ou vírgula, preferências inválidas e preservação exata de entradas sem mudança. A viga de referência conserva 6 m ao apresentar 600 cm ou 6000 mm e 200 GPa ao apresentar 200000 MPa. A reação de 30000 N corresponde a 30 kN; a flecha de −0,0084375 m corresponde a −8,4375 mm.
 
-`result-units.test.ts` verifica valores e cabeçalhos nas unidades selecionadas e hashes de regressão do CSV padrão de reações, deslocamentos, esforços e envelopes. IDs, estações e composição dos resultados permanecem rastreáveis. Os testes usam a saída de referência do OOFEM, sem substituir o solver da aplicação.
+`result-units.test.ts` verifica valores e cabeçalhos nas unidades selecionadas e hashes de regressão do CSV padrão de reações, deslocamentos, esforços e envelopes. IDs, estações e composição dos resultados permanecem rastreáveis. A cobertura inclui as reações globais e no referencial do apoio e os lados i/j nas conexões internas. Os testes usam a saída de referência do OOFEM, sem substituir o solver da aplicação.
 
-Os cenários de navegador em `units.spec.ts` cobrem resultado válido durante trocas sucessivas, mesma geometria de deformada, modelo e entrada OOFEM idênticos, retorno ao CSV padrão, edição em centímetros, preferência após recarregar, cancelamento e histórico da tabela. Conferem também área e inércia em metros sem arredondá-las para zero. `template-units.spec.ts` compara entradas e prévias em cm/mm com a geometria SI gerada, inclusive vírgula decimal, tolerância e cancelamento. Quando `OOFEM_BIN` está definido, o cenário de resultados produz a saída da viga com o executável real antes de exercitar a fronteira IPC no navegador.
+Os cenários de navegador em `units.spec.ts` cobrem resultado válido durante trocas sucessivas, mesma geometria de deformada, modelo e entrada OOFEM idênticos, retorno ao CSV padrão, edição em centímetros, preferência após recarregar, cancelamento e histórico da tabela. Conferem também área e inércia em metros sem arredondá-las para zero. O cenário em `units-views-integration.spec.ts` confere os valores i/j em N e N·m e a geometria do diagrama ao trocar unidades. `template-units.spec.ts` compara entradas e prévias em cm/mm com a geometria SI gerada, inclusive vírgula decimal, tolerância e cancelamento. Quando `OOFEM_BIN` está definido, o cenário de resultados produz a saída da viga com o executável real antes de exercitar a fronteira IPC no navegador.
 
 O benchmark numérico continua sendo executado separadamente com o OOFEM 3.0 fixado em `crates/solver-runner/oofem.json`. Esta contribuição não altera equações, convenções de sinais nem o esquema do projeto. A reabertura do aplicativo conserva o modelo e a preferência; os resultados continuam pertencendo à sessão de análise, conforme o contrato existente.
 
 ## Verificações adicionais
 
-Persistência sem perda, rejeição de versões desconhecidas e referências quebradas, remoção de cargas dependentes, desfazer/refazer, identidade de nós no snap, componentes sem restrições suficientes, Y não nulo, nós dentro de barras não subdivididas, mapeamento determinístico e saída truncada.
+Persistência sem perda, rejeição de versões desconhecidas e referências quebradas, remoção de cargas dependentes, desfazer/refazer, identidade de nós no snap, componentes sem restrições suficientes, Y não nulo, nós isolados no interior das barras, mapeamento determinístico e saída truncada.
 
 A soma global de forças e momentos é conferida com tolerância relativa de 0,1% à soma dos módulos das contribuições (mais escala unitária). A saída textual do OOFEM usa precisão menor para esforços que para deslocamentos. Equilíbrio é uma verificação complementar e não substitui benchmarks de rigidez nem análise de convergência.
 
@@ -49,6 +49,12 @@ O pórtico XZ de dois pavimentos tem pilares com propriedades diferentes, dois c
 O [workflow de pacotes](https://github.com/ricardocorsini/k-struct/actions/workflows/desktop-packages.yml) repete os benchmarks com o executável produzido em cada plataforma. Ele instala o NSIS e o .deb e testa o AppImage extraído. Cada pacote é submetido ao autoteste nativo sem OOFEM no PATH e com acesso externo desabilitado para a execução de teste. O relatório registra as reações e a flecha da viga, e o workflow confere os hashes do executável e do arquivo-fonte instalado.
 
 Os testes do runner exercitam cancelamento, tempo limite e persistência de registros. O Playwright verifica as ações de cancelar, recuperar o histórico e consultar o diagnóstico usando a fronteira IPC simulada, enquanto os testes dos pacotes executam o OOFEM real.
+
+## Diagnóstico de duplicidades
+
+A varredura compara a distância euclidiana em XYZ com a tolerância convertida para metros. A união só é válida quando cada par do conjunto está dentro da tolerância e todos os IDs removidos apontam diretamente ao sobrevivente. A suíte confere cotas distintas, cadeias de vizinhos, barras invertidas, barras nulas criadas pela união, sobreposições parciais e transferências por padrão e grupo.
+
+No teste com OOFEM 3.0, o modelo de entrada contém duas barras de sentidos opostos entre os mesmos apoios e uma carga de −10 kN/m em cada barra. O diagnóstico conserva a barra invertida. Ao escolher a carga de uma origem, a reação é de 30 kN por apoio. Ao escolher a soma, passa a 60 kN. O Playwright verifica o destaque no modelo, conflitos de cargas e apoios, cancelamento, desfazer e nova varredura.
 
 ## Divisão e união de uma viga carregada
 
@@ -166,6 +172,89 @@ OOFEM_BIN=/caminho/absoluto/oofem npm run check
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- slab.spec.ts
 ```
 
+## Conexões internas em barras físicas (KS-15)
+
+Execute `OOFEM_BIN=/caminho/para/oofem npm run check` com o OOFEM 3.0 fixado no projeto. Os ensaios estão em `tests/oofem.integration.test.ts`. O arquivo `tests/fixtures/internal-joint-oofem.txt` contém a saída do solver distribuído para a viga com oito subdivisões regulares. O teste do parser usa essa saída também nos ambientes sem binário.
+
+| Modelo                                                                                            | Referência independente                                                                                                                                                                                                   | Comparação                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Uma barra XZ de 6 m, nós A e B nas extremidades, C a 2 m de A, carga de −9 kN em C                | Equilíbrio fornece RAz = 6 kN e RBz = 3 kN. O momento sagente em C vale 12 kN·m. Para a dimensão a = 2 m, b = 4 m, a flecha em C vale −P a² b²/(3 EI L).                                                                  | Refinamentos 8, 6 e 13. No padrão, a conexão acrescenta a nona célula. Cortante de +6 kN no lado i e −3 kN no lado j. Tolerâncias absolutas de 0,05 N, 0,05 N·m e 5 × 10⁻¹⁰ m.                                                                     |
+| Mesma barra com ambas as pontas livres, engaste em C e qZ = −1 kN/m nos 6 m                       | Os balanços medem 2 e 4 m. RZ = 6 kN, MY = −6 kN·m, momentos na barra de −2 e −8 kN·m nos lados i e j.                                                                                                                    | O engaste interno estabiliza o componente. Os esforços preservam o salto devido à reação concentrada.                                                                                                                                              |
+| Banzo espacial de 6 m, engastado na origem, seção girada 23°, montante vertical de 2 m em x = 2 m | Referência construída com duas barras físicas de 2 e 4 m e o mesmo montante. A carga de ponta (1,1; 1,7; −9) kN e qZ = −0,65 kN/m no banzo exigem reação global (−1,1; −1,7; 12,9) kN e momentos (3,4; −31,9; −3,4) kN·m. | Refinamentos 5, 8 e 12 contra a referência com 8 por peça. Conferem-se os seis deslocamentos generalizados dos nós, as seis reações e os seis esforços nas extremidades e em cada lado do encontro. Tolerâncias de 5 × 10⁻⁹ m ou rad e 1 N ou N·m. |
+
+O teste de interface `tests/e2e/mesh-connections.spec.ts` conecta C, inspeciona a camada de malha, desfaz e refaz, refina, salva e reabre o projeto. Na envoltória dos fatores +1 e −1, o máximo de V em x/L = 1/3 é governado pela combinação direta do lado i e pela invertida do lado j. O teste confere a tabela e o CSV pelo ID do membro, pela posição, pelo lado e pela combinação.
+
+## Materiais compartilhados e independentes (KS-17)
+
+Dois balanços XZ independentes de 3 m têm seções de 20 × 30 cm e carga de ponta de −10,5 kN. As duas seções começam vinculadas ao mesmo aço, com E = 210 GPa, ν = 0,30, ρ = 7.850 kg/m³ e α = 0,000012/K. A referência de Euler–Bernoulli fornece $I_y=bh^3/12=0{,}00045\,\mathrm{m}^4$ e $u_z=-PL^3/(3EI_y)$, com $P$ em módulo.
+
+| Configuração | Flecha na ponta A | Flecha na ponta B |
+| --- | ---: | ---: |
+| Duas seções com E = 210 GPa | −1,000 mm | −1,000 mm |
+| Cópia com E = 420 GPa atribuída apenas à seção B | −1,000 mm | −0,500 mm |
+
+Em ambas as configurações cada engaste deve fornecer +10,5 kN em Z e −31,5 kN·m em Y. O teste verifica os IDs de material nos registros `SimpleCS`, as propriedades em `IsoLE`, as flechas com tolerância absoluta de 5 × 10⁻¹¹ m e as reações com 0,05 N ou N·m. Outro ensaio abre a viga biapoiada no formato v8 e confere α = 0, a flecha de −8,4375 mm e o momento de +45 kN·m no meio do vão.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check`. O fluxo de interface em `tests/e2e/materials.spec.ts` verifica edição compartilhada, cópia, reatribuição, desfazer/refazer e reabertura do arquivo. Com `OOFEM_BIN` configurado, resolve também a entrada exportada pela interface.
+
 ## Ainda não validado nesta etapa
 
 Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+
+## KS-18 · seções de barras e balanço espacial
+
+O catálogo recebe dimensões em cm e o domínio trabalha em metros. A largura acompanha y local, a altura acompanha z local e x vai de i para j. A rotação positiva segue a regra da mão direita em torno de x. A tabela usa mm para permitir a conferência direta com as dimensões de referência.
+
+| Forma e dimensões (mm) | A (mm²) | Iy (mm⁴) | Iz (mm⁴) | J (mm⁴) |
+| --- | ---: | ---: | ---: | ---: |
+| Círculo, d = 100 | 7 853,982 | 4 908 738,521 | 4 908 738,521 | 9 817 477,042 |
+| Tubo, D = 100, t = 10, di = 80 | 2 827,433 | 2 898 119,223 | 2 898 119,223 | 5 796 238,446 |
+| I, h = 200, b = 100, tf = 10, tw = 6 | 3 080,000 | 20 982 666,667 | 1 669 906,667 | 80 346,667 |
+
+No círculo maciço, A = πd²/4, Iy = Iz = πd⁴/64 e J = πd⁴/32. No anel, a referência subtrai o círculo interno do externo. A parede deve satisfazer 0 < t < D/2. O retângulo conserva os 60 termos ímpares da série de Saint-Venant usada nas versões anteriores.
+
+O I tem duas mesas iguais, alma centrada e cantos vivos. Com a altura livre hw = h − 2tf, a conferência independente usa o retângulo externo e os dois vazios para Iy, e três retângulos para Iz.
+
+- A = 2b·tf + hw·tw.
+- Iy = [b·h³ − (b − tw)·hw³]/12.
+- Iz = [2tf·b³ + hw·tw³]/12.
+- Para torção uniforme de Saint-Venant em chapas finas, J ≈ [2b·tf³ + (h − tf)·tw³]/3. A altura h − tf vai do centro de uma mesa ao centro da outra. Raios de concordância, cordões de solda e rigidez de empenamento restringido ficam fora do modelo. Iy + Iz é o momento polar geométrico. O exemplo publicado W610×125 (612 × 229 × 19,6 × 11,9 mm) resulta em 1,4823 × 10⁶ mm⁴, compatível com os 1,48 × 10⁶ mm⁴ da fonte. [CISC, *Torsional Section Properties of Steel Shapes*, p. 6, equações 6 e 8](https://www.labciv.eng.uerj.br/pgeciv/files/Torsion%20Properties.pdf)
+
+O KStruct limita a aproximação de J a b/tf ≥ 10 e hw/tw ≥ 10 e exige tw < b. Esses limites são um critério de aplicação adotado pelo projeto. O formulário identifica a dimensão a corrigir e impede salvar. O esquema do arquivo também verifica esses limites.
+
+**Balanço espacial.** Uma barra de 2 m em +X tem os seis graus de liberdade impedidos em i. Em j atuam Fy = +300 N, Fz = −900 N e Mx = +15 N·m. O material tem E = 210 GPa, ν = 0,30 e G = E/[2(1 + ν)]. Com rotação da seção igual a zero, a referência de Euler–Bernoulli fornece uy = Fy·L³/(3E·Iz), uz = Fz·L³/(3E·Iy) e rx = Mx·L/(GJ).
+
+| Seção | uy (mm) | uz (mm) | rx (mrad) |
+| --- | ---: | ---: | ---: |
+| Circular | +0,776070 | −2,328209 | +0,0378334 |
+| Tubular | +1,314481 | −3,943444 | +0,0640810 |
+| I | +2,281279 | −0,544667 | +4,622825 |
+
+O teste roda o OOFEM 3.0 com oito elementos Beam3d para cada seção, primeiro a 0° e depois a 90°. Um quarto de volta troca Iy e Iz nas duas referências de flexão. A tolerância relativa para cada deslocamento e rotação é 2 × 10⁻⁶. O balanço retangular da v9 passa pela migração antes de verificar a flexão biaxial, a força normal, a torção e as reações. Os testes estão em `tests/sections.test.ts` e `tests/oofem.integration.test.ts`.
+
+## KS-19 · inversão de i/j e rotação da seção
+
+No pórtico espacial de referência, a diagonal B5 tem seção de 15 × 20 cm, ângulo de 27° e carga uniforme nas três direções globais. Resolva o mesmo caso antes e depois de inverter i/j. As seis reações e os seis deslocamentos generalizados globais devem coincidir. Para cada estação original, use `1 − x/L` e transforme a base e a face conforme a [convenção de sinais](ARCHITECTURE.md#unidades-e-sinais). A comparação usa 5 × 10⁻¹⁰ m ou rad para deslocamentos e 0,01 N ou N·m mais 6 × 10⁻⁵ do valor de referência para forças e momentos impressos.
+
+Um balanço espacial horizontal de 6 m, com E = 200 GPa e a mesma seção, recebe Fy = +1,2 kN e Fz = −2,4 kN na ponta. Use $I_y = bh^3/12$, $I_z = hb^3/12$ e a referência de Euler–Bernoulli $u = P L^3/(3 E I)$. A rotação a 90° troca as inércias usadas em cada direção. Os deslocamentos conferem com tolerância de 5 × 10⁻⁹ m.
+
+| Orientação da seção | UY na ponta | UZ na ponta |
+| --- | ---: | ---: |
+| 0° | +7,68 mm | −8,64 mm |
+| 90° | +4,32 mm | −15,36 mm |
+
+Depois de inverter i/j com a seção já a 90°, os deslocamentos continuam iguais aos da última linha. Ensaios adicionais conferem N = +1,8 kN nas duas orientações em XZ e XYZ e a troca dos lados de uma seção interna carregada.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-axes.spec.ts` para conferir a exibição, a revisão dos resultados, o histórico e a reabertura.
+
+## KS-20 · apoios inclinados
+
+Na viga de 6 m em XZ, A restringe UX e UZ, B restringe apenas a translação ao longo de n = (0,6, 0, 0,8) e qZ = −10 kN/m. Use a tangente t = (0,8, 0, −0,6), com ângulo de −36,86989765° em relação a +X. Os momentos em A e as forças em Z dão RBz = RAz = 30 kN. Como RB = RN·n, resulta RN = 37,5 kN e RBx = +22,5 kN. Pelo equilíbrio em X, RAx = −22,5 kN. O rolete ideal tem RT = 0. A força axial de tração fornece UX em B de RBx·L/(EA) = +0,0225 mm e a compatibilidade n·uB = 0 fornece UZ = −0,016875 mm.
+
+O ensaio com o OOFEM 3.0 aceita 0,005 N ou N·m nos valores da viga e 5 × 10⁻¹³ m na compatibilidade e nos deslocamentos da ponta. Confere o registro local de reação normal do solver e a transformação para a estação final da deformada. Com Fx = +3 kN, Fz = −4 kN e My = +1,2 kN·m adicionais em B, o equilíbrio fornece RAx = −28,65 kN, RAz = +29,8 kN, RBx = +25,65 kN e RBz = +34,2 kN. Esse ensaio confirma que a carga nodal permanece global.
+
+Em XYZ, um balanço com UZ e RX restritos na ponta é resolvido antes e depois de girar a geometria, a seção, os apoios e as cargas. A rotação independente tem colunas (1,2,2)/3, (2,1,−2)/3 e (−2,2,−1)/3. O ensaio compara cada reação, cada estação de deslocamento e os esforços no referencial da barra. A tolerância é de 2 N ou N·m, compatível com a saída impressa, e 5 × 10⁻¹⁰ m ou rad nas translações e rotações. O ângulo zero no plano reproduz o caso legado. Direções paralelas insuficientes são rejeitadas antes de executar o solver.
+
+A inversão i/j da barra também preserva as reações e o deslocamento global do rolete. Em dois balanços de 6 m (um horizontal e um vertical), a carga de −12.345 N em Z exige reação vertical de +12.345 N num engaste orientado a 31°. O OOFEM imprime cinco algarismos significativos por componente local. A verificação de equilíbrio propaga metade da última casa impressa de cada componente pelos eixos do apoio e pelo braço da força. Os ensaios verificam o equilíbrio em relação à ponta livre e a rejeição da saída quando uma reação local é alterada em 10 N.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- inclined-supports.spec.ts` para verificar edição, desfazer/refazer, persistência, reanálise, tabela e CSV.

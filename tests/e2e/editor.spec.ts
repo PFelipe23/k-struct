@@ -197,6 +197,9 @@ test("layout desktop, arte local e vista espacial", async ({ page }) => {
   });
   await page.setViewportSize({ width: 1100, height: 720 });
   await expect(
+    page.getByRole("button", { name: "Conexões da malha", exact: true }),
+  ).toBeInViewport();
+  await expect(
     page.getByRole("button", { name: "Analisar", exact: true }),
   ).toBeInViewport();
   expect(

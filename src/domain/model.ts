@@ -1,9 +1,16 @@
 import { z } from "zod";
+import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
+import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
+import { supportBasis } from "./supports";
 import {
+  coordinates,
+  cross,
   distance,
   interiorParameter,
   subtract,
+  origin,
+  scale,
   tolerance,
   type Point3,
 } from "./geometry";
@@ -30,7 +37,7 @@ const legacyNode = z
   })
   .strict();
 const nodeSchema = legacyNode.extend({ restraints });
-const materialSchema = z
+const legacyMaterial = z
   .object({
     id,
     name: text,
@@ -39,7 +46,10 @@ const materialSchema = z
     density: finite.positive(),
   })
   .strict();
-const sectionSchema = z
+export const materialSchema = legacyMaterial.extend({ alpha: finite });
+export const materialLimit = 100;
+export const sectionLimit = 100;
+const legacySection = z
   .object({
     id,
     name: text,
@@ -82,8 +92,8 @@ const legacySchema = z
     units: z.literal("N-m-kg-s"),
     nodes: z.array(legacyNode).max(1000),
     members: z.array(legacyMember).max(1000),
-    materials: z.array(materialSchema).min(1).max(100),
-    sections: z.array(sectionSchema).min(1).max(100),
+    materials: z.array(legacyMaterial).min(1).max(materialLimit),
+    sections: z.array(legacySection).min(1).max(sectionLimit),
     loadPatterns: z.array(legacyPattern).min(1).max(100),
     analysisCases: z
       .array(
@@ -230,11 +240,66 @@ const selectionGroups = z
       .strict(),
   )
   .max(100);
-export const projectSchema = projectV6.extend({
+const projectV7 = projectV6.extend({
   schemaVersion: z.literal(7),
   selectionGroups,
 });
 
+const projectV8 = projectV7.extend({
+  schemaVersion: z.literal(8),
+  meshConnections: z
+    .array(z.object({ memberId: id, nodeId: id }).strict())
+    .max(32000),
+});
+
+const projectV9 = projectV8.extend({
+  schemaVersion: z.literal(9),
+  materials: z.array(materialSchema).min(1).max(materialLimit),
+});
+
+const sectionIdentity = { id, name: text, materialId: id };
+export const sectionSchema = z
+  .discriminatedUnion("shape", [
+    geometrySchemas.rectangle.extend(sectionIdentity),
+    geometrySchemas.circle.extend(sectionIdentity),
+    geometrySchemas.tube.extend(sectionIdentity),
+    geometrySchemas.i.extend(sectionIdentity),
+  ])
+  .superRefine((section, ctx) => {
+    for (const [field, message] of Object.entries(geometryErrors(section)))
+      ctx.addIssue({ code: "custom", path: [field], message });
+  });
+const projectV10 = projectV9.extend({
+  schemaVersion: z.literal(10),
+  sections: z.array(sectionSchema).min(1).max(sectionLimit),
+});
+const directionSchema = z.object({ x: finite, y: finite, z: finite }).strict();
+const supportFrameSchema = z.discriminatedUnion("kind", [
+  z
+    .object({ kind: z.literal("planar"), angle: finite.min(-360).max(360) })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("spatial"),
+      x: directionSchema,
+      y: directionSchema,
+    })
+    .strict(),
+]);
+export const projectSchema = projectV10.extend({
+  schemaVersion: z.literal(11),
+  nodes: z
+    .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
+    .max(1000),
+});
+export type Section = z.infer<typeof sectionSchema>;
+export type Material = z.infer<typeof materialSchema>;
+export const defaultElasticProperties = {
+  E: 2e11,
+  nu: 0.3,
+  density: 7850,
+  alpha: 0,
+} as const;
 export type Project = z.infer<typeof projectSchema>;
 export type AnalysisCase = Project["analysisCases"][number];
 export type ResultCombination = Project["resultCombinations"][number];
@@ -292,7 +357,8 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 7,
+    schemaVersion: 11,
+    meshConnections: [],
     selectionGroups: [],
     id: uid(),
     name: "Projeto sem título",
@@ -303,15 +369,14 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
     members: [],
     slabs: [],
     materials: [
-      { id: "steel", name: "Material M1", E: 2e11, nu: 0.3, density: 7850 },
+      { id: "steel", name: "Material M1", ...defaultElasticProperties },
     ],
     sections: [
       {
         id: "rect",
         name: "Retangular R1",
         materialId: "steel",
-        width: 0.15,
-        height: 0.2,
+        ...defaultGeometry.rectangle,
       },
     ],
     loadPatterns: [
@@ -526,10 +591,60 @@ export function parseProject(source: string): Project {
       };
     }
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 7
+  ) {
+    const old = projectV7.safeParse(value);
+    if (old.success)
+      value = { ...old.data, schemaVersion: 8, meshConnections: [] };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 8
+  ) {
+    const old = projectV8.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 9,
+        materials: old.data.materials.map((material) => ({
+          ...material,
+          alpha: 0,
+        })),
+      };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 9
+  ) {
+    const old = projectV9.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 10,
+        sections: old.data.sections.map((s) => ({ ...s, shape: "rectangle" })),
+      };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 10
+  ) {
+    const old = projectV10.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 11 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 7, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 11, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -592,11 +707,30 @@ export function referenceErrors(p: Project): string[] {
       );
   }
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  for (const n of p.nodes) {
+    if (!n.supportFrame) continue;
+    if (n.supportFrame.kind !== p.mode) {
+      errors.push(
+        `${n.name}: o referencial do apoio precisa corresponder ao modo do projeto.`,
+      );
+      continue;
+    }
+    try {
+      supportBasis(n.supportFrame);
+    } catch (error) {
+      errors.push(`${n.name}: ${(error as Error).message}`);
+    }
+  }
   for (const m of p.members) {
     if (!nodes.has(m.start) || !nodes.has(m.end))
       errors.push(`${m.name}: nó de extremidade inexistente.`);
     if (!p.sections.some((s) => s.id === m.sectionId))
       errors.push(`${m.name}: seção inexistente.`);
+  }
+  try {
+    connectionStations(p);
+  } catch (error) {
+    errors.push((error as Error).message);
   }
   for (const s of p.sections)
     if (!p.materials.some((m) => m.id === s.materialId))
@@ -756,23 +890,37 @@ export function analysisErrors(p: Project): string[] {
   }
   const edges = new Map(p.nodes.map((n) => [n.id, new Set<string>()]));
   const pairs = new Set<string>();
+  const incidences = connectionStations(p);
   for (const m of p.members) {
     const a = byId.get(m.start)!;
     const b = byId.get(m.end)!;
     if (distance(a, b) < tolerance) errors.push(`${m.name}: comprimento nulo.`);
-    edges.get(m.start)!.add(m.end);
-    edges.get(m.end)!.add(m.start);
+    // Regular refinement nodes only subdivide these edges and carry no restraints.
+    let previous = m.start;
+    for (const current of [
+      ...(incidences.get(m.id) ?? []).map((s) => s.nodeId),
+      m.end,
+    ]) {
+      edges.get(previous)!.add(current);
+      edges.get(current)!.add(previous);
+      previous = current;
+    }
     const key = [m.start, m.end].sort().join("|");
     if (pairs.has(key)) errors.push(`${m.name}: barra duplicada.`);
     pairs.add(key);
-    for (const n of p.nodes)
-      if (n.id !== a.id && n.id !== b.id && interiorParameter(n, a, b) !== null)
-        errors.push(
-          `${n.name} está no interior de ${m.name}. Use Conectar interseções.`,
-        );
   }
-  if (p.nodes.some((n) => !edges.get(n.id)!.size))
-    errors.push("Remova ou conecte os nós isolados antes de analisar.");
+  for (const n of p.nodes) {
+    if (edges.get(n.id)!.size) continue;
+    const host = p.members.find(
+      (m) =>
+        interiorParameter(n, byId.get(m.start)!, byId.get(m.end)!) !== null,
+    );
+    errors.push(
+      host
+        ? `${n.name} está isolado no interior de ${host.name}. Use Conexões da malha.`
+        : "Remova ou conecte os nós isolados antes de analisar.",
+    );
+  }
   if (
     p.nodes.some((a, i) =>
       p.nodes.slice(i + 1).some((b) => distance(a, b) < tolerance),
@@ -799,21 +947,16 @@ export function analysisErrors(p: Project): string[] {
     );
     const constraints: number[][] = [];
     for (const n of component) {
-      const pos = subtract(n, seed);
-      const [x, y, z] = [pos.x / span, pos.y / span, pos.z / span];
-      const r = n.restraints;
-      if (p.mode === "planar") {
-        if (r.ux) constraints.push([1, 0, z]);
-        if (r.uz) constraints.push([0, 1, -x]);
-        if (r.ry) constraints.push([0, 0, 1]);
-      } else {
-        // Restrict translation plus rotation cross the node's relative position.
-        if (r.ux) constraints.push([1, 0, 0, 0, z, -y]);
-        if (r.uy) constraints.push([0, 1, 0, -z, 0, x]);
-        if (r.uz) constraints.push([0, 0, 1, y, -x, 0]);
-        if (r.rx) constraints.push([0, 0, 0, 1, 0, 0]);
-        if (r.ry) constraints.push([0, 0, 0, 0, 1, 0]);
-        if (r.rz) constraints.push([0, 0, 0, 0, 0, 1]);
+      const pos = scale(subtract(n, seed), 1 / span);
+      const basis = supportBasis(n.supportFrame);
+      const row = (u: Point3, r: Point3) =>
+        p.mode === "planar" ? [u.x, u.z, r.y] : [u.x, u.y, u.z, r.x, r.y, r.z];
+      for (const k of coordinates) {
+        const axis = basis[k];
+        // a·(u + ω × r) = a·u + (r × a)·ω.
+        if (n.restraints[`u${k}`])
+          constraints.push(row(axis, cross(pos, axis)));
+        if (n.restraints[`r${k}`]) constraints.push(row(origin, axis));
       }
     }
     const dofs = p.mode === "planar" ? 3 : 6;
@@ -878,6 +1021,9 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
     if (nodes.has(m.start) || nodes.has(m.end)) bars.add(m.id);
     return !bars.has(m.id);
   });
+  p.meshConnections = p.meshConnections.filter(
+    (l) => !nodes.has(l.nodeId) && !bars.has(l.memberId),
+  );
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
   const removed = { node: nodes, member: bars, slab: slabs };

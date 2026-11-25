@@ -11,10 +11,27 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { defaultGeometry } from "../src/domain/sections";
+import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
+import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
-import { addMember } from "../src/domain/editing";
-import { origin } from "../src/domain/geometry";
+import {
+  addMember,
+  connectMeshJoint,
+  reverseMember,
+} from "../src/domain/editing";
+import { projectV8, projectV9, rectangle } from "./fixtures/project-v8";
+import {
+  assignMaterial,
+  duplicateSection,
+  newMaterial,
+  saveMaterial,
+} from "../src/domain/materials";
+import { internalJointBeam } from "./fixtures/internal-joint";
+import { inclinedBeam } from "./fixtures/inclined-beam";
+import { origin, type Point3 } from "../src/domain/geometry";
+import { sectionRoll } from "../src/domain/transformGeometry";
 import { combineLinearResults } from "../src/solver/combinations";
 import { evaluateMemberEnvelope } from "../src/solver/envelopes";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
@@ -48,6 +65,458 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("KS-20 · rolete XZ transmite somente a reação normal", () => {
+    const p = inclinedBeam();
+    const r = solve(p);
+    const [a, b] = r.reactions;
+    expect(a.fx).toBeCloseTo(-22500, 2);
+    expect(a.fz).toBeCloseTo(30000, 2);
+    expect(b.fx).toBeCloseTo(22500, 2);
+    expect(b.fz).toBeCloseTo(30000, 2);
+    expect(0.6 * b.fx + 0.8 * b.fz).toBeCloseTo(37500, 2);
+    expect(0.8 * b.fx - 0.6 * b.fz).toBeCloseTo(0, 2);
+    const tip = r.displacements.B;
+    expect(0.6 * tip.ux + 0.8 * tip.uz).toBeCloseTo(0, 12);
+    expect(tip.ux).toBeCloseTo((22500 * 6) / (2e11 * 0.03), 12);
+    expect(tip.uz).toBeCloseTo(-0.75 * tip.ux, 12);
+    expect(r.members.V1.at(-1)).toMatchObject(tip);
+    expect(r.rawOutput).toMatch(/Node\s+2 iDof\s+3 reaction\s+3\.7500e\+04/);
+
+    p.loadPatterns[0].nodal = [
+      { ...nodalLoad("B"), fx: 3000, fz: -4000, my: 1200 },
+    ];
+    const result = solve(p);
+    expect(result.reactions[0].fx).toBeCloseTo(-28650, 2);
+    expect(result.reactions[0].fz).toBeCloseTo(29800, 2);
+    expect(result.reactions[1].fx).toBeCloseTo(25650, 2);
+    expect(result.reactions[1].fz).toBeCloseTo(34200, 2);
+    const combined = combineLinearResults(
+      p,
+      {
+        id: "C",
+        name: "Dobrada",
+        type: "linear",
+        factors: [{ caseId: "EL", factor: 2 }],
+      },
+      new Map([["EL", result]]),
+    );
+    p.analysisCases[0].factors[0].factor = 2;
+    const direct = solve(p);
+    expect(combined.reactions[1].fx).toBeCloseTo(direct.reactions[1].fx, 2);
+    expect(combined.reactions[1].fz).toBeCloseTo(direct.reactions[1].fz, 2);
+    expect(combined.displacements.B.uz).toBeCloseTo(
+      direct.displacements.B.uz,
+      11,
+    );
+  });
+
+  it("KS-19/20 · inverter i/j conserva o vínculo, as reações e o deslocamento do rolete", () => {
+    const p = inclinedBeam();
+    const original = solve(p);
+    reverseMember(p, "V1");
+    const reversed = solve(p);
+    for (const [i, reaction] of original.reactions.entries()) {
+      expect(reversed.reactions[i].nodeId).toBe(reaction.nodeId);
+      expect(reversed.reactions[i].fx).toBeCloseTo(reaction.fx, 2);
+      expect(reversed.reactions[i].fz).toBeCloseTo(reaction.fz, 2);
+    }
+    expect(reversed.displacements.B.ux).toBeCloseTo(
+      original.displacements.B.ux,
+      12,
+    );
+    expect(reversed.displacements.B.uz).toBeCloseTo(
+      original.displacements.B.uz,
+      12,
+    );
+  });
+
+  it.each(["horizontal", "vertical"] as const)(
+    "KS-20 · distingue arredondamento de desequilíbrio em balanço %s com engaste a 31°",
+    (orientation) => {
+      const p = beamExample();
+      const [root, tip] = p.nodes;
+      root.restraints = { ...free(), ux: true, uz: true, ry: true };
+      root.supportFrame = { kind: "planar", angle: 31 };
+      tip.restraints = free();
+      if (orientation === "vertical") Object.assign(tip, { x: 0, z: 6 });
+      // The force error also contributes a moment about the free end.
+      p.nodes = [tip, root];
+      p.loadPatterns[0].uniform = [];
+      p.loadPatterns[0].nodal = [{ ...nodalLoad(tip.id), fz: -12345 }];
+      const input = exportOofem(p, "EL");
+      const raw = runDeck(input.deck, executable!);
+      const [reaction] = parseOofemOutput(raw, input).reactions;
+      expect(Math.abs(reaction.fx)).toBeLessThan(0.5);
+      expect(Math.abs(reaction.fz - 12345)).toBeLessThan(0.5);
+      expect(reaction.my).toBeCloseTo(
+        orientation === "horizontal" ? -74070 : 0,
+        2,
+      );
+      const corrupted = raw.replace(
+        /(Node\s+\d+\s+iDof\s+1\s+reaction\s+)(\S+)/,
+        (_, prefix, value) => prefix + (Number(value) + 10).toExponential(4),
+      );
+      expect(corrupted).not.toBe(raw);
+      expect(() => parseOofemOutput(corrupted, input)).toThrow(
+        /equilíbrio global/,
+      );
+    },
+  );
+
+  it("KS-20 · rolete de ângulo zero reproduz o apoio global legado", () => {
+    const p = beamExample();
+    const global = solve(p);
+    p.nodes[1].supportFrame = { kind: "planar", angle: 0 };
+    const local = solve(p);
+    expect(local.reactions).toEqual(global.reactions);
+    expect(local.displacements).toEqual(global.displacements);
+    expect(local.members).toEqual(global.members);
+  });
+
+  it("KS-20 · apoio XYZ oblíquo equivale à rotação global de um balanço de referência", () => {
+    const p = beamExample();
+    p.mode = "spatial";
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints.rx = true;
+    p.loadPatterns[0].nodal = [
+      {
+        ...nodalLoad("B"),
+        fx: 1200,
+        fy: 700,
+        fz: -900,
+        mx: 500,
+        my: -220,
+        mz: 80,
+      },
+    ];
+    const original = solve(p);
+    const rotate = ({ x, y, z }: Point3) => ({
+      x: (x + 2 * y - 2 * z) / 3,
+      y: (2 * x + y + 2 * z) / 3,
+      z: (2 * x - 2 * y - z) / 3,
+    });
+    const [a, b] = p.nodes;
+    Object.assign(b, rotate(b));
+    b.supportFrame = {
+      kind: "spatial",
+      x: { x: 1, y: 2, z: 2 },
+      y: { x: 3, y: 3, z: 0 },
+    };
+    p.members[0].roll = sectionRoll(a, b, rotate({ x: 0, y: 0, z: 1 }));
+    const pad = p.loadPatterns[0];
+    const [load] = pad.nodal;
+    const f = rotate({ x: load.fx, y: load.fy, z: load.fz });
+    const m = rotate({ x: load.mx, y: load.my, z: load.mz });
+    pad.nodal[0] = {
+      nodeId: "B",
+      fx: f.x,
+      fy: f.y,
+      fz: f.z,
+      mx: m.x,
+      my: m.y,
+      mz: m.z,
+    };
+    const q = rotate({ x: 0, y: 0, z: -10000 });
+    pad.uniform[0] = { memberId: "V1", qx: q.x, qy: q.y, qz: q.z };
+    const rotated = solve(p);
+    for (const [i, reaction] of original.reactions.entries()) {
+      const force = rotate({ x: reaction.fx, y: reaction.fy, z: reaction.fz });
+      const moment = rotate({ x: reaction.mx, y: reaction.my, z: reaction.mz });
+      for (const k of ["x", "y", "z"] as const) {
+        expect(Math.abs(rotated.reactions[i][`f${k}`] - force[k])).toBeLessThan(
+          2,
+        );
+        expect(
+          Math.abs(rotated.reactions[i][`m${k}`] - moment[k]),
+        ).toBeLessThan(2);
+      }
+    }
+    for (const [i, station] of original.members.V1.entries()) {
+      const u = rotate({ x: station.ux, y: station.uy, z: station.uz });
+      const r = rotate({ x: station.rx, y: station.ry, z: station.rz });
+      for (const k of ["x", "y", "z"] as const) {
+        expect(rotated.members.V1[i][`u${k}`]).toBeCloseTo(u[k], 9);
+        expect(rotated.members.V1[i][`r${k}`]).toBeCloseTo(r[k], 9);
+      }
+      for (const k of ["n", "vy", "vz", "mx", "my", "mz"] as const)
+        expect(Math.abs(rotated.members.V1[i][k] - station[k])).toBeLessThan(2);
+    }
+  });
+  it.each([
+    {
+      geometry: defaultGeometry.circle,
+      iy: 4908738.521234051,
+      iz: 4908738.521234051,
+      j: 9817477.042468103,
+    },
+    {
+      geometry: defaultGeometry.tube,
+      iy: 2898119.222936584,
+      iz: 2898119.222936584,
+      j: 5796238.445873168,
+    },
+    {
+      geometry: defaultGeometry.i,
+      iy: 20982666.66666667,
+      iz: 1669906.666666667,
+      j: 80346.666666667,
+    },
+  ])(
+    "KS-18 · flexão biaxial e torção no balanço 3D com seção $geometry.shape",
+    ({ geometry, iy, iz, j }) => {
+      const p = createProject("spatial");
+      const E = 210e9,
+        nu = 0.3,
+        G = E / (2 * (1 + nu)),
+        L = 2,
+        fy = 300,
+        fz = -900,
+        mx = 15;
+      Object.assign(p.materials[0], { E, nu });
+      const section = {
+        ...geometry,
+        id: "ensaio",
+        name: "Seção de ensaio",
+        materialId: p.materials[0].id,
+      };
+      p.sections.push(section);
+      const root = addPoint(p, { x: 0, y: 0, z: 0 }),
+        tip = addPoint(p, { x: L, y: 0, z: 0 });
+      root.restraints = {
+        ux: true,
+        uy: true,
+        uz: true,
+        rx: true,
+        ry: true,
+        rz: true,
+      };
+      const bar = addMember(p, root, tip, { sectionId: section.id, roll: 0 });
+      p.loadPatterns[0].nodal = [{ ...nodalLoad(tip.id), fy, fz, mx }];
+      for (const roll of [0, 90]) {
+        bar.roll = roll;
+        const result = solve(p);
+        const u = result.displacements[tip.id];
+        // Independent moments of inertia in mm⁴. A quarter-turn exchanges the bending axes.
+        const expected = [
+          [u.uy, (fy * L ** 3) / (3 * E * (roll === 0 ? iz : iy) * 1e-12)],
+          [u.uz, (fz * L ** 3) / (3 * E * (roll === 0 ? iy : iz) * 1e-12)],
+          [u.rx, (mx * L) / (G * j * 1e-12)],
+        ];
+        for (const [computed, reference] of expected)
+          expect(
+            Math.abs(computed - reference) / Math.abs(reference),
+          ).toBeLessThan(2e-6);
+        expect(result.reactions[0]).toMatchObject({
+          nodeId: root.id,
+          fy: -fy,
+          fz: -fz,
+          mx: -mx,
+        });
+      }
+    },
+  );
+
+  it("KS-17 · dobrar E em uma seção reduz à metade somente a flecha de seu balanço", () => {
+    const p = createProject();
+    const sectionA = rectangle(p.sections[0]);
+    Object.assign(sectionA, { width: 0.2, height: 0.3 });
+    const sectionB = duplicateSection(p, sectionA.id);
+    const steel = {
+      ...newMaterial(p),
+      name: "Aço de ensaio",
+      E: 210e9,
+      nu: 0.3,
+      density: 7850,
+      alpha: 12e-6,
+    };
+    saveMaterial(p, steel, "create");
+    const tips: string[] = [],
+      roots: string[] = [];
+    const P = 10500,
+      L = 3;
+    for (const [i, section] of p.sections.entries()) {
+      assignMaterial(p, { kind: "section", id: section.id }, steel.id);
+      const root = addPoint(p, { x: 0, y: 0, z: 2 * i }),
+        tip = addPoint(p, { x: L, y: 0, z: 2 * i });
+      root.restraints = { ...free(), ux: true, uz: true, ry: true };
+      addMember(p, root, tip, { sectionId: section.id, roll: 0 });
+      p.loadPatterns[0].nodal.push({ ...nodalLoad(tip.id), fz: -P });
+      roots.push(root.id);
+      tips.push(tip.id);
+    }
+    const beforeLoads = structuredClone(p.loadPatterns);
+    const materialNumbers = (deck: string) =>
+      [...deck.matchAll(/^SimpleCS .* material (\d+) set /gm)].map((m) =>
+        Number(m[1]),
+      );
+    const deck = exportOofem(p, "EL").deck;
+    expect(deck).toContain(
+      "IsoLE 2 d 7850 E 210000000000 n 0.3 tAlpha 0.000012",
+    );
+    expect(materialNumbers(deck)).toEqual([2, 2]);
+    const shared = solve(p);
+    const copy = newMaterial(p, steel);
+    saveMaterial(p, copy, "create");
+    assignMaterial(p, { kind: "section", id: sectionB }, copy.id);
+    saveMaterial(p, { ...copy, E: 2 * steel.E }, "edit");
+    const independentDeck = exportOofem(p, "EL").deck;
+    expect(materialNumbers(independentDeck)).toEqual([2, 3]);
+    expect(independentDeck).toContain(
+      "IsoLE 3 d 7850 E 420000000000 n 0.3 tAlpha 0.000012",
+    );
+    const independent = solve(p);
+    const I = (sectionA.width * sectionA.height ** 3) / 12;
+    const predicted = (-P * L ** 3) / (3 * steel.E * I);
+    for (const [i, id] of tips.entries()) {
+      expect(shared.displacements[id].uz).toBeCloseTo(predicted, 10);
+      expect(independent.displacements[id].uz).toBeCloseTo(
+        i === 0 ? predicted : predicted / 2,
+        10,
+      );
+      for (const r of [shared, independent]) {
+        const reaction = r.reactions.find((v) => v.nodeId === roots[i])!;
+        expect(reaction.fz).toBeCloseTo(P, 1);
+        expect(reaction.my).toBeCloseTo(-P * L, 1);
+      }
+    }
+    expect(p.loadPatterns).toEqual(beforeLoads);
+  });
+
+  it("KS-17 · a viga v8 recupera tAlpha zero e reproduz a solução analítica", () => {
+    const p = parseProject(JSON.stringify(projectV8(beamExample())));
+    expect(exportOofem(p, "EL").deck).toContain(
+      "IsoLE 1 d 7850 E 200000000000 n 0.3 tAlpha 0",
+    );
+    const r = solve(p),
+      middle = r.members.V1.find((s) => s.t === 0.5)!;
+    expect(middle.uz).toBeCloseTo(-0.0084375, 8);
+    expect(middle.m).toBeCloseTo(45000, 1);
+    for (const support of r.reactions) expect(support.fz).toBeCloseTo(30000, 1);
+  });
+
+  it("KS-15 · carga de 9 kN a 2 m na barra íntegra, reações, salto, flexão e flecha", () => {
+    const p = internalJointBeam();
+    const section = rectangle(p.sections[0]);
+    const EI = (p.materials[0].E * section.width * section.height ** 3) / 12;
+    // Simple supports, point load P at a, b=L−a: w(a) = −P a² b²/(3 E I L).
+    const expectedUz = (-9000 * 2 ** 2 * 4 ** 2) / (3 * EI * 6);
+    for (const count of [8, 6, 13]) {
+      p.mesh.segmentsPerMember = count;
+      const r = solve(p);
+      const [a, b] = r.reactions;
+      expect(a.fz).toBeCloseTo(6000, 1);
+      expect(b.fz).toBeCloseTo(3000, 1);
+      expect(a.fz + b.fz).toBeCloseTo(9000, 1);
+      expect(b.fz * 6 - 9000 * 2).toBeCloseTo(0, 1);
+      const stations = r.members.V1.filter((s) => s.t === 1 / 3);
+      expect(stations.map((s) => s.side)).toEqual(["left", "right"]);
+      expect(stations[0].v).toBeCloseTo(6000, 1);
+      expect(stations[1].v).toBeCloseTo(-3000, 1);
+      for (const s of stations) {
+        expect(s.m).toBeCloseTo(12000, 1);
+        expect(s.uz).toBeCloseTo(expectedUz, 9);
+        expect(s.uz).toBe(r.displacements.C.uz);
+      }
+    }
+  });
+  it("KS-15 · engaste interno equilibra a carga uniforme nos dois balanços", () => {
+    const p = internalJointBeam();
+    p.nodes[0].restraints = free();
+    p.nodes[1].restraints = free();
+    p.nodes[2].restraints = { ...free(), ux: true, uz: true, ry: true };
+    p.loadPatterns[0].nodal = [];
+    p.loadPatterns[0].uniform = [{ ...uniformLoad("V1"), qz: -1000 }];
+    const r = solve(p);
+    expect(r.reactions).toHaveLength(1);
+    expect(r.reactions[0]).toMatchObject({ nodeId: "C", fz: 6000, my: -6000 });
+    const [left, right] = r.members.V1.filter((s) => s.t === 1 / 3);
+    expect(right.v - left.v).toBeCloseTo(6000, 1);
+    expect(left.m).toBeCloseTo(-2000, 1);
+    expect(right.m).toBeCloseTo(-8000, 1);
+  });
+  it("KS-15 · montante excêntrico em banzo espacial reproduz duas peças divididas manualmente", () => {
+    const p = internalJointBeam();
+    p.mode = "spatial";
+    p.members[0].roll = 23;
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints = free();
+    const tip = addPoint(p, { x: 2, y: 0, z: 2 });
+    const post = addMember(p, p.nodes[2], tip);
+    p.meshConnections = [];
+    connectMeshJoint(p, "V1", { kind: "node", id: "C" });
+    p.loadPatterns[0].nodal = [
+      { ...nodalLoad(tip.id), fx: 1100, fy: 1700, fz: -9000 },
+    ];
+    p.loadPatterns[0].uniform = [{ ...uniformLoad("V1"), qz: -650 }];
+    const manual = structuredClone(p);
+    manual.meshConnections = [];
+    manual.members[0].end = "C";
+    manual.members.push({
+      ...p.members[0],
+      id: "V2",
+      name: "Trecho direito",
+      start: "C",
+    });
+    manual.loadPatterns[0].uniform.push({
+      ...manual.loadPatterns[0].uniform[0],
+      memberId: "V2",
+    });
+    const reference = solve(manual);
+    for (const count of [5, 8, 12]) {
+      p.mesh.segmentsPerMember = count;
+      const result = solve(p);
+      expect(Object.keys(result.members)).toEqual(["V1", post.id]);
+      for (const n of p.nodes)
+        for (const k of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+          expect(result.displacements[n.id][k]).toBeCloseTo(
+            reference.displacements[n.id][k],
+            8,
+          );
+      const reaction = result.reactions[0];
+      // Sum of forces and moments about the fixed end in global axes.
+      const equilibrium = {
+        fx: -1100,
+        fy: -1700,
+        fz: 12900,
+        mx: 3400,
+        my: -31900,
+        mz: -3400,
+      };
+      for (const k of ["fx", "fy", "fz", "mx", "my", "mz"] as const) {
+        expect(Math.abs(reaction[k] - equilibrium[k])).toBeLessThan(1);
+        expect(Math.abs(reaction[k] - reference.reactions[0][k])).toBeLessThan(
+          1,
+        );
+      }
+      const chord = result.members.V1,
+        postStations = result.members[post.id];
+      const [before, after] = chord.filter((s) => s.t === 1 / 3);
+      for (const [a, b] of [
+        [chord[0], reference.members.V1[0]],
+        [before, reference.members.V1.at(-1)!],
+        [after, reference.members.V2[0]],
+        [chord.at(-1)!, reference.members.V2.at(-1)!],
+        [postStations[0], reference.members[post.id][0]],
+        [postStations.at(-1)!, reference.members[post.id].at(-1)!],
+      ])
+        for (const k of ["n", "vy", "vz", "mx", "my", "mz"] as const)
+          expect(Math.abs(a[k] - b[k])).toBeLessThan(1);
+    }
+  });
   it("laje da issue #9: equilíbrio e convergência da flecha e dos momentos no centro", () => {
     const p = slabBenchmarkProject();
     const [slab] = p.slabs;
@@ -133,6 +602,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     const p = createProject();
     p.materials[0].E = portal.e;
     p.sections = portal.sections.map(([width, height], i) => ({
+      shape: "rectangle",
       id: `R${i}`,
       name: `Seção R${i}`,
       materialId: p.materials[0].id,
@@ -228,6 +698,38 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       const atMidspan = result.members[middleId].find((s) => s.t === t)!;
       expect(atMidspan.m).toBeCloseTo(45000, 1);
       expect(atMidspan.uz).toBeCloseTo(-0.0084375, 8);
+    }
+  });
+  it("reparar duas barras invertidas aplica a carga escolhida uma única vez", () => {
+    const p = beamExample();
+    p.members.push({
+      ...p.members[0],
+      id: "INV",
+      name: "Invertida",
+      start: "B",
+      end: "A",
+    });
+    p.loadPatterns[0].uniform.push({
+      ...p.loadPatterns[0].uniform[0],
+      memberId: "INV",
+    });
+    const stage = stagedMembers(p, 0.001, []),
+      choices = noRepairs();
+    choices.members = [{ drop: "V1", keep: "INV" }];
+    const preview = planRepair(stage, choices);
+    expect(preview.project).toBeNull();
+    expect(preview.questions).toHaveLength(1);
+    for (const [value, reaction] of [
+      ["use:V1", 30000],
+      ["all", 60000],
+    ] as const) {
+      choices.answers[preview.questions[0].key] = value;
+      const result = solve(planRepair(stage, choices).project!);
+      for (const id of ["A", "B"])
+        expect(result.reactions.find((r) => r.nodeId === id)!.fz).toBeCloseTo(
+          reaction,
+          1,
+        );
     }
   });
   it("duplicar a carga duplica deslocamentos e esforços", () => {
@@ -374,7 +876,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         check(copy[i][k], sign * station[k]);
     }
   });
-  it("balanço espacial com seção girada: flexão biaxial, normal e torção", () => {
+  it("balanço espacial v9 com retângulo girado: flexão biaxial, normal e torção", () => {
     const p = createProject("spatial");
     const a = addPoint(p, { x: 0, y: 2, z: 1 });
     const b = addPoint(p, { x: 3, y: 2, z: 1 });
@@ -399,13 +901,15 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
     p.loadPatterns[0].nodal = [
       { ...nodalLoad(b.id), fx: 1800, fy: 1200, fz: -2400, mx: 600 },
     ];
-    const { width, height } = p.sections[0];
+    const { width, height } = rectangle(p.sections[0]);
     const { E, nu } = p.materials[0];
     const iy = (width * height ** 3) / 12;
     const iz = (height * width ** 3) / 12;
     const j = 0.00012180866179401363;
     const g = E / (2 * (1 + nu));
-    const r = solve(p),
+    const migrated = parseProject(JSON.stringify(projectV9(p)));
+    expect(migrated).toEqual(p);
+    const r = solve(migrated),
       u = r.displacements[b.id];
     expect(u.ux).toBeCloseTo((1800 * 3) / (E * width * height), 9);
     expect(u.uy).toBeCloseTo((1200 * 3 ** 3) / (3 * E * iy), 8);
@@ -430,6 +934,112 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
   it("pórtico espacial assimétrico em dois pavimentos concorda com a rigidez direta independente", () => {
     const model = spatialBenchmark();
     expect(spatialBenchmarkDifferences(model, solve(model))).toEqual([]);
+  });
+  it("KS-19 · inverter a diagonal girada preserva a resposta global e transforma a face de corte", () => {
+    const p = spatialBenchmark();
+    const before = solve(p);
+    reverseMember(p, "B5");
+    const after = solve(p);
+    for (const original of before.reactions) {
+      const reversed = after.reactions.find(
+        ({ nodeId }) => nodeId === original.nodeId,
+      )!;
+      for (const key of ["fx", "fy", "fz", "mx", "my", "mz"] as const)
+        expect(Math.abs(reversed[key] - original[key])).toBeLessThan(
+          0.01 + 6e-5 * Math.abs(original[key]),
+        );
+    }
+    for (const node of p.nodes) {
+      const original = before.displacements[node.id];
+      for (const key of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+        expect(after.displacements[node.id][key]).toBeCloseTo(original[key], 9);
+    }
+    expect(after.members.B5).toHaveLength(before.members.B5.length);
+    for (const [index, original] of before.members.B5.entries()) {
+      const reversed = after.members.B5.at(-1 - index)!;
+      expect(reversed.t).toBeCloseTo(1 - original.t, 12);
+      for (const [key, sign] of [
+        ["n", 1],
+        ["vy", 1],
+        ["vz", -1],
+        ["mx", 1],
+        ["my", 1],
+        ["mz", -1],
+      ] as const) {
+        const value = original[key];
+        expect(Math.abs(reversed[key] - sign * value)).toBeLessThan(
+          0.01 + 6e-5 * Math.abs(value),
+        );
+      }
+    }
+  });
+
+  it("KS-19 · muda o lado da seção interna e mantém a tração positiva nos dois modos", () => {
+    const joint = internalJointBeam();
+    const before = solve(joint).members.V1;
+    reverseMember(joint, "V1");
+    const after = solve(joint).members.V1;
+    for (const old of before.filter(({ side }) => side)) {
+      const newSide = old.side === "left" ? "right" : "left";
+      const reversed = after.find((station) => station.side === newSide)!;
+      expect(reversed.t).toBeCloseTo(1 - old.t, 12);
+      expect(reversed.v).toBeCloseTo(old.v, 2);
+      expect(reversed.m).toBeCloseTo(-old.m, 2);
+    }
+    for (const mode of ["planar", "spatial"] as const) {
+      const p = beamExample();
+      p.mode = mode;
+      p.nodes[0].restraints = {
+        ux: true,
+        uy: mode === "spatial",
+        uz: true,
+        rx: mode === "spatial",
+        ry: true,
+        rz: mode === "spatial",
+      };
+      p.nodes[1].restraints = free();
+      p.loadPatterns[0].uniform = [];
+      p.loadPatterns[0].nodal = [{ ...nodalLoad("B"), fx: 1800 }];
+      for (let orientation = 0; orientation < 2; orientation++) {
+        const result = solve(p);
+        for (const { n } of result.members.V1) expect(n).toBeCloseTo(1800, 2);
+        expect(result.reactions[0].fx).toBeCloseTo(-1800, 2);
+        reverseMember(p, "V1");
+      }
+    }
+  });
+
+  it("KS-19 · girar 90° troca as inércias da flexão biaxial do balanço", () => {
+    const p = beamExample();
+    p.mode = "spatial";
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints = free();
+    p.loadPatterns[0].uniform = [];
+    p.loadPatterns[0].nodal = [{ ...nodalLoad("B"), fy: 1200, fz: -2400 }];
+    const span = p.nodes[1].x;
+    const { width, height } = rectangle(p.sections[0]);
+    const iy = (width * height ** 3) / 12;
+    const iz = (height * width ** 3) / 12;
+    const deflection = (force: number, inertia: number) =>
+      (force * span ** 3) / (3 * p.materials[0].E * inertia);
+    const aligned = solve(p).displacements.B;
+    expect(aligned.uy).toBeCloseTo(deflection(1200, iz), 8);
+    expect(aligned.uz).toBeCloseTo(deflection(-2400, iy), 8);
+    p.members[0].roll = 90;
+    const rotated = solve(p).displacements.B;
+    expect(rotated.uy).toBeCloseTo(deflection(1200, iy), 8);
+    expect(rotated.uz).toBeCloseTo(deflection(-2400, iz), 8);
+    reverseMember(p, "V1");
+    const reversed = solve(p).displacements.B;
+    expect(reversed.uy).toBeCloseTo(rotated.uy, 9);
+    expect(reversed.uz).toBeCloseTo(rotated.uz, 9);
   });
   it("envelope de pórtico em L mantém os esforços simultâneos de cada combinação governante", async () => {
     const project = parseProject(envelopeExample);

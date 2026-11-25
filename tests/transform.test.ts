@@ -1,3 +1,4 @@
+import { rectangle } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import { addMember } from "../src/domain/editing";
 import {
@@ -15,6 +16,7 @@ import {
   uniformLoad,
   type Project,
 } from "../src/domain/model";
+import { supportBasis } from "../src/domain/supports";
 import { geometryOnly, planTransform } from "../src/domain/transform";
 
 const zAxis = { ...origin, z: 1 },
@@ -75,7 +77,8 @@ describe("transformações de seleção", () => {
       { x: 4, y: 3, z: 1 },
       { sectionId: p.sections[0].id, roll: 27 },
     );
-    expect(p.sections[0].width).not.toBe(p.sections[0].height);
+    const section = rectangle(p.sections[0]);
+    expect(section.width).not.toBe(section.height);
     const plan = planTransform(p, [member(b.id)], yzMirror);
     const [a, c, A, C] = plan.project.nodes;
     near(A, { x: -2, y: 1, z: 0 });
@@ -171,18 +174,26 @@ describe("transformações de seleção", () => {
     }
     expect(p.nodes.find((n) => n.id === target.id)!.restraints.uy).toBe(false);
   });
-  it("detecta vínculos inclinados e aceita um subespaço que permanece representável", () => {
+  it("cria o referencial oblíquo na cópia e conserva vínculos globais quando a rotação permite", () => {
     const { p, b } = fixture(),
       spec = { ...rotate, degrees: 45 },
       opts = { ...geometryOnly, supports: true };
     p.nodes[0].restraints.ux = true;
-    expect(() => planTransform(p, [member(b.id)], spec, opts)).toThrow(
-      /direção inclinada/,
-    );
+    const copied = planTransform(p, [member(b.id)], spec, opts).project
+      .nodes[3];
+    expect(copied.restraints).toEqual({ ...free(), ux: true });
+    expect(copied.supportFrame?.kind).toBe("spatial");
+    near(supportBasis(copied.supportFrame).x, {
+      x: Math.SQRT1_2,
+      y: Math.SQRT1_2,
+      z: 0,
+    });
+    expect(p.nodes[0].supportFrame).toBeUndefined();
     p.nodes[0].restraints.uy = true;
-    expect(
-      planTransform(p, [member(b.id)], spec, opts).project.nodes[3].restraints,
-    ).toEqual({ ...free(), ux: true, uy: true });
+    const symmetric = planTransform(p, [member(b.id)], spec, opts).project
+      .nodes[3];
+    expect(symmetric.restraints).toEqual({ ...free(), ux: true, uy: true });
+    expect(symmetric.supportFrame).toBeUndefined();
   });
   it("move um nó compartilhado sem trocar IDs e rejeita colisão, barra nula ou duplicada", () => {
     const { p, b, c } = fixture("planar"),

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
+import { supportBasis, supportToLocal } from "../domain/supports";
 import type {
   AnalysisResult,
   Displacement,
@@ -22,6 +23,7 @@ import {
   getForceLabel,
   formatResult,
   resultFractionDigits,
+  sectionSide,
 } from "./resultFormatting";
 
 type ResultView =
@@ -46,29 +48,46 @@ export function buildResultTable(
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
-    const values = (r: Reaction) => [
-      ...[r.fx, ...(spatial ? [r.fy] : []), r.fz].map((value) =>
-        fromSI(value, "force", units),
-      ),
-      ...(spatial ? [r.mx, r.my, r.mz] : [r.my]).map((value) =>
-        fromSI(value, "moment", units),
-      ),
-    ];
-    const force = unitLabel("force", units);
-    const moment = unitLabel("moment", units);
-    headers = [
-      "Nó",
-      ...["RX", ...(spatial ? ["RY"] : []), "RZ"].map(
-        (label) => `${label} (${force})`,
-      ),
-      ...(spatial ? ["MX", "MY", "MZ"] : ["MY"]).map(
-        (label) => `${label} (${moment})`,
-      ),
-    ];
-    rows = (result?.reactions ?? []).map((r) => [
-      nodeNames.get(r.nodeId) ?? r.nodeId,
-      ...values(r),
-    ]);
+    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
+      ? ["fx", "fy", "fz", "mx", "my", "mz"]
+      : ["fx", "fz", "my"];
+    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
+    const hasLocal = (result?.reactions ?? []).some(
+      ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
+    );
+    const quantity = (key: (typeof keys)[number]) =>
+      key.startsWith("f") ? "force" : "moment";
+    const componentHeaders = (frame: "global" | "local") =>
+      keys.map((key) => {
+        const [kind, axis] = key.toUpperCase();
+        return `${kind === "F" ? "R" : "M"}${axis} ${frame} (${unitLabel(quantity(key), units)})`;
+      });
+    headers = ["Nó", ...componentHeaders("global")];
+    if (hasLocal)
+      headers.push(...componentHeaders("local"), "Referencial do apoio");
+    rows = (result?.reactions ?? []).map((r) => {
+      const row: (string | number)[] = [
+        nodeNames.get(r.nodeId) ?? r.nodeId,
+        ...keys.map((key) => fromSI(r[key], quantity(key), units)),
+      ];
+      if (hasLocal) {
+        const node = nodes.get(r.nodeId)!;
+        const basis = supportBasis(node.supportFrame);
+        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
+        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
+        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
+        row.push(
+          ...keys.map((key) => {
+            const axis = key[1] as "x" | "y" | "z";
+            return node.restraints[`${key[0] === "f" ? "u" : "r"}${axis}`]
+              ? fromSI(local[key], quantity(key), units)
+              : 0;
+          }),
+          node.supportFrame ? "Local" : "Global",
+        );
+      }
+      return row;
+    });
   } else if (tab === "displacements") {
     const values = (d: Displacement) => [
       ...[d.ux, ...(spatial ? [d.uy] : []), d.uz].map((value) =>
@@ -94,6 +113,7 @@ export function buildResultTable(
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
         stations
           .slice(1, -1)
+          .filter((s) => s.side !== "right")
           .map((s) => [
             `${memberNames.get(id) ?? id} · x/L ${s.t}`,
             ...values(s),
@@ -109,6 +129,9 @@ export function buildResultTable(
         const { symbol, unit } = getForceLabel(key, units);
         return `${symbol} (${unit})`;
       }),
+      ...(project.meshConnections.length
+        ? ["Lado da seção", "ID da barra"]
+        : []),
     ];
     rows = Object.entries(result?.members ?? {})
       .filter(([id]) => !forceMemberId || id === forceMemberId)
@@ -117,6 +140,7 @@ export function buildResultTable(
           memberNames.get(id) ?? id,
           s.t,
           ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
+          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
         ]),
       );
   }

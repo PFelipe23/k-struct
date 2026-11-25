@@ -15,6 +15,7 @@ import {
   formatResultQuantity,
   getForceLabel,
 } from "../src/components/resultFormatting";
+import { internalJointBeam } from "./fixtures/internal-joint";
 
 const output = readFileSync(
   new URL("./fixtures/beam-oofem.txt", import.meta.url),
@@ -44,10 +45,6 @@ describe("unidades dos resultados de referência", () => {
   // Referência gerada pelo código e9e2821 com a saída OOFEM guardada no repositório.
   it.each([
     [
-      "reactions",
-      "6c3a4bddad20cdc04df90d808f876648eac9a4bd86b9e5ccdd02c1f67560e2b6",
-    ],
-    [
       "displacements",
       "c0f94ca2e494ee3c845cecb1f28323339e238df2ccf5ad41369731655a3d5423",
     ],
@@ -63,10 +60,10 @@ describe("unidades dos resultados de referência", () => {
         .digest("hex"),
     ).toBe(expectedHash);
   });
-  it("preserva integralmente o CSV padrão das reações, incluindo a origem", () => {
+  it("preserva o CSV das reações globais e sua origem no contrato atual", () => {
     const { project, view } = reference();
     expect(buildResultCsv(project, view, "reactions")).toBe(
-      '\uFEFF"Nó";"RX (kN)";"RZ (kN)";"MY (kN·m)";"Caso";"ID do caso"\n' +
+      '\uFEFF"Nó";"RX global (kN)";"RZ global (kN)";"MY global (kN·m)";"Caso";"ID do caso"\n' +
         '"N1";0;30;0;"EL · Estática linear";"EL"\n' +
         '"N2";0;30;0;"EL · Estática linear";"EL"',
     );
@@ -79,8 +76,47 @@ describe("unidades dos resultados de referência", () => {
       ...alternate,
       moment: "kN·m",
     });
-    expect(table.headers).toEqual(["Nó", "RX (N)", "RZ (N)", "MY (kN·m)"]);
+    expect(table.headers).toEqual([
+      "Nó",
+      "RX global (N)",
+      "RZ global (N)",
+      "MY global (kN·m)",
+    ]);
     expect(table.rows[0]).toEqual(["N1", 0, 30000, 0]);
+    expect(result).toEqual(original);
+  });
+
+  it("converte reações locais após a projeção e identifica apoios globais e locais", () => {
+    const { project, result, view } = reference();
+    // Os dois deslocamentos do apoio N1 já são fixos; rotacionar essa base
+    // mantém o caso físico e permite conferir a projeção da reação real.
+    project.nodes[0].supportFrame = { kind: "planar", angle: 90 };
+    const original = structuredClone(result);
+    const table = buildResultTable(project, "reactions", result, "", alternate);
+    expect(table.headers).toEqual([
+      "Nó",
+      "RX global (N)",
+      "RZ global (N)",
+      "MY global (N·m)",
+      "RX local (N)",
+      "RZ local (N)",
+      "MY local (N·m)",
+      "Referencial do apoio",
+    ]);
+    expect(table.rows[0].slice(0, 5)).toEqual(["N1", 0, 30000, 0, 30000]);
+    expect(table.rows[0][5]).toBeCloseTo(0, 8);
+    expect(table.rows[0].slice(6)).toEqual([0, "Local"]);
+    expect(table.rows[1]).toEqual(["N2", 0, 30000, 0, 0, 30000, 0, "Global"]);
+    const standard = buildResultTable(project, "reactions", result);
+    expect(standard.rows[0][4]).toBe(30);
+    expect(standard.rows[1][5]).toBe(30);
+    const csv = buildResultCsv(project, view, "reactions", "", alternate);
+    expect(csv).toContain(
+      '"MY local (N·m)";"Referencial do apoio";"Caso";"ID do caso"',
+    );
+    expect(csv).toContain(
+      '"N2";0;30000;0;0;30000;0;"Global";"EL · Estática linear";"EL"',
+    );
     expect(result).toEqual(original);
   });
 
@@ -226,6 +262,83 @@ describe("unidades dos resultados de referência", () => {
       expect(forceQuantity(component)).toBe("moment");
       expect(getForceLabel(component, alternate).unit).toBe("N·m");
     }
+  });
+
+  it("mantém os lados i/j e os IDs em esforços e remove deslocamentos repetidos da conexão", () => {
+    const project = internalJointBeam();
+    const raw = readFileSync(
+      new URL("./fixtures/internal-joint-oofem.txt", import.meta.url),
+      "utf8",
+    );
+    const result = parseOofemOutput(raw, exportOofem(project, "EL"));
+    const table = buildResultTable(project, "forces", result, "V1", alternate);
+    expect(table.headers).toEqual([
+      "Barra",
+      "x/L",
+      "N (N)",
+      "V (N)",
+      "M (N·m)",
+      "Lado da seção",
+      "ID da barra",
+    ]);
+    expect(table.rows.filter((row) => row[1] === 1 / 3)).toEqual([
+      ["B1", 1 / 3, 0, 6000, 12000, "Lado i", "V1"],
+      ["B1", 1 / 3, -0, -3000, 12000, "Lado j", "V1"],
+    ]);
+    const displacements = buildResultTable(
+      project,
+      "displacements",
+      result,
+      "",
+      alternate,
+    );
+    expect(
+      displacements.rows.filter(([name]) => name === `B1 · x/L ${1 / 3}`),
+    ).toHaveLength(1);
+    const view = {
+      kind: "case" as const,
+      definition: project.analysisCases[0],
+      result,
+    };
+    const csv = buildResultCsv(project, view, "forces", "V1", alternate);
+    expect(csv).toContain(
+      ';6000;12000;"Lado i";"V1";"EL · Estática linear";"EL"',
+    );
+    expect(csv).toContain(
+      ';-3000;12000;"Lado j";"V1";"EL · Estática linear";"EL"',
+    );
+  });
+
+  it("preserva governantes e esforços simultâneos separados por lado no CSV convertido do envelope", async () => {
+    const project = internalJointBeam();
+    const raw = readFileSync(
+      new URL("./fixtures/internal-joint-oofem.txt", import.meta.url),
+      "utf8",
+    );
+    const result = parseOofemOutput(raw, exportOofem(project, "EL"));
+    const definition = project.resultEnvelopes[0];
+    const envelope = await evaluateMemberEnvelope(
+      project,
+      definition,
+      new Map([["EL", result]]),
+    );
+    const original = structuredClone(envelope);
+    const csv = buildEnvelopeCsv(project, definition, envelope, "v", alternate);
+    expect(csv.split("\n")[0]).toContain(
+      '"V (N)";"M (N·m)";"Parcelas (ID do caso e fator)";"Lado da seção"',
+    );
+    const maxima = csv
+      .split("\n")
+      .filter((line) => line.includes(';0.3333333333333333;"V";"Máximo";'));
+    expect(maxima).toHaveLength(2);
+    expect(maxima[0]).toContain(';"Direta";"POS";0;6000;12000;');
+    expect(maxima[0]).toMatch(/;"Lado i"$/);
+    expect(maxima[1]).toContain(';"Invertida";"NEG";0;3000;-12000;');
+    expect(maxima[1]).toMatch(/;"Lado j"$/);
+    const standard = buildEnvelopeCsv(project, definition, envelope, "v");
+    expect(standard).toContain(';"Direta";"POS";0;6;12;');
+    expect(standard).toContain(';"Invertida";"NEG";0;3;-12;');
+    expect(envelope).toEqual(original);
   });
 
   it("exibe a flecha da placa na preferência e momentos por metro explícito", () => {

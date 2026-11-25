@@ -1,3 +1,4 @@
+import { projectV8 } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import { addMember, addSlab } from "../src/domain/editing";
 import {
@@ -121,8 +122,9 @@ describe("seleção de objetos", () => {
     ).toEqual(next.selectionGroups);
   });
   it("migra v6 original e mantém as referências válidas de grupos em arquivos legados", () => {
-    const { selectionGroups, ...p } = beamExample();
-    const v6 = { ...p, schemaVersion: 6 };
+    const p = beamExample();
+    const { meshConnections, selectionGroups, ...legacy } = projectV8(p);
+    const v6 = { ...legacy, schemaVersion: 6 };
     expect(parseProject(JSON.stringify(v6)).selectionGroups).toEqual([]);
     const objects = [
       { kind: "member", id: "V1" },

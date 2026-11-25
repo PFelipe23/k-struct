@@ -43,6 +43,17 @@ export function addMember(
   });
 }
 
+export function reverseMember(p: Project, id: string) {
+  const member = p.members.find((item) => item.id === id);
+  if (!member) throw new Error("A barra selecionada não existe.");
+  [member.start, member.end] = [member.end, member.start];
+  // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
+  // keeps z fixed in global space when x changes sign.
+  if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
+  // Mesh connections refer to physical node IDs and derive x/L from i and j.
+  // Uniform loads are global, and groups and sections refer to the same ID.
+}
+
 export function addSlab(
   p: Project,
   levelId: string,
@@ -63,12 +74,13 @@ export function addSlab(
   const lengthY = Math.abs(to.y - from.y);
   if (lengthX < tolerance || lengthY < tolerance)
     throw new Error("Marque dois cantos opostos para definir um retângulo.");
-  const concrete = { E: 30e9, nu: 0.2, density: 2500 };
+  const concrete = { E: 30e9, nu: 0.2, density: 2500, alpha: 0 };
   let material = p.materials.find(
     (item) =>
       item.E === concrete.E &&
       item.nu === concrete.nu &&
-      item.density === concrete.density,
+      item.density === concrete.density &&
+      item.alpha === concrete.alpha,
   );
   if (!material) {
     material = { id: uid(), name: "Concreto", ...concrete };
@@ -127,6 +139,65 @@ function crossing(a: Point3, b: Point3, c: Point3, d: Point3) {
   return distance(p, q) < tolerance ? scale(add(p, q), 0.5) : null;
 }
 
+/** An explicit crossing creates one editable joint. Only the chosen bars share it. */
+export function connectMeshJoint(
+  p: Project,
+  memberId: string,
+  target: { kind: "node" | "member"; id: string },
+) {
+  const member = p.members.find((m) => m.id === memberId);
+  if (!member) throw new Error("Escolha a barra que receberá a conexão.");
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const a = nodes.get(member.start)!,
+    b = nodes.get(member.end)!;
+  const hosts = [member];
+  let joint = nodes.get(target.id);
+  if (target.kind === "member") {
+    const other = p.members.find((m) => m.id === target.id);
+    if (!other || other.id === member.id)
+      throw new Error("Escolha duas barras distintas.");
+    const point = crossing(
+      a,
+      b,
+      nodes.get(other.start)!,
+      nodes.get(other.end)!,
+    );
+    if (point === "overlap")
+      throw new Error(
+        "As barras são colineares e sobrepostas. Escolha um nó específico para conectar.",
+      );
+    if (!point)
+      throw new Error(
+        "As barras precisam se cruzar no interior dos dois segmentos em XYZ. Para um encontro em T, escolha o nó do montante.",
+      );
+    if (p.nodes.filter((n) => distance(n, point) < tolerance).length > 1)
+      throw new Error(
+        "Há mais de um nó no cruzamento. Resolva a duplicidade antes de conectar.",
+      );
+    joint = addPoint(p, point);
+    hosts.push(other);
+  }
+  if (
+    !joint ||
+    hosts.some(
+      (m) =>
+        interiorParameter(joint!, nodes.get(m.start)!, nodes.get(m.end)!) ===
+        null,
+    )
+  )
+    throw new Error("Escolha um nó no interior da barra em XYZ.");
+  const nodeId = joint.id;
+  const additions = hosts.filter(
+    (m) =>
+      !p.meshConnections.some(
+        (l) => l.memberId === m.id && l.nodeId === nodeId,
+      ),
+  );
+  if (!additions.length) throw new Error("Essa conexão já existe.");
+  p.meshConnections.push(...additions.map((m) => ({ memberId: m.id, nodeId })));
+}
+
+// Explicit bulk physical split retained for existing callers. Mesh connections use connectMeshJoint.
 export function connectIntersections(p: Project) {
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const segments = p.members.map((m) => ({
@@ -210,6 +281,26 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       })),
     );
   }
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const byId = new Map(p.members.map((m) => [m.id, m]));
+  p.meshConnections = p.meshConnections.flatMap((link) => {
+    const children = split.get(link.memberId);
+    if (!children) return [link];
+    const n = nodes.get(link.nodeId)!;
+    // A cut at the joint already connects both child endpoints.
+    if (cuts.get(link.memberId)!.includes(n.id)) return [];
+    const owner = children
+      .map((id) => byId.get(id)!)
+      .find(
+        (m) =>
+          interiorParameter(n, nodes.get(m.start)!, nodes.get(m.end)!) !== null,
+      );
+    if (!owner)
+      throw new Error(
+        `O corte deixaria a conexão de ${n.name} fora dos trechos. Revise o ponto de corte.`,
+      );
+    return [{ ...link, memberId: owner.id }];
+  });
   remapGroups(p, "member", split);
   return split;
 }

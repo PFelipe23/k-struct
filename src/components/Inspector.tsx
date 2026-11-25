@@ -1,3 +1,6 @@
+import SectionPreview from "./SectionPreview";
+import { dimensions, geometryErrors, shapeNames } from "../domain/sections";
+import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
 import {
   Box,
@@ -6,7 +9,14 @@ import {
   SlidersHorizontal,
   Square,
 } from "lucide-react";
-import { coordinates, distance, tolerance } from "../domain/geometry";
+import {
+  beamAxes,
+  coordinates,
+  distance,
+  localComponents,
+  tolerance,
+} from "../domain/geometry";
+import { reverseMember } from "../domain/editing";
 import {
   free,
   nodalLoad,
@@ -21,14 +31,13 @@ import {
 import { parseNumberInput } from "./numberInput";
 import {
   formatQuantity,
-  formatUnitValue,
   formatUnitInput,
-  fromSI,
   parseUnitInput,
   unitLabel,
   type UnitQuantity,
 } from "../units";
 import { useUnits } from "./Units";
+import SupportFrameEditor from "./SupportFrameEditor";
 
 export function NumberField({
   label,
@@ -39,6 +48,7 @@ export function NumberField({
   min,
   max,
   integer = false,
+  validate,
 }: {
   label: string;
   value: number;
@@ -48,16 +58,19 @@ export function NumberField({
   min?: number;
   max?: number;
   integer?: boolean;
+  validate?: (value: number) => string | undefined;
 }) {
   const { units } = useUnits();
   const displayValue = () =>
     quantity ? formatUnitInput(value, quantity, units) : String(value);
   const [draft, setDraft] = useState(displayValue),
     [invalid, setInvalid] = useState(false);
+  const [detail, setDetail] = useState<string>();
   const cancelling = useRef(false);
   useEffect(() => {
     setDraft(displayValue());
     setInvalid(false);
+    setDetail(undefined);
   }, [value, quantity, units]);
   const commit = () => {
     if (cancelling.current) {
@@ -67,7 +80,10 @@ export function NumberField({
     const n = quantity
       ? (parseUnitInput(draft, quantity, units, value) ?? NaN)
       : parseNumberInput(draft);
+    const error = validate?.(n);
+    setDetail(error);
     if (
+      error ||
       !Number.isFinite(n) ||
       (integer && !Number.isInteger(n)) ||
       (min !== undefined && n < min) ||
@@ -96,6 +112,7 @@ export function NumberField({
               cancelling.current = true;
               setDraft(displayValue());
               setInvalid(false);
+              setDetail(undefined);
               e.currentTarget.blur();
             }
           }}
@@ -106,11 +123,8 @@ export function NumberField({
       </div>
       {invalid && (
         <em>
-          {integer ? "Informe um número inteiro" : "Informe um valor válido"}
-          {min !== undefined
-            ? ` (mín. ${quantity ? formatQuantity(min, quantity, units) : min})`
-            : ""}
-          .
+          {detail ??
+            `${integer ? "Informe um número inteiro" : "Informe um valor válido"}${min !== undefined ? ` (mín. ${quantity ? formatQuantity(min, quantity, units) : min})` : ""}.`}
         </em>
       )}
     </label>
@@ -142,11 +156,13 @@ function SlabFields({
   slab,
   pattern,
   edit,
+  onMaterials,
 }: {
   project: Project;
   slab: Slab;
   pattern: Pattern;
   edit: (fn: (p: Project) => void) => void;
+  onMaterials: () => void;
 }) {
   const { units } = useUnits();
   const material = project.materials.find(({ id }) => id === slab.materialId)!;
@@ -221,30 +237,8 @@ function SlabFields({
           ))}
         </select>
       </label>
-      <NumberField
-        key={`${material.id}-E`}
-        label="Módulo E"
-        quantity="modulus"
-        min={1e6}
-        value={material.E}
-        onChange={(value) =>
-          edit((draft) => {
-            draft.materials.find(({ id }) => id === material.id)!.E = value;
-          })
-        }
-      />
-      <NumberField
-        key={`${material.id}-nu`}
-        label="Poisson ν"
-        min={0}
-        max={0.499999}
-        value={material.nu}
-        onChange={(value) =>
-          edit((draft) => {
-            draft.materials.find(({ id }) => id === material.id)!.nu = value;
-          })
-        }
-      />
+      <MaterialProperties material={material} />
+      <button onClick={onMaterials}>Abrir material na biblioteca</button>
       <h4>Apoios de borda</h4>
       <p className="help">
         Marque as bordas com apoio simples. Bordas desmarcadas ficam livres. Use
@@ -337,11 +331,15 @@ export default function Inspector({
   selection,
   patternId,
   edit,
+  onMaterials,
+  onSections,
 }: {
   project: Project;
   selection: SelectedObject[];
   patternId: string;
   edit: (fn: (p: Project) => void) => void;
+  onMaterials: () => void;
+  onSections: (id: string) => void;
 }) {
   const { units } = useUnits();
   const single = selection.length === 1 ? selection[0] : null;
@@ -369,6 +367,16 @@ export default function Inspector({
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
   const ul = sumUniform(pattern, member?.id ?? "");
+  const start = member && p.nodes.find((n) => n.id === member.start)!;
+  const end = member && p.nodes.find((n) => n.id === member.end)!;
+  const span = start && end ? distance(start, end) : 0;
+  const localLoad =
+    member && start && end && span >= tolerance
+      ? localComponents(
+          { x: ul.qx, y: ul.qy, z: ul.qz },
+          beamAxes(start, end, member.roll, p.mode),
+        )
+      : undefined;
   const nodeLoad = (key: Exclude<keyof NodalLoad, "nodeId">, value: number) =>
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
@@ -486,13 +494,24 @@ export default function Inspector({
               </div>
             )}
             <h4>Apoios e restrições</h4>
+            <SupportFrameEditor
+              mode={p.mode}
+              frame={node.supportFrame}
+              onChange={(frame) =>
+                edit((draft) => {
+                  const target = draft.nodes.find(({ id }) => id === node.id)!;
+                  if (frame) target.supportFrame = frame;
+                  else delete target.supportFrame;
+                })
+              }
+            />
             <p className="help">Marque os graus de liberdade impedidos.</p>
             <div className="restraints">
               {dofs.map((k) => (
                 <label key={k}>
                   <input
                     type="checkbox"
-                    aria-label={`Restringir ${k}`}
+                    aria-label={`Restringir ${k}${node.supportFrame ? " local" : ""}`}
                     checked={node.restraints[k]}
                     onChange={(e) =>
                       edit((p) => {
@@ -503,6 +522,13 @@ export default function Inspector({
                   />
                   <span>
                     {`${k[0] === "r" ? "Rotação" : "Translação"} ${k[1].toUpperCase()}`}
+                    {node.supportFrame && " local"}
+                    {node.supportFrame?.kind === "planar" &&
+                      (k === "ux"
+                        ? " · tangente"
+                        : k === "uz"
+                          ? " · normal"
+                          : "")}
                   </span>
                 </label>
               ))}
@@ -552,23 +578,26 @@ export default function Inspector({
             </label>
             <h4>Conectividade</h4>
             <div className="property-line">
-              <span>Início → fim</span>
+              <span>Sentido i → j</span>
               <b>
-                {p.nodes.find((n) => n.id === member.start)?.name} →{" "}
-                {p.nodes.find((n) => n.id === member.end)?.name}
+                {start?.name} → {end?.name}
               </b>
             </div>
             <div className="property-line">
               <span>Comprimento</span>
               <b>
-                {(() => {
-                  const a = p.nodes.find((n) => n.id === member.start)!,
-                    b = p.nodes.find((n) => n.id === member.end)!;
-                  return formatQuantity(distance(a, b), "length", units);
-                })()}{" "}
-                {units.length}
+                {formatQuantity(span, "length", units)} {units.length}
               </b>
             </div>
+            <button
+              onClick={() => edit((draft) => reverseMember(draft, member.id))}
+            >
+              Inverter i/j
+            </button>
+            <p className="help">
+              A inversão conserva a orientação física da seção e as cargas
+              globais.
+            </p>
             <label className="stack-field">
               Seção
               <select
@@ -588,7 +617,7 @@ export default function Inspector({
                 ))}
               </select>
             </label>
-            {spatial && (
+            {spatial ? (
               <NumberField
                 label="Rotação em torno de x local"
                 value={member.roll}
@@ -601,6 +630,11 @@ export default function Inspector({
                   })
                 }
               />
+            ) : (
+              <div className="property-line">
+                <span>Rotação da seção em XZ</span>
+                <b>0°</b>
+              </div>
             )}
             <h4>
               Carga distribuída <span>{pattern.name}</span>
@@ -614,6 +648,26 @@ export default function Inspector({
                 onChange={(v) => setUniformLoad(`q${k}`, v)}
               />
             ))}
+            {localLoad && (
+              <dl
+                className="material-values"
+                aria-label="Projeção local da carga distribuída"
+              >
+                {axes.map((key) => (
+                  <div key={key}>
+                    <dt>q{key} local</dt>
+                    <dd>
+                      {formatQuantity(
+                        Math.abs(localLoad[key]) < 1e-8 ? 0 : localLoad[key],
+                        "distributedLoad",
+                        units,
+                      )}{" "}
+                      {units.distributedLoad}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             <p className="help">
               Carga uniforme por metro de barra. Use qZ negativo para cargas
               verticais descendentes.
@@ -621,89 +675,57 @@ export default function Inspector({
           </>
         )}
         {slab && (
-          <SlabFields project={p} slab={slab} pattern={pattern} edit={edit} />
+          <SlabFields
+            project={p}
+            slab={slab}
+            pattern={pattern}
+            edit={edit}
+            onMaterials={onMaterials}
+          />
         )}
         {!slab &&
           !node &&
           selection.length < 2 &&
           (member || !p.slabs.length) && (
             <>
-              <h4>Seção retangular compartilhada</h4>
+              <h4>
+                {shapeNames[section.shape]} · {section.name}
+              </h4>
               <p className="help">
                 Alterações se aplicam a todas as barras que usam esta seção.
               </p>
-              <NumberField
-                label="Largura b"
-                quantity="section"
-                value={section.width}
-                min={0.001}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.width = v;
-                  })
-                }
-              />
-              <NumberField
-                label="Altura h"
-                quantity="section"
-                value={section.height}
-                min={0.001}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.sections.find((s) => s.id === section.id)!.height = v;
-                  })
-                }
-              />
-              <div className="section-preview">
-                <div
-                  style={{
-                    width: Math.max(
-                      15,
-                      Math.min(90, (section.width / section.height) * 70),
-                    ),
-                    height: 70,
-                  }}
+              {dimensions(section).map(({ key, label, value }) => (
+                <NumberField
+                  key={`${section.id}-${key}`}
+                  label={label}
+                  quantity="section"
+                  value={value}
+                  validate={(v) =>
+                    Object.values(geometryErrors({ ...section, [key]: v }))[0]
+                  }
+                  onChange={(v) =>
+                    edit((draft) => {
+                      Object.assign(
+                        draft.sections.find((s) => s.id === section.id)!,
+                        { [key]: v },
+                      );
+                    })
+                  }
                 />
-                <span>
-                  A ={" "}
-                  {formatUnitValue(
-                    section.width *
-                      section.height *
-                      fromSI(1, "section", units) ** 2,
-                  )}{" "}
-                  {units.section}²
-                  <br />
-                  IY ={" "}
-                  {formatUnitValue(
-                    ((section.width * section.height ** 3) / 12) *
-                      fromSI(1, "section", units) ** 4,
-                  )}{" "}
-                  {units.section}⁴
-                </span>
+              ))}
+              <SectionPreview geometry={section} roll={member?.roll} />
+              <button onClick={() => onSections(section.id)}>
+                Catálogo de seções
+              </button>
+              <h4>Material da seção</h4>
+              <div className="property-line">
+                <span>{section.name}</span>
+                <b>{material.name}</b>
               </div>
-              <h4>Material compartilhado</h4>
-              <NumberField
-                label="Módulo E"
-                quantity="modulus"
-                value={material.E}
-                min={1e6}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.materials.find((m) => m.id === material.id)!.E = v;
-                  })
-                }
-              />
-              <NumberField
-                label="Poisson ν"
-                value={material.nu}
-                min={0}
-                max={0.49}
-                onChange={(v) =>
-                  edit((p) => {
-                    p.materials.find((m) => m.id === material.id)!.nu = v;
-                  })
-                }
-              />
+              <MaterialProperties material={material} />
+              <button onClick={onMaterials}>
+                Abrir material na biblioteca
+              </button>
             </>
           )}
         {!slab && (member || node || !p.slabs.length) && (

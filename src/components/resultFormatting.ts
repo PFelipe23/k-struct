@@ -26,6 +26,9 @@ export const forceLabels: Record<
   mz: { symbol: "Mz", unit: "kN·m" },
 };
 
+export const sectionSide = (side?: "left" | "right") =>
+  side === "left" ? "Lado i" : side === "right" ? "Lado j" : "";
+
 export function forceQuantity(
   component: MemberForceComponent,
 ): "force" | "moment" {

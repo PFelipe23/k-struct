@@ -134,6 +134,10 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     throw new Error(
       `${n.name} também conecta ${other.name}. A operação desfaria essa ligação.`,
     );
+  if (p.meshConnections.some((l) => l.nodeId === n.id))
+    throw new Error(
+      `${n.name} tem uma conexão da malha. Remova a conexão antes de alterar a extremidade.`,
+    );
   if (Object.values(n.restraints).some(Boolean))
     throw new Error(
       `${n.name} tem apoio. A operação alteraria a posição ou eliminaria o vínculo.`,
@@ -266,6 +270,8 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   p.members = p.members.filter(
     (m) => !selected.has(m.id) || m.id === survivor.id,
   );
+  for (const link of p.meshConnections)
+    if (selected.has(link.memberId)) link.memberId = survivor.id;
   discardNodes(p, interior);
   remapGroups(p, "member", new Map(bars.map((m) => [m.id, [survivor.id]])));
   return {
@@ -331,6 +337,9 @@ function editEndOrSplit(
       Object.assign(old, { x: point.x, y: point.y, z: point.z });
     else {
       m[cmd.end] = joint.id;
+      p.meshConnections = p.meshConnections.filter(
+        (l) => l.memberId !== m.id || l.nodeId !== joint.id,
+      );
       discardNodes(p, new Set([old.id]), joint.id);
     }
   }

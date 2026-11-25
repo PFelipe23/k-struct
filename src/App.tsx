@@ -26,6 +26,7 @@ import {
   Download,
   Layers3,
   BookOpen,
+  Library,
   GitBranch,
   History,
   ListChecks,
@@ -35,6 +36,8 @@ import {
   PanelRight,
   Scissors,
   Ruler,
+  ScanSearch,
+  Waypoints,
 } from "lucide-react";
 import {
   addPoint,
@@ -52,7 +55,7 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, addSlab, connectIntersections } from "./domain/editing";
+import { addMember, addSlab } from "./domain/editing";
 import {
   onPlane,
   origin,
@@ -79,6 +82,11 @@ import { useViewLayers } from "./components/ViewLayers";
 import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
+import DuplicateDialog from "./components/DuplicateDialog";
+import SectionCatalog from "./components/SectionCatalog";
+import { dimensions, shapeNames } from "./domain/sections";
+import MaterialLibrary from "./components/MaterialLibrary";
+import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
 import type { TransformPlan } from "./domain/transform";
@@ -132,6 +140,10 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v11") ??
+      localStorage.getItem("kstruct.draft.v10") ??
+      localStorage.getItem("kstruct.draft.v9") ??
+      localStorage.getItem("kstruct.draft.v8") ??
       localStorage.getItem("kstruct.draft.v7") ??
       localStorage.getItem("kstruct.draft.v6") ??
       localStorage.getItem("kstruct.draft.v5") ??
@@ -159,6 +171,7 @@ export default function App() {
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
   const [layout, setLayout] = useState<Layout>("dual");
+  const [showMemberAxes, setShowMemberAxes] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("primary");
   const [planes, setPlanes] = useState(() => initialPlanes(slab?.levelId));
   const primaryLayers = useViewLayers();
@@ -198,12 +211,21 @@ export default function App() {
   const [launchDialog, setLaunchDialog] = useState<
     | "guides"
     | "replicate"
+    | "mesh"
+    | "materials"
+    | "sections"
     | "member-edit"
+    | "duplicates"
     | "nodes"
     | "new-project"
     | "selection"
     | null
   >(null);
+  const [catalogSectionId, setCatalogSectionId] = useState("");
+  const openSections = (id: string) => {
+    setCatalogSectionId(id);
+    setLaunchDialog("sections");
+  };
   const {
     plane,
     guides: planeGuides,
@@ -378,7 +400,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v7", serialized);
+      localStorage.setItem("kstruct.draft.v11", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -459,8 +481,13 @@ export default function App() {
       setMessage(`Caso ${selected.name} selecionado. Clique em Analisar.`);
     }
   };
+  const [diagnosticHighlight, setDiagnosticHighlight] = useState<
+    SelectedObject[]
+  >([]);
+  const shownSelection =
+    launchDialog === "duplicates" ? diagnosticHighlight : selection;
   const isSelected = (kind: SelectedObject["kind"], id: string) =>
-    selection.some((s) => s.kind === kind && s.id === id);
+    shownSelection.some((s) => s.kind === kind && s.id === id);
   const selectObject = useCallback((object: Selection, additive = false) => {
     if (!additive) setSelection(object ? [object] : []);
     else if (object)
@@ -593,6 +620,8 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if (
         loadEditor ||
+        launchDialog === "materials" ||
+        launchDialog === "sections" ||
         launchDialog === "nodes" ||
         launchDialog === "selection" ||
         settings ||
@@ -706,20 +735,6 @@ export default function App() {
         : []),
     ]);
   };
-  const connect = () => {
-    let report: ReturnType<typeof connectIntersections> | undefined;
-    const error = edit((p) => {
-      report = connectIntersections(p);
-    });
-    if (error || !report) return;
-    changeTool("select");
-    if (report.divided) setSelection([]);
-    setMessage(
-      report.divided
-        ? `${report.divided} barras subdivididas · ${report.joints} novos nós.`
-        : "Nenhuma interseção ou nó interno pendente de conexão.",
-    );
-  };
   const applyGeometry = (plan: TransformPlan | MemberEdit) => {
     if (("ready" in plan && !plan.ready) || current.current !== plan.source)
       return "O modelo mudou. Reabra a prévia para confirmar.";
@@ -728,6 +743,7 @@ export default function App() {
       draft.members = plan.project.members;
       draft.loadPatterns = plan.project.loadPatterns;
       draft.selectionGroups = plan.project.selectionGroups;
+      draft.meshConnections = plan.project.meshConnections;
     });
     if (!error) {
       changeTool("select");
@@ -983,6 +999,25 @@ export default function App() {
                 </button>
                 <button
                   className="tool-button"
+                  disabled={!p.members.length}
+                  onClick={() => setLaunchDialog("mesh")}
+                  title="Conectar nós e inspecionar as estações de análise"
+                >
+                  <Waypoints size={20} />
+                  <span>Conexões da malha</span>
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={() => {
+                    setDiagnosticHighlight([]);
+                    setLaunchDialog("duplicates");
+                  }}
+                >
+                  <ScanSearch size={20} />
+                  <span>Duplicidades</span>
+                </button>
+                <button
+                  className="tool-button"
                   onClick={() => setLaunchDialog("nodes")}
                 >
                   <Table2 size={21} />
@@ -1053,12 +1088,20 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <button
-                className="manage-loads"
-                onClick={() => setLoadEditor("patterns")}
-              >
-                <ListChecks size={14} /> Cargas e casos
-              </button>
+              <div className="definition-shortcuts">
+                <button
+                  className="manage-loads"
+                  onClick={() => setLoadEditor("patterns")}
+                >
+                  <ListChecks size={14} /> Cargas e casos
+                </button>
+                <button
+                  className="manage-loads"
+                  onClick={() => setLaunchDialog("materials")}
+                >
+                  <Library size={14} /> Materiais
+                </button>
+              </div>
             </div>
             <div className="ribbon-group">
               <button
@@ -1143,7 +1186,7 @@ export default function App() {
               <span>
                 {slab
                   ? `Placa delgada DKT · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
-                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} elementos por barra`}
+                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
                 {slab
@@ -1217,6 +1260,15 @@ export default function App() {
                 <span>Unidades</span>
               </button>
               <small>APRESENTAÇÃO</small>
+            </div>
+            <div className="ribbon-group theme-group">
+              <button
+                aria-pressed={showMemberAxes}
+                className="member-axes-toggle"
+                onClick={() => setShowMemberAxes((show) => !show)}
+              >
+                Eixos locais
+              </button>
             </div>
           </>
         )}
@@ -1374,10 +1426,18 @@ export default function App() {
                   Seções <span>{p.sections.length}</span>
                 </summary>
                 {p.sections.map((s) => (
-                  <p key={s.id} className="tree-empty">
-                    {formatQuantity(s.width, "section", units)} ×{" "}
-                    {formatQuantity(s.height, "section", units)} {units.section}
-                  </p>
+                  <button
+                    key={s.id}
+                    title={`${shapeNames[s.shape]} · ${dimensions(s)
+                      .map(
+                        ({ label, value }) =>
+                          `${label}: ${formatQuantity(value, "section", units)} ${units.section}`,
+                      )
+                      .join(", ")}`}
+                    onClick={() => openSections(s.id)}
+                  >
+                    {s.name}
+                  </button>
                 ))}
               </details>
               <details>
@@ -1528,7 +1588,7 @@ export default function App() {
               }}
               selectPlane={selectPlane}
               replicate={() => setLaunchDialog("replicate")}
-              connect={connect}
+              connect={() => setLaunchDialog("mesh")}
             />
           )}
           <div className={`viewports ${layout}`}>
@@ -1552,9 +1612,10 @@ export default function App() {
                   active={active}
                   onActivate={() => activatePanel(panel)}
                   project={p}
+                  showMemberAxes={showMemberAxes}
                   plane={view.plane}
                   orthogonal={orthogonal}
-                  selection={selection}
+                  selection={shownSelection}
                   tool={active ? tool : "select"}
                   quick={active && tool === "member" && memberMode === "span"}
                   result={result}
@@ -1600,7 +1661,8 @@ export default function App() {
                 patternId={patternId}
                 theme={theme}
                 project={p}
-                selection={selection}
+                showMemberAxes={showMemberAxes}
+                selection={shownSelection}
                 result={visibleDisplay === "deformed" ? result : null}
                 onSelect={selectObject}
               />
@@ -1627,8 +1689,8 @@ export default function App() {
                 {visibleDisplay === "deformed"
                   ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
                   : spatial
-                    ? "Esforços nos eixos locais, na face positiva de x. N positivo em tração. O diagrama é desenhado no plano ativo."
-                    : "Esforços amostrados nos nós da malha. N positivo em tração. M positivo sagente para barras horizontais orientadas +X."}
+                    ? "x/L vai de i (0) a j (1). Esforços nos eixos locais, na face +x. N positivo em tração."
+                    : "x/L vai de i (0) a j (1). N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
               </div>
             )
           )}
@@ -1685,6 +1747,8 @@ export default function App() {
         </main>
         {right && (
           <Inspector
+            onSections={openSections}
+            onMaterials={() => setLaunchDialog("materials")}
             project={p}
             selection={selection}
             patternId={patternId}
@@ -1841,6 +1905,56 @@ export default function App() {
               p.guides = guides;
             })
           }
+        />
+      )}
+      {launchDialog === "duplicates" && (
+        <DuplicateDialog
+          project={p}
+          onHighlight={setDiagnosticHighlight}
+          onClose={() => setLaunchDialog(null)}
+          onApply={(source, next) => {
+            if (current.current !== source)
+              return "O modelo mudou. Reabra o diagnóstico.";
+            const error = edit((draft) => {
+              draft.nodes = next.nodes;
+              draft.members = next.members;
+              draft.loadPatterns = next.loadPatterns;
+              draft.selectionGroups = next.selectionGroups;
+              draft.meshConnections = next.meshConnections;
+            });
+            if (!error) {
+              changeTool("select");
+              setSelection([]);
+              setMessage(
+                "Correções aplicadas. Reabra Duplicidades para consultar os pares restantes.",
+              );
+            }
+            return error;
+          }}
+        />
+      )}
+      {launchDialog === "sections" && (
+        <SectionCatalog
+          initialId={catalogSectionId}
+          project={p}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
+        />
+      )}
+      {launchDialog === "materials" && (
+        <MaterialLibrary
+          project={p}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
+        />
+      )}
+      {launchDialog === "mesh" && (
+        <MeshConnections
+          project={p}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "member-edit" && (

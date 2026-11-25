@@ -124,7 +124,10 @@ async function download(page: Page, name: string) {
 }
 
 const draft = (page: Page) =>
-  page.evaluate(() => localStorage.getItem("kstruct.draft.v7"));
+  page.evaluate(
+    (version) => localStorage.getItem(`kstruct.draft.v${version}`),
+    referenceBeam.schemaVersion,
+  );
 
 test("unidades preservam análise, geometria, entrada OOFEM e CSV padrão", async ({
   page,
@@ -159,13 +162,13 @@ test("unidades preservam análise, geometria, entrada OOFEM e CSV padrão", asyn
     geometry,
   );
   await expect(
-    page.getByRole("columnheader", { name: "RZ (N)", exact: true }),
+    page.getByRole("columnheader", { name: "RZ global (N)", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("cell", { name: "30.000", exact: true }),
   ).toHaveCount(2);
   const csvN = await download(page, "CSV");
-  expect(csvN).toContain('"RZ (N)"');
+  expect(csvN).toContain('"RZ global (N)"');
   expect(csvN).toContain("30000");
   await page
     .getByRole("button", { name: "Deslocamentos", exact: true })
@@ -187,10 +190,17 @@ test("unidades preservam análise, geometria, entrada OOFEM e CSV padrão", asyn
     .locator(".explorer")
     .getByRole("button", { name: "B1", exact: true })
     .click();
-  await expect(page.locator(".section-preview")).toContainText("A = 0,03 m²");
-  await expect(page.locator(".section-preview")).toContainText(
-    "IY = 0,0001 m⁴",
-  );
+  const section = page.getByLabel("Propriedades geométricas da seção");
+  await expect(
+    section
+      .locator("div")
+      .filter({ has: page.getByText("A", { exact: true }) }),
+  ).toContainText("0,03 m²");
+  await expect(
+    section
+      .locator("div")
+      .filter({ has: page.getByText("Iy", { exact: true }) }),
+  ).toContainText("0,0001 m⁴");
   await expect(page.locator(".status-bar")).toContainText("Análise concluída");
   expect(await draft(page)).toBe(before);
   expect(
@@ -213,17 +223,37 @@ test("edição usa centímetros e MPa, salva SI e recarrega a preferência", asy
     .locator(".explorer")
     .getByRole("button", { name: "B1", exact: true })
     .click();
-  await expect(page.getByLabel("Módulo E", { exact: true })).toHaveValue(
-    "200000",
-  );
+  await page
+    .getByRole("button", { name: "Abrir material na biblioteca", exact: true })
+    .click();
+  const library = page.getByRole("dialog", { name: "Biblioteca de materiais" });
+  await library
+    .getByRole("button", { name: "Editar material", exact: true })
+    .click();
+  await expect(
+    library.getByLabel("Módulo E (MPa)", { exact: true }),
+  ).toHaveValue("200000");
+  await library
+    .getByRole("button", { name: "Cancelar edição", exact: true })
+    .click();
+  await library.getByRole("button", { name: "Fechar", exact: true }).click();
   await page.getByLabel("Largura b", { exact: true }).fill("15,5");
   await page.getByLabel("Largura b", { exact: true }).press("Tab");
   const project = parseProject((await draft(page))!);
-  expect(project.sections[0].width).toBe(0.155);
+  expect(project.sections[0]).toMatchObject({
+    shape: "rectangle",
+    width: 0.155,
+  });
   const content = await download(page, "Salvar projeto");
-  expect(parseProject(content).sections[0].width).toBe(0.155);
+  expect(parseProject(content).sections[0]).toMatchObject({
+    shape: "rectangle",
+    width: 0.155,
+  });
   await page.reload();
-  expect(parseProject((await draft(page))!).sections[0].width).toBe(0.155);
+  expect(parseProject((await draft(page))!).sections[0]).toMatchObject({
+    shape: "rectangle",
+    width: 0.155,
+  });
   const prefs = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("kstruct.units")!),
   );
