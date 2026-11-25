@@ -238,7 +238,7 @@ test("pórtico espacial assimétrico lançado do vazio, salvo e conferido com a 
     ).toBeVisible();
     await page.getByRole("button", { name: "Reações", exact: true }).click();
     await expect(
-      page.getByRole("columnheader", { name: "RY (kN)" }),
+      page.getByRole("columnheader", { name: "RY global (kN)", exact: true }),
     ).toBeVisible();
   }
   expect(errors).toEqual([]);
