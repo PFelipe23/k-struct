@@ -30,6 +30,7 @@ import {
 } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
 import { formatResult } from "./resultFormatting";
+import SupportFrameEditor from "./SupportFrameEditor";
 
 export function NumberField({
   label,
@@ -472,13 +473,24 @@ export default function Inspector({
               </div>
             )}
             <h4>Apoios e restrições</h4>
+            <SupportFrameEditor
+              mode={p.mode}
+              frame={node.supportFrame}
+              onChange={(frame) =>
+                edit((draft) => {
+                  const target = draft.nodes.find(({ id }) => id === node.id)!;
+                  if (frame) target.supportFrame = frame;
+                  else delete target.supportFrame;
+                })
+              }
+            />
             <p className="help">Marque os graus de liberdade impedidos.</p>
             <div className="restraints">
               {dofs.map((k) => (
                 <label key={k}>
                   <input
                     type="checkbox"
-                    aria-label={`Restringir ${k}`}
+                    aria-label={`Restringir ${k}${node.supportFrame ? " local" : ""}`}
                     checked={node.restraints[k]}
                     onChange={(e) =>
                       edit((p) => {
@@ -489,6 +501,13 @@ export default function Inspector({
                   />
                   <span>
                     {`${k[0] === "r" ? "Rotação" : "Translação"} ${k[1].toUpperCase()}`}
+                    {node.supportFrame && " local"}
+                    {node.supportFrame?.kind === "planar" &&
+                      (k === "ux"
+                        ? " · tangente"
+                        : k === "uz"
+                          ? " · normal"
+                          : "")}
                   </span>
                 </label>
               ))}

@@ -12,10 +12,10 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
-- Editar coordenadas, apoios nos graus de liberdade do projeto, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
+- Editar coordenadas, apoios em referenciais globais ou inclinados, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v10, com migração dos projetos v1 a v9 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v11, com migração dos projetos v1 a v10 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -86,6 +86,12 @@ Em **Exibição → Eixos locais**, mostre a seta x de i para j e a tríade nas 
 No inspetor da barra, **Inverter i/j** troca o início e o fim, mantendo o ID, a seção na mesma orientação física e as cargas globais. Confira o novo sentido e a projeção local do padrão de carga ativo. Em XYZ, edite **Rotação em torno de x local** para girar fisicamente a seção. Em XZ, o giro da seção fica fixo em 0°. A inversão e a edição do ângulo entram no histórico e exigem nova análise.
 
 Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou **Pórtico regular** para definir vãos e alturas dos pavimentos. No modelo espacial, informe também os vãos em Y. Confira as quantidades de nós e barras na prévia e clique em **Gerar projeto**. Os nós começam livres e as cargas podem ser lançadas no editor.
+
+### Apoios inclinados
+
+Selecione um nó e escolha **Local** em **Propriedades → Apoios e restrições → Referencial do apoio**. Em XZ, informe o ângulo da tangente em graus a partir de +X no sentido de +Z. Confira a prévia e clique em **Aplicar referencial**. Um rolete bloqueia apenas a translação Z local, que corresponde à normal, e deixa livres a translação X local e a rotação Y. Em XYZ, informe a direção de x local e uma direção para y. O editor mostra a base ortonormal de mão direita antes de aplicar. As cargas nodais continuam expressas em XYZ globais.
+
+Analise o caso e abra **Reações**. Quando houver um apoio local com reação, a tabela e o CSV incluem colunas globais e locais, com unidades e o referencial de cada apoio. Em XZ, RX local corresponde à tangente e RZ local à normal. Para reproduzir a viga de 6 m com rolete inclinado, mantenha o nó inicial global e aplique −36,86989765° ao nó final da **Viga de referência**. [Valores esperados](docs/VALIDATION.md#ks-20--apoios-inclinados)
 
 ### Materiais do projeto
 

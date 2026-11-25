@@ -25,6 +25,7 @@ import type {
   StructuralNode,
 } from "../domain/model";
 import type { StructuralResult } from "../solver/oofem";
+import { restrainedDofs, supportBasis } from "../domain/supports";
 import type { Theme } from "../theme";
 import { additiveSelection } from "./WorkPlaneView";
 
@@ -525,6 +526,7 @@ export default function SpatialView({
       const loads = layers.loads
         ? (pattern?.nodal.filter((load) => load.nodeId === n.id) ?? [])
         : [];
+      const blocked = restrainedDofs(n.restraints);
       annotate(
         s.model,
         sphere.position,
@@ -532,15 +534,36 @@ export default function SpatialView({
           ...(layers.labels ? [n.name] : []),
           ...loadComponents(loads, ["fx", "fy", "fz"], "kN"),
           ...loadComponents(loads, ["mx", "my", "mz"], "kN·m"),
+          ...(n.supportFrame && blocked.length && (layers.labels || selected)
+            ? [`${blocked.map((key) => key.toUpperCase()).join(", ")} local`]
+            : []),
         ],
         selected,
       );
-      if (Object.values(n.restraints).some(Boolean)) {
+      if (blocked.length) {
+        const translations = (["z", "x", "y"] as const).filter(
+          (axis) => n.restraints[`u${axis}`],
+        );
+        const rotation = n.supportFrame && !translations.length;
         const support = new THREE.Mesh(
-          new THREE.ConeGeometry(0.16, 0.22, 4),
+          rotation
+            ? new THREE.TorusGeometry(0.09, 0.009, 4, 12)
+            : new THREE.ConeGeometry(0.16, 0.22, 4),
           s.materials.support,
         );
-        support.position.set(n.x, n.z - 0.13, -n.y);
+        if (n.supportFrame) {
+          const basis = supportBasis(n.supportFrame);
+          const axis =
+            translations[0] ??
+            (n.restraints.rz ? "z" : n.restraints.rx ? "x" : "y");
+          const normal = scenePoint(basis[axis]).normalize();
+          support.quaternion.setFromUnitVectors(
+            rotation ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0),
+            normal,
+          );
+          support.position.copy(sphere.position);
+          if (!rotation) support.position.addScaledVector(normal, -0.13);
+        } else support.position.set(n.x, n.z - 0.13, -n.y);
         s.model.add(support);
       }
     }

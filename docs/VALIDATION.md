@@ -236,3 +236,13 @@ Um balanço espacial horizontal de 6 m, com E = 200 GPa e a mesma seção, receb
 Depois de inverter i/j com a seção já a 90°, os deslocamentos continuam iguais aos da última linha. Ensaios adicionais conferem N = +1,8 kN nas duas orientações em XZ e XYZ e a troca dos lados de uma seção interna carregada.
 
 Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-axes.spec.ts` para conferir a exibição, a revisão dos resultados, o histórico e a reabertura.
+
+## KS-20 · apoios inclinados
+
+Na viga de 6 m em XZ, A restringe UX e UZ, B restringe apenas a translação ao longo de n = (0,6, 0, 0,8) e qZ = −10 kN/m. Use a tangente t = (0,8, 0, −0,6), com ângulo de −36,86989765° em relação a +X. Os momentos em A e as forças em Z dão RBz = RAz = 30 kN. Como RB = RN·n, resulta RN = 37,5 kN e RBx = +22,5 kN. Pelo equilíbrio em X, RAx = −22,5 kN. O rolete ideal tem RT = 0. A força axial de tração fornece UX em B de RBx·L/(EA) = +0,0225 mm e a compatibilidade n·uB = 0 fornece UZ = −0,016875 mm.
+
+O ensaio com o OOFEM 3.0 aceita 0,005 N ou N·m nos valores da viga e 5 × 10⁻¹³ m na compatibilidade e nos deslocamentos da ponta. Confere o registro local de reação normal do solver e a transformação para a estação final da deformada. Com Fx = +3 kN, Fz = −4 kN e My = +1,2 kN·m adicionais em B, o equilíbrio fornece RAx = −28,65 kN, RAz = +29,8 kN, RBx = +25,65 kN e RBz = +34,2 kN. Esse ensaio confirma que a carga nodal permanece global.
+
+Em XYZ, um balanço com UZ e RX restritos na ponta é resolvido antes e depois de girar a geometria, a seção, os apoios e as cargas. A rotação independente tem colunas (1,2,2)/3, (2,1,−2)/3 e (−2,2,−1)/3. O ensaio compara cada reação, cada estação de deslocamento e os esforços no referencial da barra. A tolerância é de 2 N ou N·m, compatível com a saída impressa, e 5 × 10⁻¹⁰ m ou rad nas translações e rotações. O ângulo zero no plano reproduz o caso legado. Direções paralelas insuficientes são rejeitadas antes de executar o solver.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- inclined-supports.spec.ts` para verificar edição, desfazer/refazer, persistência, reanálise, tabela e CSV.

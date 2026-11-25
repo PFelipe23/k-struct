@@ -35,6 +35,7 @@ import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 import MemberAxes2D from "./MemberAxes2D";
 import { forceLabels, formatResult } from "./resultFormatting";
+import InclinedSupport2D from "./InclinedSupport2D";
 
 export type PlaneCamera = {
   projectId: string;
@@ -902,14 +903,24 @@ export default function WorkPlaneView({
                 onSelect({ kind: "node", id: n.id }, additiveSelection(e));
               }}
             >
-              {fixed && (
+              {hasSupport && n.supportFrame && (
+                <InclinedSupport2D
+                  node={n}
+                  x={x}
+                  y={y}
+                  u={axisU}
+                  v={axisV}
+                  showLabel={labels || active}
+                />
+              )}
+              {!n.supportFrame && fixed && (
                 <path
                   d={`M${x - 11} ${y + 7}h22m-20 0l-4 6m12-6l-4 6m12-6l-4 6`}
                   stroke="var(--geometry-support)"
                   fill="none"
                 />
               )}
-              {!fixed && hasSupport && (
+              {!n.supportFrame && !fixed && hasSupport && (
                 <g
                   stroke="var(--geometry-support)"
                   fill="var(--geometry-node-fill)"

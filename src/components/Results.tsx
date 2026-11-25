@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
+import { supportBasis, supportToLocal } from "../domain/supports";
 import type {
   AnalysisResult,
   Displacement,
@@ -74,23 +75,44 @@ export default function Results({
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
-    const values = (r: Reaction) =>
-      spatial ? [r.fx, r.fy, r.fz, r.mx, r.my, r.mz] : [r.fx, r.fz, r.my];
-    headers = spatial
-      ? [
-          "Nó",
-          "RX (kN)",
-          "RY (kN)",
-          "RZ (kN)",
-          "MX (kN·m)",
-          "MY (kN·m)",
-          "MZ (kN·m)",
-        ]
-      : ["Nó", "RX (kN)", "RZ (kN)", "MY (kN·m)"];
-    rows = (result?.reactions ?? []).map((r) => [
-      nodeNames.get(r.nodeId) ?? r.nodeId,
-      ...values(r).map((v) => v / 1000),
-    ]);
+    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
+      ? ["fx", "fy", "fz", "mx", "my", "mz"]
+      : ["fx", "fz", "my"];
+    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
+    const hasLocal = (result?.reactions ?? []).some(
+      ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
+    );
+    const componentHeaders = (frame = "") =>
+      keys.map((key) => {
+        const [kind, axis] = key.toUpperCase();
+        return `${kind === "F" ? "R" : "M"}${axis}${frame} (${kind === "F" ? "kN" : "kN·m"})`;
+      });
+    headers = ["Nó", ...componentHeaders(hasLocal ? " global" : "")];
+    if (hasLocal)
+      headers.push(...componentHeaders(" local"), "Referencial do apoio");
+    rows = (result?.reactions ?? []).map((r) => {
+      const row: (string | number)[] = [
+        nodeNames.get(r.nodeId) ?? r.nodeId,
+        ...keys.map((k) => r[k] / 1000),
+      ];
+      if (hasLocal) {
+        const node = nodes.get(r.nodeId)!;
+        const basis = supportBasis(node.supportFrame);
+        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
+        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
+        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
+        row.push(
+          ...keys.map((k) => {
+            const axis = k[1] as "x" | "y" | "z";
+            return node.restraints[`${k[0] === "f" ? "u" : "r"}${axis}`]
+              ? local[k] / 1000
+              : 0;
+          }),
+          node.supportFrame ? "Local" : "Global",
+        );
+      }
+      return row;
+    });
   } else if (tab === "displacements") {
     const values = (d: Displacement) =>
       (spatial ? [d.ux, d.uy, d.uz, d.rx, d.ry, d.rz] : [d.ux, d.uz, d.ry]).map(
