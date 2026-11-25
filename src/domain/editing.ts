@@ -63,12 +63,13 @@ export function addSlab(
   const lengthY = Math.abs(to.y - from.y);
   if (lengthX < tolerance || lengthY < tolerance)
     throw new Error("Marque dois cantos opostos para definir um retângulo.");
-  const concrete = { E: 30e9, nu: 0.2, density: 2500 };
+  const concrete = { E: 30e9, nu: 0.2, density: 2500, alpha: 0 };
   let material = p.materials.find(
     (item) =>
       item.E === concrete.E &&
       item.nu === concrete.nu &&
-      item.density === concrete.density,
+      item.density === concrete.density &&
+      item.alpha === concrete.alpha,
   );
   if (!material) {
     material = { id: uid(), name: "Concreto", ...concrete };

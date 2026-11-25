@@ -31,7 +31,7 @@ const legacyNode = z
   })
   .strict();
 const nodeSchema = legacyNode.extend({ restraints });
-const materialSchema = z
+const legacyMaterial = z
   .object({
     id,
     name: text,
@@ -40,6 +40,9 @@ const materialSchema = z
     density: finite.positive(),
   })
   .strict();
+export const materialSchema = legacyMaterial.extend({ alpha: finite });
+export const materialLimit = 100;
+export const sectionLimit = 100;
 const sectionSchema = z
   .object({
     id,
@@ -83,8 +86,8 @@ const legacySchema = z
     units: z.literal("N-m-kg-s"),
     nodes: z.array(legacyNode).max(1000),
     members: z.array(legacyMember).max(1000),
-    materials: z.array(materialSchema).min(1).max(100),
-    sections: z.array(sectionSchema).min(1).max(100),
+    materials: z.array(legacyMaterial).min(1).max(materialLimit),
+    sections: z.array(sectionSchema).min(1).max(sectionLimit),
     loadPatterns: z.array(legacyPattern).min(1).max(100),
     analysisCases: z
       .array(
@@ -236,13 +239,25 @@ const projectV7 = projectV6.extend({
   selectionGroups,
 });
 
-export const projectSchema = projectV7.extend({
+const projectV8 = projectV7.extend({
   schemaVersion: z.literal(8),
   meshConnections: z
     .array(z.object({ memberId: id, nodeId: id }).strict())
     .max(32000),
 });
 
+export const projectSchema = projectV8.extend({
+  schemaVersion: z.literal(9),
+  materials: z.array(materialSchema).min(1).max(materialLimit),
+});
+
+export type Material = z.infer<typeof materialSchema>;
+export const defaultElasticProperties = {
+  E: 2e11,
+  nu: 0.3,
+  density: 7850,
+  alpha: 0,
+} as const;
 export type Project = z.infer<typeof projectSchema>;
 export type AnalysisCase = Project["analysisCases"][number];
 export type ResultCombination = Project["resultCombinations"][number];
@@ -300,7 +315,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 8,
+    schemaVersion: 9,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -312,7 +327,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
     members: [],
     slabs: [],
     materials: [
-      { id: "steel", name: "Material M1", E: 2e11, nu: 0.3, density: 7850 },
+      { id: "steel", name: "Material M1", ...defaultElasticProperties },
     ],
     sections: [
       {
@@ -545,10 +560,27 @@ export function parseProject(source: string): Project {
     if (old.success)
       value = { ...old.data, schemaVersion: 8, meshConnections: [] };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 8
+  ) {
+    const old = projectV8.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 9,
+        materials: old.data.materials.map((material) => ({
+          ...material,
+          alpha: 0,
+        })),
+      };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 8, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 9, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));

@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v8, migração v1 a v7, geometria, validação e histórico      | `src/domain`                 |
+| Domínio           | Formato v9, migração v1 a v8, geometria, validação e histórico      | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v8 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v9 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. O snap prioriza nós do plano, depois eixos e pavimentos próximos, e usa uma malha de 0,50 m como passo. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -32,6 +32,12 @@ Em cada conexão interna, o parser conserva o esforço de extremidade final do e
 O painel de laje tem ID persistente, origem XY, lados, referência ao pavimento, material, espessura, quatro condições de borda e subdivisões independentes em X/Y. `meshSlab` numera os nós em linhas de X crescente. Em QDKT cada célula forma um quadrilátero. Em DKT a diagonal do canto inferior esquerdo ao superior direito define dois triângulos anti-horários. As bordas referenciam os mesmos nós da conectividade. A malha e os resultados são derivados do painel na revisão atual. A análise de laje aceita um painel isolado por projeto.
 
 O padrão de carga armazena ações. O caso de análise seleciona os padrões, os fatores e o procedimento. A combinação linear armazena IDs de casos estáticos e os respectivos fatores. O envelope guarda os IDs das combinações incluídas, na ordem escolhida. O editor aplica as mudanças de padrões, casos, combinações e envelopes em uma única edição. Antes de excluir um padrão, caso ou combinação, retire suas referências das definições que o utilizam.
+
+### Materiais e atribuições
+
+Cada material do projeto tem um ID estável e quatro propriedades elásticas e térmicas. O esquema v9 acrescenta `alpha` em 1/K. Na migração de v8, cada material recebe zero, valor historicamente escrito em `tAlpha`. As seções referenciam `materialId` e as lajes guardam sua própria referência direta. A lista de usos da biblioteca inclui ambos. Duplicar cria um ID novo. Reatribuir modifica somente a referência do destino.
+
+O cadastro aceita valores finitos com E > 0 em Pa, 0 ≤ ν < 0,5, ρ > 0 em kg/m³ e α com sinal. O adaptador exporta `IsoLE` com `d`, `E`, `n` e `tAlpha` para barras e para a placa isolada. Os padrões e fatores de carga continuam determinando as ações aplicadas.
 
 ## Unidades e sinais
 

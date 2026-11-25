@@ -16,6 +16,13 @@ import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
 import { addMember, connectMeshJoint } from "../src/domain/editing";
+import { projectV8 } from "./fixtures/project-v8";
+import {
+  assignMaterial,
+  duplicateSection,
+  newMaterial,
+  saveMaterial,
+} from "../src/domain/materials";
 import { internalJointBeam } from "./fixtures/internal-joint";
 import { origin } from "../src/domain/geometry";
 import { combineLinearResults } from "../src/solver/combinations";
@@ -51,6 +58,84 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("KS-17 · dobrar E em uma seção reduz à metade somente a flecha de seu balanço", () => {
+    const p = createProject();
+    const sectionA = p.sections[0];
+    Object.assign(sectionA, { width: 0.2, height: 0.3 });
+    const sectionB = duplicateSection(p, sectionA.id);
+    const steel = {
+      ...newMaterial(p),
+      name: "Aço de ensaio",
+      E: 210e9,
+      nu: 0.3,
+      density: 7850,
+      alpha: 12e-6,
+    };
+    saveMaterial(p, steel, "create");
+    const tips: string[] = [],
+      roots: string[] = [];
+    const P = 10500,
+      L = 3;
+    for (const [i, section] of p.sections.entries()) {
+      assignMaterial(p, { kind: "section", id: section.id }, steel.id);
+      const root = addPoint(p, { x: 0, y: 0, z: 2 * i }),
+        tip = addPoint(p, { x: L, y: 0, z: 2 * i });
+      root.restraints = { ...free(), ux: true, uz: true, ry: true };
+      addMember(p, root, tip, { sectionId: section.id, roll: 0 });
+      p.loadPatterns[0].nodal.push({ ...nodalLoad(tip.id), fz: -P });
+      roots.push(root.id);
+      tips.push(tip.id);
+    }
+    const beforeLoads = structuredClone(p.loadPatterns);
+    const materialNumbers = (deck: string) =>
+      [...deck.matchAll(/^SimpleCS .* material (\d+) set /gm)].map((m) =>
+        Number(m[1]),
+      );
+    const deck = exportOofem(p, "EL").deck;
+    expect(deck).toContain(
+      "IsoLE 2 d 7850 E 210000000000 n 0.3 tAlpha 0.000012",
+    );
+    expect(materialNumbers(deck)).toEqual([2, 2]);
+    const shared = solve(p);
+    const copy = newMaterial(p, steel);
+    saveMaterial(p, copy, "create");
+    assignMaterial(p, { kind: "section", id: sectionB }, copy.id);
+    saveMaterial(p, { ...copy, E: 2 * steel.E }, "edit");
+    const independentDeck = exportOofem(p, "EL").deck;
+    expect(materialNumbers(independentDeck)).toEqual([2, 3]);
+    expect(independentDeck).toContain(
+      "IsoLE 3 d 7850 E 420000000000 n 0.3 tAlpha 0.000012",
+    );
+    const independent = solve(p);
+    const I = (sectionA.width * sectionA.height ** 3) / 12;
+    const predicted = (-P * L ** 3) / (3 * steel.E * I);
+    for (const [i, id] of tips.entries()) {
+      expect(shared.displacements[id].uz).toBeCloseTo(predicted, 10);
+      expect(independent.displacements[id].uz).toBeCloseTo(
+        i === 0 ? predicted : predicted / 2,
+        10,
+      );
+      for (const r of [shared, independent]) {
+        const reaction = r.reactions.find((v) => v.nodeId === roots[i])!;
+        expect(reaction.fz).toBeCloseTo(P, 1);
+        expect(reaction.my).toBeCloseTo(-P * L, 1);
+      }
+    }
+    expect(p.loadPatterns).toEqual(beforeLoads);
+  });
+
+  it("KS-17 · a viga v8 recupera tAlpha zero e reproduz a solução analítica", () => {
+    const p = parseProject(JSON.stringify(projectV8(beamExample())));
+    expect(exportOofem(p, "EL").deck).toContain(
+      "IsoLE 1 d 7850 E 200000000000 n 0.3 tAlpha 0",
+    );
+    const r = solve(p),
+      middle = r.members.V1.find((s) => s.t === 0.5)!;
+    expect(middle.uz).toBeCloseTo(-0.0084375, 8);
+    expect(middle.m).toBeCloseTo(45000, 1);
+    for (const support of r.reactions) expect(support.fz).toBeCloseTo(30000, 1);
+  });
+
   it("KS-15 · carga de 9 kN a 2 m na barra íntegra, reações, salto, flexão e flecha", () => {
     const p = internalJointBeam();
     const EI =

@@ -26,6 +26,7 @@ import {
   Download,
   Layers3,
   BookOpen,
+  Library,
   GitBranch,
   History,
   ListChecks,
@@ -79,6 +80,7 @@ import Inspector from "./components/Inspector";
 import SelectionDialog from "./components/SelectionDialog";
 import TransformDialog from "./components/TransformDialog";
 import DuplicateDialog from "./components/DuplicateDialog";
+import MaterialLibrary from "./components/MaterialLibrary";
 import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
@@ -133,6 +135,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v9") ??
       localStorage.getItem("kstruct.draft.v8") ??
       localStorage.getItem("kstruct.draft.v7") ??
       localStorage.getItem("kstruct.draft.v6") ??
@@ -199,6 +202,7 @@ export default function App() {
     | "guides"
     | "replicate"
     | "mesh"
+    | "materials"
     | "member-edit"
     | "duplicates"
     | "nodes"
@@ -380,7 +384,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v8", serialized);
+      localStorage.setItem("kstruct.draft.v9", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -600,6 +604,7 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if (
         loadEditor ||
+        launchDialog === "materials" ||
         launchDialog === "nodes" ||
         launchDialog === "selection" ||
         settings ||
@@ -1066,12 +1071,20 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <button
-                className="manage-loads"
-                onClick={() => setLoadEditor("patterns")}
-              >
-                <ListChecks size={14} /> Cargas e casos
-              </button>
+              <div className="definition-shortcuts">
+                <button
+                  className="manage-loads"
+                  onClick={() => setLoadEditor("patterns")}
+                >
+                  <ListChecks size={14} /> Cargas e casos
+                </button>
+                <button
+                  className="manage-loads"
+                  onClick={() => setLaunchDialog("materials")}
+                >
+                  <Library size={14} /> Materiais
+                </button>
+              </div>
             </div>
             <div className="ribbon-group">
               <button
@@ -1683,6 +1696,7 @@ export default function App() {
         </main>
         {right && (
           <Inspector
+            onMaterials={() => setLaunchDialog("materials")}
             project={p}
             selection={selection}
             patternId={patternId}
@@ -1864,6 +1878,14 @@ export default function App() {
             }
             return error;
           }}
+        />
+      )}
+      {launchDialog === "materials" && (
+        <MaterialLibrary
+          project={p}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "mesh" && (

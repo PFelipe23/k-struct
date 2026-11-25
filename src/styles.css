@@ -2108,3 +2108,31 @@ button.primary {
   border-radius: 50%;
   pointer-events: none;
 }
+
+.definition-shortcuts, .material-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.material-library { width: min(630px, calc(100vw - 24px)); color: var(--text); }
+.material-library label { display: grid; gap: 4px; }
+.material-library select { width: 100%; min-width: 0; }
+.material-library button { border-color: var(--control-border); }
+.material-columns, .material-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+.material-columns { margin-top: 20px; align-items: start; }
+.material-columns fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line); }
+.material-columns legend { padding: 0 5px; }
+.material-values { margin: 8px 0; font-size: 11px; }
+.material-values > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 4px 0; }
+.material-values dt { color: var(--muted); }
+.material-values dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.material-usage p, .material-columns fieldset p { margin: 0; overflow-wrap: anywhere; }
+.material-usage h3 { font-size: 12px; margin: 8px 0 2px; }
+.material-actions { margin-top: 10px; }
+@media (max-width: 620px) {
+  .material-columns, .material-fields { grid-template-columns: 1fr; }
+}

@@ -15,7 +15,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v8, com migração dos projetos v1 a v7 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v9, com migração dos projetos v1 a v8 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -82,6 +82,12 @@ No modo **Selecionar** das vistas 2D, arraste da esquerda para a direita para co
 Em **Exibição → Tema**, escolha **Claro** ou **Escuro**. A primeira abertura usa o tema escuro. A escolha é guardada nas preferências locais e vale para a interface e as duas vistas, inclusive durante a consulta de resultados.
 
 Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou **Pórtico regular** para definir vãos e alturas dos pavimentos. No modelo espacial, informe também os vãos em Y. Confira as quantidades de nós e barras na prévia e clique em **Gerar projeto**. Os nós começam livres e as cargas podem ser lançadas no editor.
+
+### Materiais do projeto
+
+Em **Modelo → Materiais**, cadastre o módulo E em GPa, o coeficiente de Poisson ν, a massa específica ρ em kg/m³ e a dilatação linear α em 1/K. Ao editar um material compartilhado, confira em **Uso no projeto** os nomes e a quantidade de seções e lajes afetadas. **Salvar material** aplica a alteração a esses usos.
+
+Para testar outro módulo, selecione o material, clique em **Duplicar material**, edite a cópia e salve. Escolha a seção em **Seção ou laje de destino** e clique em **Atribuir material**. Se várias barras usam a mesma seção e apenas uma deve mudar, use **Duplicar seção**, atribua o novo material à seção copiada e escolha essa seção no inspetor da barra. Cada atribuição pode ser desfeita. Para excluir um material em uso, reatribua primeiro as seções e lajes listadas.
 
 ### Laje retangular isolada
 
