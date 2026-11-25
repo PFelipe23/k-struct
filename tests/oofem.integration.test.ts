@@ -15,7 +15,8 @@ import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
 import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
-import { addMember } from "../src/domain/editing";
+import { addMember, connectMeshJoint } from "../src/domain/editing";
+import { internalJointBeam } from "./fixtures/internal-joint";
 import { origin } from "../src/domain/geometry";
 import { combineLinearResults } from "../src/solver/combinations";
 import { evaluateMemberEnvelope } from "../src/solver/envelopes";
@@ -50,6 +51,122 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
 });
 
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
+  it("KS-15 · carga de 9 kN a 2 m na barra íntegra, reações, salto, flexão e flecha", () => {
+    const p = internalJointBeam();
+    const EI =
+      (p.materials[0].E * p.sections[0].width * p.sections[0].height ** 3) / 12;
+    // Simple supports, point load P at a, b=L−a: w(a) = −P a² b²/(3 E I L).
+    const expectedUz = (-9000 * 2 ** 2 * 4 ** 2) / (3 * EI * 6);
+    for (const count of [8, 6, 13]) {
+      p.mesh.segmentsPerMember = count;
+      const r = solve(p);
+      const [a, b] = r.reactions;
+      expect(a.fz).toBeCloseTo(6000, 1);
+      expect(b.fz).toBeCloseTo(3000, 1);
+      expect(a.fz + b.fz).toBeCloseTo(9000, 1);
+      expect(b.fz * 6 - 9000 * 2).toBeCloseTo(0, 1);
+      const stations = r.members.V1.filter((s) => s.t === 1 / 3);
+      expect(stations.map((s) => s.side)).toEqual(["left", "right"]);
+      expect(stations[0].v).toBeCloseTo(6000, 1);
+      expect(stations[1].v).toBeCloseTo(-3000, 1);
+      for (const s of stations) {
+        expect(s.m).toBeCloseTo(12000, 1);
+        expect(s.uz).toBeCloseTo(expectedUz, 9);
+        expect(s.uz).toBe(r.displacements.C.uz);
+      }
+    }
+  });
+  it("KS-15 · engaste interno equilibra a carga uniforme nos dois balanços", () => {
+    const p = internalJointBeam();
+    p.nodes[0].restraints = free();
+    p.nodes[1].restraints = free();
+    p.nodes[2].restraints = { ...free(), ux: true, uz: true, ry: true };
+    p.loadPatterns[0].nodal = [];
+    p.loadPatterns[0].uniform = [{ ...uniformLoad("V1"), qz: -1000 }];
+    const r = solve(p);
+    expect(r.reactions).toHaveLength(1);
+    expect(r.reactions[0]).toMatchObject({ nodeId: "C", fz: 6000, my: -6000 });
+    const [left, right] = r.members.V1.filter((s) => s.t === 1 / 3);
+    expect(right.v - left.v).toBeCloseTo(6000, 1);
+    expect(left.m).toBeCloseTo(-2000, 1);
+    expect(right.m).toBeCloseTo(-8000, 1);
+  });
+  it("KS-15 · montante excêntrico em banzo espacial reproduz duas peças divididas manualmente", () => {
+    const p = internalJointBeam();
+    p.mode = "spatial";
+    p.members[0].roll = 23;
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints = free();
+    const tip = addPoint(p, { x: 2, y: 0, z: 2 });
+    const post = addMember(p, p.nodes[2], tip);
+    p.meshConnections = [];
+    connectMeshJoint(p, "V1", { kind: "node", id: "C" });
+    p.loadPatterns[0].nodal = [
+      { ...nodalLoad(tip.id), fx: 1100, fy: 1700, fz: -9000 },
+    ];
+    p.loadPatterns[0].uniform = [{ ...uniformLoad("V1"), qz: -650 }];
+    const manual = structuredClone(p);
+    manual.meshConnections = [];
+    manual.members[0].end = "C";
+    manual.members.push({
+      ...p.members[0],
+      id: "V2",
+      name: "Trecho direito",
+      start: "C",
+    });
+    manual.loadPatterns[0].uniform.push({
+      ...manual.loadPatterns[0].uniform[0],
+      memberId: "V2",
+    });
+    const reference = solve(manual);
+    for (const count of [5, 8, 12]) {
+      p.mesh.segmentsPerMember = count;
+      const result = solve(p);
+      expect(Object.keys(result.members)).toEqual(["V1", post.id]);
+      for (const n of p.nodes)
+        for (const k of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+          expect(result.displacements[n.id][k]).toBeCloseTo(
+            reference.displacements[n.id][k],
+            8,
+          );
+      const reaction = result.reactions[0];
+      // Sum of forces and moments about the fixed end in global axes.
+      const equilibrium = {
+        fx: -1100,
+        fy: -1700,
+        fz: 12900,
+        mx: 3400,
+        my: -31900,
+        mz: -3400,
+      };
+      for (const k of ["fx", "fy", "fz", "mx", "my", "mz"] as const) {
+        expect(Math.abs(reaction[k] - equilibrium[k])).toBeLessThan(1);
+        expect(Math.abs(reaction[k] - reference.reactions[0][k])).toBeLessThan(
+          1,
+        );
+      }
+      const chord = result.members.V1,
+        postStations = result.members[post.id];
+      const [before, after] = chord.filter((s) => s.t === 1 / 3);
+      for (const [a, b] of [
+        [chord[0], reference.members.V1[0]],
+        [before, reference.members.V1.at(-1)!],
+        [after, reference.members.V2[0]],
+        [chord.at(-1)!, reference.members.V2.at(-1)!],
+        [postStations[0], reference.members[post.id][0]],
+        [postStations.at(-1)!, reference.members[post.id].at(-1)!],
+      ])
+        for (const k of ["n", "vy", "vz", "mx", "my", "mz"] as const)
+          expect(Math.abs(a[k] - b[k])).toBeLessThan(1);
+    }
+  });
   it("laje da issue #9: equilíbrio e convergência da flecha e dos momentos no centro", () => {
     const p = slabBenchmarkProject();
     const [slab] = p.slabs;

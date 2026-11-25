@@ -16,6 +16,7 @@ import {
   projectSchema,
   type Project,
 } from "../domain/model";
+import { beamStations, type SectionLocation } from "../domain/beamMesh";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
 export interface MeshNode extends Point3 {
@@ -55,8 +56,7 @@ export interface Reaction {
   my: number;
   mz: number;
 }
-export interface Station extends Displacement {
-  t: number;
+export interface Station extends Displacement, SectionLocation {
   n: number;
   v: number;
   m: number;
@@ -134,28 +134,30 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     p.sections.map((s) => [s.id, [] as number[]]),
   );
   const memberElements = new Map<string, number[]>();
+  const layout = beamStations(p);
   for (const m of p.members) {
     const a = modelNodes.get(m.start)!,
       b = modelNodes.get(m.end)!;
     if (spatial) axes.set(m.id, beamAxes(a, b, m.roll));
     const ids: number[] = [];
     let start = nodeNumber(m.start);
-    const count = p.mesh.segmentsPerMember;
-    for (let i = 1; i <= count; i++) {
-      const end = i === count ? nodeNumber(m.end) : nodes.length + 1;
-      if (i < count)
-        nodes.push({
-          number: end,
-          ...interpolate(a, b, i / count),
-        });
+    const stations = layout.get(m.id)!;
+    for (let i = 1; i < stations.length; i++) {
+      const { t, nodeId } = stations[i];
+      const end = nodeId ? nodeNumber(nodeId) : nodes.length + 1;
+      if (!nodeId) nodes.push({ number: end, ...interpolate(a, b, t) });
+      if (!(distance(nodes[start - 1], nodes[end - 1]) > 0))
+        throw new Error(
+          `${m.name}: a malha produziria um segmento de comprimento nulo.`,
+        );
       ids.push(elements.length + 1);
       elements.push({
         number: elements.length + 1,
         memberId: m.id,
         start,
         end,
-        t0: (i - 1) / count,
-        t1: i / count,
+        t0: stations[i - 1].t,
+        t1: t,
       });
       start = end;
     }
@@ -354,8 +356,13 @@ export function parseOofemOutput(
         m = -sign * f[offset + 2];
       return { t, ...displacement, n, v, m, vy: 0, vz: v, mx: 0, my: m, mz: 0 };
     };
+    // Internal editable joints can exchange forces with loads, supports and other bars.
     if (!stations.length) stations.push(station(false));
-    stations.push(station(true));
+    else if (input.nodes[e.start - 1].objectId)
+      stations.push({ ...station(false), side: "right" });
+    const end = station(true);
+    if (e.t1 < 1 && input.nodes[e.end - 1].objectId) end.side = "left";
+    stations.push(end);
   }
   const reactions: Reaction[] = [];
   const modelNumbers = new Map(input.nodes.map((n) => [n.objectId, n.number]));

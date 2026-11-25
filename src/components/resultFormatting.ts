@@ -19,6 +19,9 @@ export const forceLabels: Record<
   mz: { symbol: "Mz", unit: "kN·m" },
 };
 
+export const sectionSide = (side?: "left" | "right") =>
+  side === "left" ? "Lado i" : side === "right" ? "Lado j" : "";
+
 export const formatResult = (value: number) =>
   value.toLocaleString("pt-BR", { maximumFractionDigits: 5 });
 

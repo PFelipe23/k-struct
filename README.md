@@ -15,7 +15,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Editar coordenadas, apoios nos graus de liberdade do projeto, seção retangular, orientação da seção e cargas globais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v7, com migração dos projetos v1 a v6 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v8, com migração dos projetos v1 a v7 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -57,7 +57,9 @@ Para explorar os envelopes de esforços, baixe o [projeto de exemplo do pórtico
 4. Altere a carga e analise novamente. A edição remove os resultados anteriores.
 5. Para começar do zero, use **Novo projeto** para XZ ou **Novo pórtico espacial** para XYZ. Ative **Barra** (`B`) e marque duas extremidades. Defina apoios e cargas antes de analisar.
 
-No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolha o pavimento para lançar vigas em planta e alterne para uma elevação para lançar pilares. **Orto** alinha a segunda extremidade no plano. Segure `Shift` para inverter o modo durante o clique. Use `Ctrl` ou `Shift` para montar uma seleção e **Replicar** para copiar a geometria até outro pavimento. Use **Conectar interseções** onde as barras precisam compartilhar nós.
+No modelo espacial, defina os eixos e as cotas em **Eixos e pavimentos**. Escolha o pavimento para lançar vigas em planta e alterne para uma elevação para lançar pilares. **Orto** alinha a segunda extremidade no plano. Segure `Shift` para inverter o modo durante o clique. Use `Ctrl` ou `Shift` para montar uma seleção e **Replicar** para copiar a geometria até outro pavimento. Use **Conexões da malha** para ligar um nó interno, um montante ou duas barras que se cruzam em XYZ. Em **Editar barras**, a opção **Dividir** cria peças físicas independentes.
+
+Para lançar um banzo contínuo, crie a barra entre os nós extremos e lance os montantes nas posições desejadas. Em **Modelo → Conexões da malha**, escolha o banzo, o nó de cada encontro e **Conectar**. Ative **Malha de análise** na vista para inspecionar os pontos regulares e os anéis das conexões. Em **Esforços**, o mesmo ID de barra reúne todo o diagrama. **Lado i** e **Lado j** identificam os limites da seção quando a carga ou o montante transfere esforço.
 
 Para transformar a seleção, abra **Replicar** no modelo espacial ou **Transformar** no modelo plano. Escolha a operação. Em **Mover por vetor**, expanda **Barras incidentes** para conferir os comprimentos antes e depois do movimento. Para espelhar, indique um ponto e a reta em XZ ou o plano em XYZ. Na rotação, defina o centro, o eixo, o passo angular e o número de cópias. Por exemplo, um passo de +90° em torno de Z, com centro na origem, leva (2, 0, 0) a (0, 2, 0).
 

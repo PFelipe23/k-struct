@@ -2070,3 +2070,20 @@ button.primary {
 .duplicate-list > button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
 .duplicate-pages { display: flex; align-items: center; gap: 10px; }
 .duplicate-selected, .duplicate-review { border-top: 1px solid var(--line); margin-top: 10px; }
+
+.mesh-dialog {
+  width: min(580px, 94vw);
+}
+.mesh-dialog h3 {
+  margin: 0 0 8px;
+}
+.mesh-dialog .load-definition-fields p {
+  margin: 0;
+}
+.scene-mesh-joint {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--geometry-support);
+  border-radius: 50%;
+  pointer-events: none;
+}

@@ -22,7 +22,7 @@ Os cinco benchmarks também passaram contra a tag exata 3.0 no [primeiro workflo
 
 ## Verificações adicionais
 
-Persistência sem perda, rejeição de versões desconhecidas e referências quebradas, remoção de cargas dependentes, desfazer/refazer, identidade de nós no snap, componentes sem restrições suficientes, Y não nulo, nós dentro de barras não subdivididas, mapeamento determinístico e saída truncada.
+Persistência sem perda, rejeição de versões desconhecidas e referências quebradas, remoção de cargas dependentes, desfazer/refazer, identidade de nós no snap, componentes sem restrições suficientes, Y não nulo, nós isolados no interior das barras, mapeamento determinístico e saída truncada.
 
 A soma global de forças e momentos é conferida com tolerância relativa de 0,1% à soma dos módulos das contribuições (mais escala unitária). A saída textual do OOFEM usa precisão menor para esforços que para deslocamentos. Equilíbrio é uma verificação complementar e não substitui benchmarks de rigidez nem análise de convergência.
 
@@ -161,6 +161,18 @@ O Playwright lança a laje na cota do pavimento, edita as bordas e a pressão, s
 OOFEM_BIN=/caminho/absoluto/oofem npm run check
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- slab.spec.ts
 ```
+
+## Conexões internas em barras físicas (KS-15)
+
+Execute `OOFEM_BIN=/caminho/para/oofem npm run check` com o OOFEM 3.0 fixado no projeto. Os ensaios estão em `tests/oofem.integration.test.ts`. O arquivo `tests/fixtures/internal-joint-oofem.txt` contém a saída do solver distribuído para a viga com oito subdivisões regulares. O teste do parser usa essa saída também nos ambientes sem binário.
+
+| Modelo                                                                                            | Referência independente                                                                                                                                                                                                   | Comparação                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Uma barra XZ de 6 m, nós A e B nas extremidades, C a 2 m de A, carga de −9 kN em C                | Equilíbrio fornece RAz = 6 kN e RBz = 3 kN. O momento sagente em C vale 12 kN·m. Para a dimensão a = 2 m, b = 4 m, a flecha em C vale −P a² b²/(3 EI L).                                                                  | Refinamentos 8, 6 e 13. No padrão, a conexão acrescenta a nona célula. Cortante de +6 kN no lado i e −3 kN no lado j. Tolerâncias absolutas de 0,05 N, 0,05 N·m e 5 × 10⁻¹⁰ m.                                                                     |
+| Mesma barra com ambas as pontas livres, engaste em C e qZ = −1 kN/m nos 6 m                       | Os balanços medem 2 e 4 m. RZ = 6 kN, MY = −6 kN·m, momentos na barra de −2 e −8 kN·m nos lados i e j.                                                                                                                    | O engaste interno estabiliza o componente. Os esforços preservam o salto devido à reação concentrada.                                                                                                                                              |
+| Banzo espacial de 6 m, engastado na origem, seção girada 23°, montante vertical de 2 m em x = 2 m | Referência construída com duas barras físicas de 2 e 4 m e o mesmo montante. A carga de ponta (1,1; 1,7; −9) kN e qZ = −0,65 kN/m no banzo exigem reação global (−1,1; −1,7; 12,9) kN e momentos (3,4; −31,9; −3,4) kN·m. | Refinamentos 5, 8 e 12 contra a referência com 8 por peça. Conferem-se os seis deslocamentos generalizados dos nós, as seis reações e os seis esforços nas extremidades e em cada lado do encontro. Tolerâncias de 5 × 10⁻⁹ m ou rad e 1 N ou N·m. |
+
+O teste de interface `tests/e2e/mesh-connections.spec.ts` conecta C, inspeciona a camada de malha, desfaz e refaz, refina, salva e reabre o projeto. Na envoltória dos fatores +1 e −1, o máximo de V em x/L = 1/3 é governado pela combinação direta do lado i e pela invertida do lado j. O teste confere a tabela e o CSV pelo ID do membro, pela posição, pelo lado e pela combinação.
 
 ## Ainda não validado nesta etapa
 

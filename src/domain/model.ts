@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
   distance,
@@ -230,9 +231,16 @@ const selectionGroups = z
       .strict(),
   )
   .max(100);
-export const projectSchema = projectV6.extend({
+const projectV7 = projectV6.extend({
   schemaVersion: z.literal(7),
   selectionGroups,
+});
+
+export const projectSchema = projectV7.extend({
+  schemaVersion: z.literal(8),
+  meshConnections: z
+    .array(z.object({ memberId: id, nodeId: id }).strict())
+    .max(32000),
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -292,7 +300,8 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 7,
+    schemaVersion: 8,
+    meshConnections: [],
     selectionGroups: [],
     id: uid(),
     name: "Projeto sem título",
@@ -526,10 +535,20 @@ export function parseProject(source: string): Project {
       };
     }
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 7
+  ) {
+    const old = projectV7.safeParse(value);
+    if (old.success)
+      value = { ...old.data, schemaVersion: 8, meshConnections: [] };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 7, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 8, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -597,6 +616,11 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${m.name}: nó de extremidade inexistente.`);
     if (!p.sections.some((s) => s.id === m.sectionId))
       errors.push(`${m.name}: seção inexistente.`);
+  }
+  try {
+    connectionStations(p);
+  } catch (error) {
+    errors.push((error as Error).message);
   }
   for (const s of p.sections)
     if (!p.materials.some((m) => m.id === s.materialId))
@@ -756,23 +780,37 @@ export function analysisErrors(p: Project): string[] {
   }
   const edges = new Map(p.nodes.map((n) => [n.id, new Set<string>()]));
   const pairs = new Set<string>();
+  const incidences = connectionStations(p);
   for (const m of p.members) {
     const a = byId.get(m.start)!;
     const b = byId.get(m.end)!;
     if (distance(a, b) < tolerance) errors.push(`${m.name}: comprimento nulo.`);
-    edges.get(m.start)!.add(m.end);
-    edges.get(m.end)!.add(m.start);
+    // Regular refinement nodes only subdivide these edges and carry no restraints.
+    let previous = m.start;
+    for (const current of [
+      ...(incidences.get(m.id) ?? []).map((s) => s.nodeId),
+      m.end,
+    ]) {
+      edges.get(previous)!.add(current);
+      edges.get(current)!.add(previous);
+      previous = current;
+    }
     const key = [m.start, m.end].sort().join("|");
     if (pairs.has(key)) errors.push(`${m.name}: barra duplicada.`);
     pairs.add(key);
-    for (const n of p.nodes)
-      if (n.id !== a.id && n.id !== b.id && interiorParameter(n, a, b) !== null)
-        errors.push(
-          `${n.name} está no interior de ${m.name}. Use Conectar interseções.`,
-        );
   }
-  if (p.nodes.some((n) => !edges.get(n.id)!.size))
-    errors.push("Remova ou conecte os nós isolados antes de analisar.");
+  for (const n of p.nodes) {
+    if (edges.get(n.id)!.size) continue;
+    const host = p.members.find(
+      (m) =>
+        interiorParameter(n, byId.get(m.start)!, byId.get(m.end)!) !== null,
+    );
+    errors.push(
+      host
+        ? `${n.name} está isolado no interior de ${host.name}. Use Conexões da malha.`
+        : "Remova ou conecte os nós isolados antes de analisar.",
+    );
+  }
   if (
     p.nodes.some((a, i) =>
       p.nodes.slice(i + 1).some((b) => distance(a, b) < tolerance),
@@ -878,6 +916,9 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
     if (nodes.has(m.start) || nodes.has(m.end)) bars.add(m.id);
     return !bars.has(m.id);
   });
+  p.meshConnections = p.meshConnections.filter(
+    (l) => !nodes.has(l.nodeId) && !bars.has(l.memberId),
+  );
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
   const removed = { node: nodes, member: bars, slab: slabs };

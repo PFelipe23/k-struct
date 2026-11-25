@@ -16,6 +16,7 @@ import {
   type NodalLoad,
   type UniformLoad,
   type Member,
+  type Project,
 } from "./model";
 
 export type Decisions = {
@@ -91,6 +92,16 @@ export function planRepair(
     .filter((m) => !changedMember.has(m.id) && !removed.has(m.id))
     .map((m) => ({ ...m }));
   p.nodes = p.nodes.filter((n) => !changedNode.has(n.id));
+  const survivingMembers = new Map(p.members.map((m) => [m.id, m]));
+  const mappedLinks = new Map<string, Project["meshConnections"][number]>();
+  for (const link of p.meshConnections) {
+    const nodeId = changedNode.get(link.nodeId) ?? link.nodeId;
+    const memberId = changedMember.get(link.memberId) ?? link.memberId;
+    const m = survivingMembers.get(memberId);
+    if (m && nodeId !== m.start && nodeId !== m.end)
+      mappedLinks.set(memberId + ":" + nodeId, { memberId, nodeId });
+  }
+  p.meshConnections = [...mappedLinks.values()];
   const nodeDraft = new Map(p.nodes.map((n) => [n.id, n]));
   type Load = NodalLoad | UniformLoad;
   // Preserve independent load records. The solver sums records only when the user chooses to.
