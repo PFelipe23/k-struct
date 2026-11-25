@@ -1,3 +1,5 @@
+import { parseUnitNumber } from "../units";
+
 export type Point3 = { x: number; y: number; z: number };
 export type Coordinate = keyof Point3;
 
@@ -95,4 +97,53 @@ export function localComponents(
   [x, y, z]: ReturnType<typeof beamAxes>,
 ): Point3 {
   return { x: dot(vector, x), y: dot(vector, y), z: dot(vector, z) };
+}
+
+export function normalizeCoord(value: number): number {
+  return Object.is(value, -0) ? 0 : value;
+}
+
+export function midpoint(a: Point3, b: Point3): Point3 {
+  return {
+    x: normalizeCoord((a.x + b.x) / 2),
+    y: normalizeCoord((a.y + b.y) / 2),
+    z: normalizeCoord((a.z + b.z) / 2),
+  };
+}
+
+export function perpendicularFootOnSegment(
+  from: Point3,
+  a: Point3,
+  b: Point3,
+): Point3 | null {
+  const ab = subtract(b, a);
+  const span = length(ab);
+  if (span < tolerance) return null;
+  const u = scale(ab, 1 / span);
+  const d = dot(subtract(from, a), u);
+  if (d < -tolerance || d > span + tolerance) return null;
+  const clamped = Math.min(span, Math.max(0, d));
+  const foot = add(a, scale(u, clamped));
+  if (distance(from, foot) < tolerance) return null;
+  return {
+    x: normalizeCoord(foot.x),
+    y: normalizeCoord(foot.y),
+    z: normalizeCoord(foot.z),
+  };
+}
+
+export function relativePointOnPlane(
+  anchor: Point3,
+  deltaU: number,
+  deltaV: number,
+  plane: WorkPlane,
+): Point3 {
+  const [axisU, axisV] = planeCoordinates[plane.kind];
+  const u = normalizeCoord(anchor[axisU] + deltaU);
+  const v = normalizeCoord(anchor[axisV] + deltaV);
+  return planePoint(u, v, plane);
+}
+
+export function parseDecimalInput(raw: string): number {
+  return parseUnitNumber(raw.replace(/−/g, "-")) ?? NaN;
 }
