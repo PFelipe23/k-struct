@@ -1712,7 +1712,7 @@ button.primary {
 .scene-axis-label.member-axis-x { margin-left: 4px; }
 .scene-axis-label.member-axis-y { margin: 4px 0 0 5px; }
 .scene-axis-label.member-axis-z { margin: -4px 0 0 -11px; }
-.scene-member-end { margin: -4px -4px 0 0; }
+.scene-member-end { margin-top: -4px; }
 @media (max-height: 800px) {
   .work-area:has(.viewports.triple) .results { height: 110px; }
   .viewports.triple .view-foot { height: 19px; min-height: 19px; }

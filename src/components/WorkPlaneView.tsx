@@ -833,7 +833,7 @@ export default function WorkPlaneView({
                         >
                           <circle cx={x} cy={y} r={3} />
                           <text x={x} y={y + 13}>
-                            {end} · {formatResult(value / 1000)}
+                            {end} · {formatResult(value / 1000)} {unit}
                           </text>
                         </g>
                       );

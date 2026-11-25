@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import {
   beamExample,
@@ -116,7 +116,7 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
     ).toBeVisible();
     await expect(
       plan.getByRole("img", { name: /B1, j, N .* kN/ }),
-    ).toBeVisible();
+    ).toContainText(/j · .+ kN/);
     await button("Exibição").click();
     await button("Eixos locais").click();
     await expect(page.getByRole("status")).toContainText("Análise concluída");
@@ -156,4 +156,59 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
   await member.click();
   await inverted();
   await expect(roll).toHaveValue("-27");
+});
+
+test("separa as marcas i e j de duas barras que compartilham o mesmo nó", async ({
+  page,
+}) => {
+  const p = beamExample();
+  p.mode = "spatial";
+  p.nodes.push({
+    ...p.nodes[1],
+    id: "C",
+    name: "N3",
+    x: 12,
+    restraints: free(),
+  });
+  p.members.push({
+    ...p.members[0],
+    id: "V2",
+    name: "B2",
+    start: "B",
+    end: "C",
+  });
+  await page.addInitScript(
+    (source) => localStorage.setItem("kstruct.draft.v10", source),
+    serializeProject(p),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Exibição", exact: true }).click();
+  await page.getByRole("button", { name: "Eixos locais", exact: true }).click();
+  const plan = page.getByRole("region", { name: "Planta XY", exact: true });
+  const space = page.getByRole("region", {
+    name: "Perspectiva 3D",
+    exact: true,
+  });
+  const planJoint = (member: string, end: string) =>
+    plan
+      .getByRole("img", { name: new RegExp(`Eixos locais de ${member}:`) })
+      .getByText(end, { exact: true });
+  async function checkJoint(a: Locator, b: Locator) {
+    await expect(a).toBeVisible();
+    await expect(b).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [ra, rb] = await Promise.all([a.boundingBox(), b.boundingBox()]);
+        if (!ra || !rb) return false;
+        return (
+          ra.x + ra.width <= rb.x ||
+          rb.x + rb.width <= ra.x ||
+          ra.y + ra.height <= rb.y ||
+          rb.y + rb.height <= ra.y
+        );
+      })
+      .toBe(true);
+  }
+  await checkJoint(planJoint("B1", "j"), planJoint("B2", "i"));
+  await checkJoint(space.getByLabel("B1: j N2"), space.getByLabel("B2: i N2"));
 });
