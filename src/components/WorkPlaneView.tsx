@@ -613,10 +613,24 @@ export default function WorkPlaneView({
             const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
             const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
             const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
-            envelope.onSection({
-              memberId: m.id,
-              index: nearestSection(envelopeStations, t),
-            });
+            let index = nearestSection(envelopeStations, t);
+            const station = envelopeStations[index];
+            // On a jump both traces have the same abscissa. Pick the closer force ordinate.
+            if (
+              station.side &&
+              Math.abs(t - station.t) * length * camera.scale <= 2
+            ) {
+              const other = index + (station.side === "left" ? 1 : -1);
+              const toPointer = ([px, py]: readonly [number, number]) =>
+                Math.hypot(
+                  px + bounds.left - event.clientX,
+                  py + bounds.top - event.clientY,
+                );
+              const toCurve = (i: number) =>
+                Math.min(toPointer(band.min[i]), toPointer(band.max[i]));
+              if (toCurve(other) < toCurve(index)) index = other;
+            }
+            envelope.onSection({ memberId: m.id, index });
           };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {

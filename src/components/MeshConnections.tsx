@@ -38,12 +38,16 @@ export default function MeshConnections({
   );
   const layout = useMemo(() => beamStations(project), [project]);
   const member = project.members.find((m) => m.id === memberId);
+  const stations = layout.get(memberId) ?? [];
+  const links = stations.slice(1, -1).filter((s) => s.nodeId);
+  const linkedNodes = new Set(links.map((s) => s.nodeId));
   const candidates =
     kind === "member"
       ? project.members.filter((m) => m.id !== memberId)
       : member
         ? project.nodes.filter(
             (n) =>
+              !linkedNodes.has(n.id) &&
               interiorParameter(
                 n,
                 nodes.get(member.start)!,
@@ -53,8 +57,6 @@ export default function MeshConnections({
         : [];
   const targetId =
     candidates.find((c) => c.id === target)?.id ?? candidates[0]?.id ?? "";
-  const stations = layout.get(memberId) ?? [];
-  const links = stations.slice(1, -1).filter((s) => s.nodeId);
   const validCount =
     Number.isInteger(Number(count)) &&
     Number(count) >= 2 &&
@@ -74,6 +76,7 @@ export default function MeshConnections({
         <label>
           Barra física
           <select
+            aria-label="Barra física"
             value={memberId}
             onChange={(e) => setMemberId(e.target.value)}
           >
@@ -88,6 +91,7 @@ export default function MeshConnections({
           <label>
             Conectar por
             <select
+              aria-label="Conectar por"
               value={kind}
               onChange={(e) => {
                 setKind(e.target.value as typeof kind);
@@ -101,6 +105,7 @@ export default function MeshConnections({
           <label>
             {kind === "node" ? "Nó interno" : "Segunda barra"}
             <select
+              aria-label={kind === "node" ? "Nó interno" : "Segunda barra"}
               value={targetId}
               onChange={(e) => setTarget(e.target.value)}
               disabled={!candidates.length}
@@ -183,6 +188,7 @@ export default function MeshConnections({
           <label>
             Subdivisões regulares por barra
             <input
+              aria-label="Subdivisões regulares por barra"
               type="number"
               min="2"
               max="32"
