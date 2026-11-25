@@ -29,7 +29,14 @@ import {
   type Slab,
 } from "../domain/model";
 import { parseNumberInput } from "./numberInput";
-import { formatResult } from "./resultFormatting";
+import {
+  formatQuantity,
+  formatUnitInput,
+  parseUnitInput,
+  unitLabel,
+  type UnitQuantity,
+} from "../units";
+import { useUnits } from "./Units";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
 import { selectionKey } from "../domain/selection";
@@ -38,6 +45,7 @@ export function NumberField({
   label,
   value,
   unit,
+  quantity,
   onChange,
   min,
   max,
@@ -47,26 +55,33 @@ export function NumberField({
   label: string;
   value: number;
   unit?: string;
+  quantity?: UnitQuantity;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
   integer?: boolean;
   validate?: (value: number) => string | undefined;
 }) {
-  const [draft, setDraft] = useState(String(value)),
+  const { units } = useUnits();
+  const displayValue = () =>
+    quantity ? formatUnitInput(value, quantity, units) : String(value);
+  const [draft, setDraft] = useState(displayValue),
     [invalid, setInvalid] = useState(false);
   const [detail, setDetail] = useState<string>();
   const cancelling = useRef(false);
   useEffect(() => {
-    setDraft(String(Number(value.toPrecision(10))));
+    setDraft(displayValue());
     setInvalid(false);
-  }, [value]);
+    setDetail(undefined);
+  }, [value, quantity, units]);
   const commit = () => {
     if (cancelling.current) {
       cancelling.current = false;
       return;
     }
-    const n = parseNumberInput(draft);
+    const n = quantity
+      ? (parseUnitInput(draft, quantity, units, value) ?? NaN)
+      : parseNumberInput(draft);
     const error = validate?.(n);
     setDetail(error);
     if (
@@ -80,7 +95,7 @@ export function NumberField({
       return;
     }
     setInvalid(false);
-    onChange(n);
+    if (n !== value) onChange(n);
   };
   return (
     <label className="number-field">
@@ -97,18 +112,21 @@ export function NumberField({
             if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
               cancelling.current = true;
-              setDraft(String(value));
+              setDraft(displayValue());
               setInvalid(false);
+              setDetail(undefined);
               e.currentTarget.blur();
             }
           }}
         />
-        {unit && <small>{unit}</small>}
+        {(quantity || unit) && (
+          <small>{quantity ? unitLabel(quantity, units) : unit}</small>
+        )}
       </div>
       {invalid && (
         <em>
           {detail ??
-            `${integer ? "Informe um número inteiro" : "Informe um valor válido"}${min !== undefined ? ` (mín. ${min})` : ""}.`}
+            `${integer ? "Informe um número inteiro" : "Informe um valor válido"}${min !== undefined ? ` (mín. ${quantity ? formatQuantity(min, quantity, units) : min})` : ""}.`}
         </em>
       )}
     </label>
@@ -148,6 +166,7 @@ function SlabFields({
   edit: (fn: (p: Project) => void) => void;
   onMaterials: () => void;
 }) {
+  const { units } = useUnits();
   const material = project.materials.find(({ id }) => id === slab.materialId)!;
   const updateSlab = (changes: Partial<Slab>) =>
     edit((draft) => {
@@ -175,7 +194,8 @@ function SlabFields({
         >
           {project.guides.z.map((level) => (
             <option key={level.id} value={level.id}>
-              {level.name} · {level.position} m
+              {level.name} · {formatQuantity(level.position, "length", units)}{" "}
+              {units.length}
             </option>
           ))}
         </select>
@@ -193,17 +213,17 @@ function SlabFields({
           key={key}
           label={label}
           value={slab[key]}
-          unit="m"
+          quantity="length"
           min={key === "lengthX" || key === "lengthY" ? tolerance : undefined}
           onChange={(value) => updateSlab({ [key]: value })}
         />
       ))}
       <NumberField
         label="Espessura"
-        unit="cm"
-        min={0.0001}
-        value={slab.thickness * 100}
-        onChange={(value) => updateSlab({ thickness: value / 100 })}
+        quantity="section"
+        min={0.000001}
+        value={slab.thickness}
+        onChange={(value) => updateSlab({ thickness: value })}
       />
       <h4>Material elástico isotrópico</h4>
       <label className="stack-field">
@@ -323,6 +343,7 @@ export default function Inspector({
   onMaterials: () => void;
   onSections: (id: string) => void;
 }) {
+  const { units } = useUnits();
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
   const dofs = spatial
@@ -362,8 +383,8 @@ export default function Inspector({
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
       const next = sumNodal(pat, node!.id);
-      if (next[key] / 1000 === value) return;
-      next[key] = value * 1000;
+      if (next[key] === value) return;
+      next[key] = value;
       pat.nodal = pat.nodal.filter((l) => l.nodeId !== node!.id);
       if (nodalComponents.some((k) => next[k])) pat.nodal.push(next);
     });
@@ -374,8 +395,8 @@ export default function Inspector({
     edit((p) => {
       const pat = p.loadPatterns.find((l) => l.id === patternId)!;
       const next = sumUniform(pat, member!.id);
-      if (next[key] / 1000 === value) return;
-      next[key] = value * 1000;
+      if (next[key] === value) return;
+      next[key] = value;
       pat.uniform = pat.uniform.filter((l) => l.memberId !== member!.id);
       if (uniformComponents.some((k) => next[k])) pat.uniform.push(next);
     });
@@ -446,7 +467,7 @@ export default function Inspector({
             </p>
             {selectedNodes.size > 0 && supportPresets}
             <BatchAssignPanel
-              key={JSON.stringify([p.mode, patternId, ...selection.map(selectionKey)])}
+              key={JSON.stringify([p.mode, patternId, units.force, units.moment, units.distributedLoad, ...selection.map(selectionKey)])}
               project={p}
               selection={selection}
               patternId={patternId}
@@ -467,7 +488,7 @@ export default function Inspector({
                 key={k}
                 label={k.toUpperCase()}
                 value={node[k]}
-                unit="m"
+                quantity="length"
                 onChange={(v) =>
                   edit((p) => {
                     p.nodes.find((n) => n.id === node.id)![k] = v;
@@ -478,7 +499,7 @@ export default function Inspector({
             {!spatial && (
               <div className="property-line">
                 <span>Y</span>
-                <b>0,00 m</b>
+                <b>0,00 {units.length}</b>
               </div>
             )}
             <h4>Apoios e restrições</h4>
@@ -530,8 +551,8 @@ export default function Inspector({
                 <NumberField
                   key={`${patternId}-${k}`}
                   label={`${k[0] === "f" ? "Força" : "Momento"} ${k[1].toUpperCase()}`}
-                  value={nl[k] / 1000}
-                  unit={k[0] === "f" ? "kN" : "kN·m"}
+                  value={nl[k]}
+                  quantity={k[0] === "f" ? "force" : "moment"}
                   onChange={(v) => nodeLoad(k, v)}
                 />
               ),
@@ -573,7 +594,9 @@ export default function Inspector({
             </div>
             <div className="property-line">
               <span>Comprimento</span>
-              <b>{span.toFixed(3)} m</b>
+              <b>
+                {formatQuantity(span, "length", units)} {units.length}
+              </b>
             </div>
             <button
               onClick={() => edit((draft) => reverseMember(draft, member.id))}
@@ -629,8 +652,8 @@ export default function Inspector({
               <NumberField
                 key={`${patternId}-${k}`}
                 label={`q${k.toUpperCase()} global`}
-                unit="kN/m"
-                value={ul[`q${k}`] / 1000}
+                quantity="distributedLoad"
+                value={ul[`q${k}`]}
                 onChange={(v) => setUniformLoad(`q${k}`, v)}
               />
             ))}
@@ -643,12 +666,12 @@ export default function Inspector({
                   <div key={key}>
                     <dt>q{key} local</dt>
                     <dd>
-                      {formatResult(
-                        Math.abs(localLoad[key]) < 1e-8
-                          ? 0
-                          : localLoad[key] / 1000,
+                      {formatQuantity(
+                        Math.abs(localLoad[key]) < 1e-8 ? 0 : localLoad[key],
+                        "distributedLoad",
+                        units,
                       )}{" "}
-                      kN/m
+                      {units.distributedLoad}
                     </dd>
                   </div>
                 ))}
@@ -684,18 +707,16 @@ export default function Inspector({
                 <NumberField
                   key={`${section.id}-${key}`}
                   label={label}
-                  unit="cm"
-                  value={value * 100}
+                  quantity="section"
+                  value={value}
                   validate={(v) =>
-                    Object.values(
-                      geometryErrors({ ...section, [key]: v / 100 }),
-                    )[0]
+                    Object.values(geometryErrors({ ...section, [key]: v }))[0]
                   }
                   onChange={(v) =>
                     edit((draft) => {
                       Object.assign(
                         draft.sections.find((s) => s.id === section.id)!,
-                        { [key]: v / 100 },
+                        { [key]: v },
                       );
                     })
                   }

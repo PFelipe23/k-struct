@@ -65,6 +65,7 @@ const acknowledge = [{ value: "confirm", label: "Confirmar esta decisão" }];
 export function planRepair(
   stage: ReturnType<typeof stagedMembers>,
   choices: Pick<Decisions, "members" | "removeNull" | "answers">,
+  formatLoad: (row: NodalLoad | UniformLoad) => string = loadText,
 ) {
   const source = stage.source;
   const p = structuredClone(source),
@@ -152,7 +153,7 @@ export function planRepair(
           ? named(items.get(keep)!)
           : "descartar";
       notes.push(
-        `${named(pattern)} · ${named(items.get(idOf(row))!)} → ${destination} · ${loadText(row)}`,
+        `${named(pattern)} · ${named(items.get(idOf(row))!)} → ${destination} · ${formatLoad(row)}`,
       );
     }
     return rows.flatMap((row) =>
@@ -227,7 +228,7 @@ export function planRepair(
         for (const pat of source.loadPatterns)
           for (const l of pat.uniform.filter((row) => row.memberId === m.id))
             notes.push(
-              `${named(pat)} · mantida em ${named(m)} na nova extensão · ${loadText(l)}`,
+              `${named(pat)} · mantida em ${named(m)} na nova extensão · ${formatLoad(l)}`,
             );
       }
     }
@@ -264,7 +265,7 @@ export function planRepair(
       for (const pat of p.loadPatterns) {
         for (const l of pat.uniform.filter((l) => l.memberId === id))
           notes.push(
-            `${named(pat)} · excluir carga de ${named(m)} · ${loadText(l)}`,
+            `${named(pat)} · excluir carga de ${named(m)} · ${formatLoad(l)}`,
           );
         pat.uniform = pat.uniform.filter((l) => l.memberId !== id);
       }

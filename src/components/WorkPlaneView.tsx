@@ -33,8 +33,14 @@ import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
+import { formatQuantity, fromSI } from "../units";
+import { useUnits } from "./Units";
 import MemberAxes2D from "./MemberAxes2D";
-import { forceLabels, formatResult } from "./resultFormatting";
+import {
+  forceQuantity,
+  formatResultQuantity,
+  getForceLabel,
+} from "./resultFormatting";
 import InclinedSupport2D from "./InclinedSupport2D";
 
 export type PlaneCamera = {
@@ -105,6 +111,7 @@ export default function WorkPlaneView({
   onPoint,
   onSelect,
 }: Props & LayerControls) {
+  const { units } = useUnits();
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 700, height: 460 });
   const [camera, setCamera] = useState({ u: 3, v: 1.5, scale: 65 });
@@ -360,7 +367,8 @@ export default function WorkPlaneView({
           <i className="view-dot" />
           {heading}{" "}
           <small>
-            {normal.toUpperCase()} = {plane.offset} m
+            {normal.toUpperCase()} ={" "}
+            {formatQuantity(plane.offset, "length", units)} {units.length}
           </small>
         </span>
         <div className="view-actions">
@@ -491,7 +499,7 @@ export default function WorkPlaneView({
                 className={u === 0 ? "axis" : ""}
               />
               <text x={sx(u) + 4} y={size.height - 10}>
-                {Number(u.toFixed(2))}
+                {Number(fromSI(u, "length", units).toFixed(2))}
               </text>
             </g>
           ))}
@@ -505,7 +513,7 @@ export default function WorkPlaneView({
                 className={v === 0 ? "axis" : ""}
               />
               <text x="8" y={sy(v) - 5}>
-                {Number(v.toFixed(2))}
+                {Number(fromSI(v, "length", units).toFixed(2))}
               </text>
             </g>
           ))}
@@ -732,11 +740,13 @@ export default function WorkPlaneView({
                       {components
                         .flatMap((q, i) =>
                           q
-                            ? [`q${coordinates[i].toUpperCase()} ${q / 1000}`]
+                            ? [
+                                `q${coordinates[i].toUpperCase()} ${formatQuantity(q, "distributedLoad", units)}`,
+                              ]
                             : [],
                         )
                         .join(" · ")}{" "}
-                      kN/m
+                      {units.distributedLoad}
                     </text>
                   </g>
                 )}
@@ -825,7 +835,12 @@ export default function WorkPlaneView({
                     ).map(([end, station]) => {
                       const value = station[display];
                       const [x, y] = forcePoint(station.t, value);
-                      const { symbol, unit } = forceLabels[display];
+                      const { symbol, unit } = getForceLabel(display, units);
+                      const formatted = formatResultQuantity(
+                        value,
+                        forceQuantity(display),
+                        units,
+                      );
                       const towardSpan = end === "i" ? 1 : -1;
                       const dx = (towardSpan * du) / length;
                       const dy = (-towardSpan * dv) / length;
@@ -834,7 +849,7 @@ export default function WorkPlaneView({
                         <g
                           key={end}
                           role="img"
-                          aria-label={`${m.name}, ${end}, ${symbol} ${formatResult(value / 1000)} ${unit}`}
+                          aria-label={`${m.name}, ${end}, ${symbol} ${formatted} ${unit}`}
                         >
                           <circle cx={x} cy={y} r={3} />
                           <text
@@ -849,7 +864,7 @@ export default function WorkPlaneView({
                                     : "middle",
                             }}
                           >
-                            {end} · {formatResult(value / 1000)} {unit}
+                            {end} · {formatted} {unit}
                           </text>
                         </g>
                       );
@@ -891,7 +906,9 @@ export default function WorkPlaneView({
           const norm = Math.hypot(fu, fv);
           const moments = coordinates.flatMap((k) => {
             const m = loads.reduce((sum, l) => sum + l[`m${k}`], 0);
-            return m ? [`M${k.toUpperCase()} ${m / 1000}`] : [];
+            return m
+              ? [`M${k.toUpperCase()} ${formatQuantity(m, "moment", units)}`]
+              : [];
           });
           return (
             <g
@@ -959,17 +976,19 @@ export default function WorkPlaneView({
                       {coordinates
                         .flatMap((k) =>
                           force(k)
-                            ? [`F${k.toUpperCase()} ${force(k) / 1000}`]
+                            ? [
+                                `F${k.toUpperCase()} ${formatQuantity(force(k), "force", units)}`,
+                              ]
                             : [],
                         )
                         .join(" · ")}{" "}
-                      kN
+                      {units.force}
                     </text>
                   </g>
                 )}
               {layers.loads && display === "model" && moments.length > 0 && (
                 <text x={x + 16} y={y + 35} className="moment-label">
-                  {moments.join(" · ")} kN·m
+                  {moments.join(" · ")} {units.moment}
                 </text>
               )}
             </g>
@@ -1030,11 +1049,13 @@ export default function WorkPlaneView({
       )}
       <div className="view-foot">
         <span>
-          {normal.toUpperCase()} = {plane.offset} m <b>·</b> Snap 0,50 m
+          {normal.toUpperCase()} ={" "}
+          {formatQuantity(plane.offset, "length", units)} {units.length}{" "}
+          <b>·</b> Snap {formatQuantity(0.5, "length", units)} {units.length}
         </span>
         <span>
           {cursor
-            ? `${axisU.toUpperCase()} ${cursor.u.toFixed(2)} · ${axisV.toUpperCase()} ${cursor.v.toFixed(2)} m`
+            ? `${axisU.toUpperCase()} ${fromSI(cursor.u, "length", units).toFixed(2)} · ${axisV.toUpperCase()} ${fromSI(cursor.v, "length", units).toFixed(2)} ${units.length}`
             : display === "deformed"
               ? `Deformada ×${deformationScale.toFixed(1)}`
               : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}

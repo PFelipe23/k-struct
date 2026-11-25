@@ -20,6 +20,16 @@ O caso vertical detectou a necessidade de transformação explícita das cargas 
 
 Os cinco benchmarks também passaram contra a tag exata 3.0 no [primeiro workflow numérico](https://github.com/ricardocorsini/k-struct/actions/runs/44565642421). A mesma execução confirmou o `cargo check` do aplicativo no Windows. A verificação atual é sempre a CI do commit em uso.
 
+## Preferências de unidades (KS-05)
+
+Os testes de `units.test.ts` verificam ida e volta de cada grandeza, leitura com ponto ou vírgula, preferências inválidas e preservação exata de entradas sem mudança. A viga de referência conserva 6 m ao apresentar 600 cm ou 6000 mm e 200 GPa ao apresentar 200000 MPa. A reação de 30000 N corresponde a 30 kN; a flecha de −0,0084375 m corresponde a −8,4375 mm.
+
+`result-units.test.ts` verifica valores e cabeçalhos nas unidades selecionadas e hashes de regressão do CSV padrão de reações, deslocamentos, esforços e envelopes. IDs, estações e composição dos resultados permanecem rastreáveis. A cobertura inclui as reações globais e no referencial do apoio e os lados i/j nas conexões internas. Os testes usam a saída de referência do OOFEM, sem substituir o solver da aplicação.
+
+Os cenários de navegador em `units.spec.ts` cobrem resultado válido durante trocas sucessivas, mesma geometria de deformada, modelo e entrada OOFEM idênticos, retorno ao CSV padrão, edição em centímetros, preferência após recarregar, cancelamento e histórico da tabela. Conferem também área e inércia em metros sem arredondá-las para zero. O cenário em `units-views-integration.spec.ts` confere os valores i/j em N e N·m e a geometria do diagrama ao trocar unidades. `template-units.spec.ts` compara entradas e prévias em cm/mm com a geometria SI gerada, inclusive vírgula decimal, tolerância e cancelamento. Quando `OOFEM_BIN` está definido, o cenário de resultados produz a saída da viga com o executável real antes de exercitar a fronteira IPC no navegador.
+
+O benchmark numérico continua sendo executado separadamente com o OOFEM 3.0 fixado em `crates/solver-runner/oofem.json`. Esta contribuição não altera equações, convenções de sinais nem o esquema do projeto. A reabertura do aplicativo conserva o modelo e a preferência; os resultados continuam pertencendo à sessão de análise, conforme o contrato existente.
+
 ## Verificações adicionais
 
 Persistência sem perda, rejeição de versões desconhecidas e referências quebradas, remoção de cargas dependentes, desfazer/refazer, identidade de nós no snap, componentes sem restrições suficientes, Y não nulo, nós isolados no interior das barras, mapeamento determinístico e saída truncada.
@@ -42,7 +52,7 @@ Os testes do runner exercitam cancelamento, tempo limite e persistência de regi
 
 ## Diagnóstico de duplicidades
 
-A varredura compara a distância euclidiana em XYZ com a tolerância informada em metros. A união só é válida quando cada par do conjunto está dentro da tolerância e todos os IDs removidos apontam diretamente ao sobrevivente. A suíte confere cotas distintas, cadeias de vizinhos, barras invertidas, barras nulas criadas pela união, sobreposições parciais e transferências por padrão e grupo.
+A varredura compara a distância euclidiana em XYZ com a tolerância convertida para metros. A união só é válida quando cada par do conjunto está dentro da tolerância e todos os IDs removidos apontam diretamente ao sobrevivente. A suíte confere cotas distintas, cadeias de vizinhos, barras invertidas, barras nulas criadas pela união, sobreposições parciais e transferências por padrão e grupo.
 
 No teste com OOFEM 3.0, o modelo de entrada contém duas barras de sentidos opostos entre os mesmos apoios e uma carga de −10 kN/m em cada barra. O diagnóstico conserva a barra invertida. Ao escolher a carga de uma origem, a reação é de 30 kN por apoio. Ao escolher a soma, passa a 60 kN. O Playwright verifica o destaque no modelo, conflitos de cargas e apoios, cancelamento, desfazer e nova varredura.
 
@@ -146,12 +156,12 @@ O parser lê UZ diretamente no nó central nas três malhas de referência. Nos 
 
 Valores medidos com OOFEM 3.0 no commit `214b161ed3acb471f2d0104b004c37fd73bafaa2`. UZ é negativo para baixo. Momentos positivos tracionam a face inferior na direção indicada pelos eixos X e Y do painel.
 
-| Subdivisões X × Y | Triângulos | ΣRZ (kN) | UZ (mm) | Mx (kN·m/m) | My (kN·m/m) | Erro UZ / Mx / My |
-| ----------------- | ---------- | -------- | ------- | ----------- | ----------- | ----------------- |
-| 8 × 6             | 96         | 59,99980 | −1,013955 | 2,02504    | 3,10462     | 1,65% / 1,96% / 0,97% |
-| 16 × 12           | 384        | 60,00012 | −1,026874 | 1,99603    | 3,08276     | 0,39% / 0,50% / 0,26% |
-| 32 × 24           | 1.536      | 59,99996 | −1,029932 | 1,98866    | 3,07682     | 0,10% / 0,13% / 0,07% |
-| Navier            | —          | 60,00000 | −1,030920 | 1,98613    | 3,07472     | — |
+| Subdivisões X × Y | Triângulos | ΣRZ (kN) | UZ (mm)   | Mx (kN·m/m) | My (kN·m/m) | Erro UZ / Mx / My     |
+| ----------------- | ---------- | -------- | --------- | ----------- | ----------- | --------------------- |
+| 8 × 6             | 96         | 59,99980 | −1,013955 | 2,02504     | 3,10462     | 1,65% / 1,96% / 0,97% |
+| 16 × 12           | 384        | 60,00012 | −1,026874 | 1,99603     | 3,08276     | 0,39% / 0,50% / 0,26% |
+| 32 × 24           | 1.536      | 59,99996 | −1,029932 | 1,98866     | 3,07682     | 0,10% / 0,13% / 0,07% |
+| Navier            | —          | 60,00000 | −1,030920 | 1,98613     | 3,07472     | —                     |
 
 O teste exige erro decrescente em todas as grandezas centrais, erro relativo inferior a 0,5% na malha final e diferença inferior a 1 N na soma das reações verticais em cada malha. A tolerância de 0,5% cobre o erro de discretização e recuperação de momentos na malha fina. A de 1 N acomoda a precisão textual do OOFEM para as reações. Uma segunda regressão verifica apoios opostos, pressão ascendente obtida por fatores de carga e a solução de faixa para ν = 0. Uma análise incompleta ou em desequilíbrio é rejeitada.
 

@@ -2280,3 +2280,21 @@ button.primary {
 .batch-actions button.primary {
   padding: 6px 12px;
 }
+
+.units-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+.units-dialog {
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+.units-dialog .modal-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .units-fields {
+    grid-template-columns: 1fr;
+  }
+}

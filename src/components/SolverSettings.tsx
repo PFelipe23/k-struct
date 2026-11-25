@@ -7,6 +7,9 @@ import {
   type Diagnostic,
 } from "../solver/desktop";
 import EngineDetails from "./EngineDetails";
+import { unitLabel } from "../units";
+import { formatResultQuantity } from "./resultFormatting";
+import { useUnits } from "./Units";
 
 export default function SolverSettings({
   executable,
@@ -19,6 +22,7 @@ export default function SolverSettings({
   onSave: (path: string) => void;
   onClose: () => void;
 }) {
+  const { units } = useUnits();
   const [custom, setCustom] = useState(executable);
   const [report, setReport] = useState<Diagnostic | null>(null);
   const [checking, setChecking] = useState(false);
@@ -111,13 +115,25 @@ export default function SolverSettings({
                 {report.engine && <EngineDetails engine={report.engine} />}
                 {report.ok && report.benchmark && (
                   <p>
-                    Reações {report.benchmark.leftReactionN / 1000} e{" "}
-                    {report.benchmark.rightReactionN / 1000} kN · Flecha{" "}
-                    {(report.benchmark.midspanUzM * 1000).toLocaleString(
-                      "pt-BR",
-                      { maximumFractionDigits: 4 },
+                    Reações{" "}
+                    {formatResultQuantity(
+                      report.benchmark.leftReactionN,
+                      "force",
+                      units,
                     )}{" "}
-                    mm
+                    e{" "}
+                    {formatResultQuantity(
+                      report.benchmark.rightReactionN,
+                      "force",
+                      units,
+                    )}{" "}
+                    {unitLabel("force", units)} · Flecha{" "}
+                    {formatResultQuantity(
+                      report.benchmark.midspanUzM,
+                      "displacement",
+                      units,
+                    )}{" "}
+                    {unitLabel("displacement", units)}
                   </p>
                 )}
                 {!report.ok && (report.stdout || report.stderr) && (

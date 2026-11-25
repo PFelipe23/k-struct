@@ -1,3 +1,4 @@
+import { DEFAULT_UNITS, formatQuantity, type UnitPreferences } from "../units";
 import {
   nodalLoad,
   patternLoadLimit,
@@ -269,14 +270,6 @@ function validateSpec(
   return errors;
 }
 
-export function formatBatchLoad(value: number) {
-  const kilo = value / 1000;
-  return kilo.toLocaleString("pt-BR", {
-    maximumSignificantDigits: 12,
-    notation: kilo !== 0 && Math.abs(kilo) < 1e-4 ? "scientific" : "standard",
-  });
-}
-
 // Only the edited components of a changed object are consolidated. All other
 // components stay on their original rows, including cancelling or very small loads.
 function planLoads<K extends string, L extends Record<K, number>>(
@@ -426,6 +419,7 @@ export function previewBatchAssignment(
   selection: readonly SelectedObject[],
   patternId: string,
   spec: BatchAssignmentSpec,
+  units: UnitPreferences = DEFAULT_UNITS,
 ): BatchPreview {
   let plan: ReturnType<typeof planBatchAssignment>;
   try {
@@ -472,7 +466,7 @@ export function previewBatchAssignment(
         const desc = entries
           .map(
             ([k, v]) =>
-              `${k[0]}${k[1].toUpperCase()} = ${formatBatchLoad(v)} kN/m`,
+              `${k[0]}${k[1].toUpperCase()} = ${formatQuantity(v, "distributedLoad", units)} ${units.distributedLoad}`,
           )
           .join(", ");
         lines.push(
@@ -497,7 +491,7 @@ export function previewBatchAssignment(
         const desc = entries
           .map(
             ([k, v]) =>
-              `${k[0] === "f" ? "F" : "M"}${k[1].toUpperCase()} = ${formatBatchLoad(v)} ${k[0] === "f" ? "kN" : "kN·m"}`,
+              `${k[0] === "f" ? "F" : "M"}${k[1].toUpperCase()} = ${formatQuantity(v, k[0] === "f" ? "force" : "moment", units)} ${k[0] === "f" ? units.force : units.moment}`,
           )
           .join(", ");
         lines.push(

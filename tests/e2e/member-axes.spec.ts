@@ -59,6 +59,20 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
     name: "Rotação em torno de x local",
   });
   const load = page.getByLabel("Projeção local da carga distribuída");
+  const axialLoad = load
+    .getByText("qx local", { exact: true })
+    .locator("..")
+    .getByRole("definition");
+  async function expectAxialLoad(value: number) {
+    await expect(axialLoad).toHaveText(/^-?\d+(?:,\d+)? kN\/m$/);
+    await expect
+      .poll(async () =>
+        Number(
+          (await axialLoad.innerText()).replace(" kN/m", "").replace(",", "."),
+        ),
+      )
+      .toBeCloseTo(value, 5);
+  }
 
   await member.click();
   await button("Exibição").click();
@@ -77,7 +91,7 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
       perspective.getByLabel(`Eixo local ${axis} de B1`),
     ).toBeVisible();
   await expect(perspective.getByLabel("B1: i N1")).toBeVisible();
-  await expect(load).toContainText("0,63246 kN/m");
+  await expectAxialLoad(0.632455532034);
 
   if (process.env.OOFEM_BIN) {
     await showAxialDiagram(page, project, process.env.OOFEM_BIN);
@@ -98,7 +112,7 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
   await expect(perspective.getByLabel("B1: i N2")).toBeVisible();
   await expect(perspective.getByLabel("B1: i N1")).toHaveCount(0);
   await expect(roll).toHaveValue("-27");
-  await expect(load).toContainText("-0,63246 kN/m");
+  await expectAxialLoad(-0.632455532034);
   await expect(page.getByRole("status")).toContainText("Modelo em edição");
   await button("Desfazer").click();
   await expect(triad("i N1, j N2")).toBeVisible();

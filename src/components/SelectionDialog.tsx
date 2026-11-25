@@ -7,6 +7,8 @@ import {
   type SelectionFilter,
   type SelectionMode,
 } from "../domain/selection";
+import { formatQuantity } from "../units";
+import { useUnits } from "./Units";
 
 type Props = {
   project: Project;
@@ -23,6 +25,7 @@ export default function SelectionDialog({
   edit,
   onClose,
 }: Props) {
+  const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   const [filter, setFilter] = useState(allObjects);
   const [mode, setMode] = useState<SelectionMode>("replace");
@@ -100,7 +103,8 @@ export default function SelectionDialog({
                 .sort((a, b) => a.position - b.position)
                 .map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.name} · {g.position} m
+                    {g.name} · {formatQuantity(g.position, "length", units)}{" "}
+                    {units.length}
                   </option>
                 ))}
             </select>

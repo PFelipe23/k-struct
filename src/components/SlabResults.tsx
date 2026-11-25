@@ -2,28 +2,38 @@ import { CheckCircle2, History, Terminal } from "lucide-react";
 import type { Slab } from "../domain/model";
 import { exportFile } from "../solver/desktop";
 import type { SlabResult, SlabSample } from "../solver/slab";
-import { formatResult } from "./resultFormatting";
+import {
+  DEFAULT_UNITS,
+  fromSI,
+  unitLabel,
+  type UnitPreferences,
+} from "../units";
+import { useUnits } from "./Units";
+import { formatResultQuantity } from "./resultFormatting";
 
 export const slabDisplays = {
   "slab-uz": {
     label: "Flecha UZ",
     field: "uz",
-    unit: "mm",
-    factor: 1000,
+    quantity: "displacement",
+    unit: unitLabel("displacement"),
+    factor: fromSI(1, "displacement"),
     sign: "UZ negativo para baixo",
   },
   "slab-mx": {
     label: "Momento local Mx",
     field: "mx",
-    unit: "kN·m/m",
-    factor: 0.001,
+    quantity: "moment",
+    unit: `${unitLabel("moment")}/m`,
+    factor: fromSI(1, "moment"),
     sign: "Mx positivo traciona a face inferior na direção X",
   },
   "slab-my": {
     label: "Momento local My",
     field: "my",
-    unit: "kN·m/m",
-    factor: 0.001,
+    quantity: "moment",
+    unit: `${unitLabel("moment")}/m`,
+    factor: fromSI(1, "moment"),
     sign: "My positivo traciona a face inferior na direção Y",
   },
 } as const satisfies Record<
@@ -31,6 +41,7 @@ export const slabDisplays = {
   {
     label: string;
     field: keyof SlabSample;
+    quantity: "displacement" | "moment";
     unit: string;
     factor: number;
     sign: string;
@@ -40,8 +51,27 @@ export type SlabDisplay = keyof typeof slabDisplays;
 export const isSlabDisplay = (value: string): value is SlabDisplay =>
   Object.hasOwn(slabDisplays, value);
 
-export function buildSlabMap(result: SlabResult, display: SlabDisplay) {
+export function getSlabQuantityDefinition(
+  display: SlabDisplay,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
   const definition = slabDisplays[display];
+  return {
+    ...definition,
+    unit:
+      definition.quantity === "moment"
+        ? `${unitLabel("moment", units)}/m`
+        : unitLabel("displacement", units),
+    factor: fromSI(1, definition.quantity, units),
+  };
+}
+
+export function buildSlabMap(
+  result: SlabResult,
+  display: SlabDisplay,
+  units: UnitPreferences = DEFAULT_UNITS,
+) {
+  const definition = getSlabQuantityDefinition(display, units);
   const values = result.elements.map((element) => element[definition.field]);
   const scale = Math.max(...values.map(Math.abs));
   return { result, definition, values, scale };
@@ -63,8 +93,12 @@ export function SlabLegend({
   name: string;
   caseName: string;
 }) {
-  const { definition, scale } = map;
-  const limit = scale * definition.factor;
+  const { units } = useUnits();
+  const definition = getSlabQuantityDefinition(
+    `slab-${map.definition.field}`,
+    units,
+  );
+  const { scale } = map;
   return (
     <div
       className="diagram-caption slab-legend"
@@ -77,7 +111,7 @@ export function SlabLegend({
         · {caseName}
       </span>
       <span className="slab-legend-scale">
-        {formatResult(limit ? -limit : 0)}
+        {formatResultQuantity(scale ? -scale : 0, definition.quantity, units)}
         <i
           aria-hidden="true"
           style={{
@@ -85,7 +119,8 @@ export function SlabLegend({
               "linear-gradient(to right, var(--slab-negative), var(--slab-zero), var(--slab-positive))",
           }}
         />
-        {formatResult(limit)} {definition.unit}
+        {formatResultQuantity(scale, definition.quantity, units)}{" "}
+        {definition.unit}
       </span>
       <span>{definition.sign} · valores médios por elemento</span>
     </div>
@@ -111,6 +146,9 @@ export default function SlabResults({
   openRunHistory?: () => void;
   onExportError: (message: string) => void;
 }) {
+  const { units } = useUnits();
+  const displacement = getSlabQuantityDefinition("slab-uz", units);
+  const moment = getSlabQuantityDefinition("slab-mx", units);
   return (
     <section className="results slab-results" aria-label="Resultados da laje">
       <div className="results-heading">
@@ -157,23 +195,36 @@ export default function SlabResults({
               <thead>
                 <tr>
                   <th>Local</th>
-                  <th>UZ (mm)</th>
-                  <th>Mx (kN·m/m)</th>
-                  <th>My (kN·m/m)</th>
+                  <th>UZ ({displacement.unit})</th>
+                  <th>Mx ({moment.unit})</th>
+                  <th>My ({moment.unit})</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td>Centro do painel</td>
-                  <td>{formatResult(result.center.uz * 1000)}</td>
-                  <td>{formatResult(result.center.mx / 1000)}</td>
-                  <td>{formatResult(result.center.my / 1000)}</td>
+                  <td>
+                    {formatResultQuantity(
+                      result.center.uz,
+                      "displacement",
+                      units,
+                    )}
+                  </td>
+                  <td>
+                    {formatResultQuantity(result.center.mx, "moment", units)}
+                  </td>
+                  <td>
+                    {formatResultQuantity(result.center.my, "moment", units)}
+                  </td>
                 </tr>
               </tbody>
             </table>
             <p className="slab-equilibrium">
-              Carga em Z {formatResult(result.totalLoadZ / 1000)} kN · Soma das
-              reações em Z {formatResult(result.totalReactionZ / 1000)} kN
+              Carga em Z{" "}
+              {formatResultQuantity(result.totalLoadZ, "force", units)}{" "}
+              {unitLabel("force", units)} · Soma das reações em Z{" "}
+              {formatResultQuantity(result.totalReactionZ, "force", units)}{" "}
+              {unitLabel("force", units)}
             </p>
           </>
         )}

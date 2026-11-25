@@ -12,7 +12,8 @@ import {
 } from "../domain/geometry";
 import type { Transform } from "../domain/transformGeometry";
 import type { TransformPlan } from "../domain/transform";
-import { formatResult } from "./resultFormatting";
+import { formatResultQuantity } from "./resultFormatting";
+import { useUnits } from "./Units";
 
 function guide(spec: Transform, first: Point3, radius: number) {
   const unit = (v: Point3) => scale(v, 1 / length(v));
@@ -54,6 +55,7 @@ export default function TransformPreview({
   plane: PlaneKind;
   spec: Transform;
 }) {
+  const { units } = useUnits();
   const source = drawing(
     plan.source,
     new Set(plan.maps.flatMap((m) => [...m.nodes.keys()])),
@@ -85,8 +87,10 @@ export default function TransformPreview({
               [A, B] = target.bars[i];
             return (
               <div key={id}>
-                {bar.name} · {formatResult(distance(a, b))} →{" "}
-                {formatResult(distance(A, B))} m
+                {bar.name} ·{" "}
+                {formatResultQuantity(distance(a, b), "length", units)} →{" "}
+                {formatResultQuantity(distance(A, B), "length", units)}{" "}
+                {units.length}
               </div>
             );
           })}
