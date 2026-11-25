@@ -35,6 +35,18 @@ type ResultView =
       problem: string;
     };
 
+const allMembersLabel = "Todas as barras";
+
+function hasAmbiguousMemberNames(members: Project["members"]) {
+  const labels = new Set([allMembersLabel]);
+  for (const { name } of members) {
+    const label = name.trim().replace(/\s+/g, " ").normalize("NFC");
+    if (labels.has(label)) return true;
+    labels.add(label);
+  }
+  return false;
+}
+
 export function buildResultTable(
   project: Project,
   tab: string,
@@ -44,7 +56,14 @@ export function buildResultTable(
 ) {
   const spatial = project.mode === "spatial";
   const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
-  const memberNames = new Map(project.members.map((m) => [m.id, m.name]));
+  const includeMemberIds =
+    tab === "forces" && hasAmbiguousMemberNames(project.members);
+  const memberNames = new Map(
+    project.members.map(({ id, name }) => [
+      id,
+      includeMemberIds ? `[${id}] ${name}` : name,
+    ]),
+  );
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
@@ -144,7 +163,7 @@ export function buildResultTable(
         ]),
       );
   }
-  return { headers, rows };
+  return { headers, rows, memberNames };
 }
 
 export function buildResultCsv(
@@ -218,7 +237,7 @@ export default function Results({
       setExportError(String(e)),
     );
   };
-  const { headers, rows } = buildResultTable(
+  const { headers, rows, memberNames } = buildResultTable(
     project,
     tab,
     result,
@@ -253,10 +272,10 @@ export default function Results({
                 value={forceMemberId}
                 onChange={(event) => onForceMemberChange(event.target.value)}
               >
-                <option value="">Todas as barras</option>
-                {project.members.map(({ id, name }) => (
+                <option value="">{allMembersLabel}</option>
+                {project.members.map(({ id }) => (
                   <option key={id} value={id}>
-                    {name}
+                    {memberNames.get(id)}
                   </option>
                 ))}
               </select>

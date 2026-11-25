@@ -175,6 +175,18 @@ describe("unidades dos resultados de referência", () => {
     );
   });
 
+  it("distingue uma barra chamada Todas as barras da opção que reúne o projeto", () => {
+    const { project, result, view } = reference();
+    project.members[0].name = "Todas as barras";
+    const table = buildResultTable(project, "forces", result, "V1");
+    expect(table.rows.every((row) => row[0] === "[V1] Todas as barras")).toBe(
+      true,
+    );
+    expect(buildResultCsv(project, view, "forces", "V1")).toContain(
+      '"[V1] Todas as barras";0.5;',
+    );
+  });
+
   it("conserva IDs, fatores e números não arredondados no CSV de combinação", () => {
     const { project, result } = reference();
     const definition: ResultCombination = {

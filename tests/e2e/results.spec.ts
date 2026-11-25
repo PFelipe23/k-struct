@@ -617,6 +617,73 @@ test("filtro de esforços acompanha caso e combinação e limita as linhas do CS
   await expect(filter).toHaveValue("");
 });
 
+test("duas barras de mesmo nome continuam identificáveis no filtro, na tabela e no CSV", async ({
+  page,
+}) => {
+  const project = twoSpanBeam();
+  for (const member of project.members) member.name = "Viga";
+  project.resultCombinations = [
+    {
+      id: "C1",
+      name: "EL em dobro",
+      type: "linear",
+      factors: [{ caseId: "EL", factor: 2 }],
+    },
+  ];
+  const output = readFileSync(
+    new URL("../fixtures/two-span-beam-oofem.txt", import.meta.url),
+    "utf8",
+  );
+  await bridge(page, { solverOutput: output });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "barras-homonimas.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(project)),
+  });
+  await page.getByRole("button", { name: "Analisar", exact: true }).click();
+  await page.getByRole("button", { name: "Esforços", exact: true }).click();
+  const filter = page.getByRole("combobox", { name: "Barra em Esforços" });
+  await expect(filter.locator("option")).toHaveText([
+    "Todas as barras",
+    "[V1] Viga",
+    "[V2] Viga",
+  ]);
+  const names = page.getByRole("table").locator("tbody td:first-child");
+  await expect(names).toHaveText([
+    "[V1] Viga",
+    "[V1] Viga",
+    "[V1] Viga",
+    "[V2] Viga",
+    "[V2] Viga",
+    "[V2] Viga",
+  ]);
+  await filter.selectOption({ label: "[V2] Viga" });
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  for (const source of ["EL", "combination:C1"]) {
+    await page
+      .getByLabel("Caso, combinação ou envelope", { exact: true })
+      .selectOption(source);
+    await expect(filter).toHaveValue("V2");
+    await expect(names).toHaveText(["[V2] Viga", "[V2] Viga", "[V2] Viga"]);
+    const waiting = page.waitForEvent("download");
+    await page.getByRole("button", { name: "CSV", exact: true }).click();
+    const csv = await readFile((await (await waiting).path())!, "utf8");
+    const [header, ...rows] = csv.split("\n");
+    expect(header).toContain(
+      source === "EL"
+        ? '"Caso";"ID do caso"'
+        : '"Combinação";"ID da combinação"',
+    );
+    expect(rows.map((row) => row.split(";").slice(0, 2))).toEqual([
+      ['"[V2] Viga"', "0"],
+      ['"[V2] Viga"', "0.5"],
+      ['"[V2] Viga"', "1"],
+    ]);
+    expect(rows[1].split(";")[4]).toBe(source === "EL" ? "5.625" : "11.25");
+  }
+});
+
 test("envelope consulta os dois extremos por estação e exporta as combinações governantes", async ({
   page,
 }) => {
