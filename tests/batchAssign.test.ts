@@ -197,6 +197,46 @@ describe("atribuição em lote de seção, apoios e cargas (KS-11)", () => {
     ]);
   });
 
+  it("remove todas as parcelas da componente selecionada mesmo quando elas se anulam", () => {
+    const p = beamExample();
+    const pattern = p.loadPatterns[0];
+    pattern.nodal = [
+      { ...nodalLoad("A"), fx: 50, fz: 100 },
+      { ...nodalLoad("A"), fz: -100 },
+      { ...nodalLoad("B"), fz: 10 },
+    ];
+    pattern.uniform = [
+      { ...uniformLoad("V1"), qx: 30, qz: -2000 },
+      { ...uniformLoad("V1"), qz: 2000 },
+    ];
+    const selection: SelectedObject[] = [
+      { kind: "node", id: "A" },
+      { kind: "member", id: "V1" },
+    ];
+    const remove = {
+      nodalLoad: { operation: "remove", values: {}, removeKeys: ["fz"] },
+      uniformLoad: { operation: "remove", values: {}, removeKeys: ["qz"] },
+    } as const;
+    const before = structuredClone(p);
+    expect(previewBatchAssignment(p, selection, "G", remove)).toMatchObject({
+      ok: true,
+      hasChanges: true,
+      affectedNodes: 1,
+      affectedMembers: 1,
+    });
+    expect(p).toEqual(before);
+    applyBatchAssignment(p, selection, "G", remove);
+    expect(pattern.nodal).toEqual([
+      { ...nodalLoad("A"), fx: 50 },
+      { ...nodalLoad("B"), fz: 10 },
+    ]);
+    expect(pattern.uniform).toEqual([{ ...uniformLoad("V1"), qx: 30 }]);
+    expect(previewBatchAssignment(p, selection, "G", remove)).toMatchObject({
+      ok: true,
+      hasChanges: false,
+    });
+  });
+
   it("rejeita o lote inteiro antes de editar se a soma ou o número de registros excederem o limite", () => {
     const p = beamExample();
     const pat = p.loadPatterns[0];

@@ -293,21 +293,23 @@ function planLoads<K extends string, L extends Record<K, number>>(
       ? (edit.removeKeys ?? [])
       : keys.filter((k) => edit?.values[k] !== undefined);
   if (!edit || !touched.length || !objects.length) return { rows, changes };
-  const totals = selectedTotals(objects, rows, keys, idOf, empty);
-  for (const [id, total] of totals) {
+  const rowsById = new Map<string, L[]>(objects.map(({ id }) => [id, []]));
+  for (const row of rows) rowsById.get(idOf(row))?.push(row);
+  for (const [id, existing] of rowsById) {
     const updated = new Map<K, number>();
     for (const k of touched) {
+      if (edit.operation === "remove") {
+        if (existing.some((row) => row[k] !== 0)) updated.set(k, 0);
+        continue;
+      }
+      const total = existing.reduce((sum, row) => sum + row[k], 0);
       const value =
-        edit.operation === "remove"
-          ? 0
-          : edit.operation === "add"
-            ? total[k] + edit.values[k]!
-            : edit.values[k]!;
+        edit.operation === "add" ? total + edit.values[k]! : edit.values[k]!;
       if (!Number.isFinite(value))
         throw new Error(
           `O total de ${k.toUpperCase()} excede o intervalo numérico.`,
         );
-      if (value !== total[k]) updated.set(k, value);
+      if (value !== total) updated.set(k, value);
     }
     if (updated.size) changes.set(id, updated);
   }
