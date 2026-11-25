@@ -1,13 +1,63 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import {
   beamExample,
   free,
+  nodalLoad,
+  type Project,
   parseProject,
   serializeProject,
 } from "../../src/domain/model";
 import { exportOofem } from "../../src/solver/oofem";
 import { runDeck } from "../fixtures/solve-oofem";
+
+async function showAxialDiagram(
+  page: Page,
+  project: Project,
+  executable: string,
+) {
+  const { deck } = exportOofem(project, "EL");
+  const output = runDeck(deck, executable);
+  await page.evaluate(
+    ({ deck, output }) => {
+      let callback = 0;
+      Object.assign(window, {
+        isTauri: true,
+        __TAURI_INTERNALS__: {
+          transformCallback: () => ++callback,
+          invoke: async (
+            cmd: string,
+            args: {
+              deck: string;
+              runContext: Record<string, string>;
+              response: { onmessage: (payload: unknown) => void };
+            },
+          ) => {
+            if (cmd !== "start_oofem" || args.deck !== deck)
+              throw new Error("Entrada OOFEM divergente.");
+            args.response.onmessage({
+              output,
+              log: {
+                summary: {
+                  ...args.runContext,
+                  status: "completed",
+                  message: "OOFEM concluído.",
+                },
+                historyError: null,
+              },
+            });
+          },
+        },
+      });
+    },
+    { deck, output },
+  );
+  await page.getByRole("button", { name: "Análise", exact: true }).click();
+  await page.getByRole("button", { name: "Analisar", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  await page.getByLabel("Visualização dos resultados").selectOption("n");
+}
 
 test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", async ({
   page,
@@ -70,47 +120,7 @@ test("exibe i/j e a tríade nas duas vistas, inverte e grava a conectividade", a
   await expect(load).toContainText("0,63246 kN/m");
 
   if (process.env.OOFEM_BIN) {
-    const { deck } = exportOofem(project, "EL");
-    const output = runDeck(deck, process.env.OOFEM_BIN);
-    await page.evaluate(
-      ({ deck, output }) => {
-        let callback = 0;
-        Object.assign(window, {
-          isTauri: true,
-          __TAURI_INTERNALS__: {
-            transformCallback: () => ++callback,
-            invoke: async (
-              cmd: string,
-              args: {
-                deck: string;
-                runContext: Record<string, string>;
-                response: { onmessage: (payload: unknown) => void };
-              },
-            ) => {
-              if (cmd !== "start_oofem" || args.deck !== deck)
-                throw new Error("Entrada OOFEM divergente.");
-              args.response.onmessage({
-                output,
-                log: {
-                  summary: {
-                    ...args.runContext,
-                    status: "completed",
-                    message: "OOFEM concluído.",
-                  },
-                  historyError: null,
-                },
-              });
-            },
-          },
-        });
-      },
-      { deck, output },
-    );
-    await button("Análise").click();
-    await button("Analisar").click();
-    await expect(page.getByRole("status")).toContainText("Análise concluída");
-    await page.evaluate(() => Object.assign(window, { isTauri: false }));
-    await page.getByLabel("Visualização dos resultados").selectOption("n");
+    await showAxialDiagram(page, project, process.env.OOFEM_BIN);
     await expect(
       plan.getByRole("img", { name: /B1, i, N .* kN/ }),
     ).toBeVisible();
@@ -163,6 +173,17 @@ test("separa as marcas i e j de duas barras que compartilham o mesmo nó", async
 }) => {
   const p = beamExample();
   p.mode = "spatial";
+  p.nodes[0].restraints = {
+    ux: true,
+    uy: true,
+    uz: true,
+    rx: true,
+    ry: true,
+    rz: true,
+  };
+  p.nodes[1].restraints = free();
+  p.loadPatterns[0].uniform = [];
+  p.loadPatterns[0].nodal = [{ ...nodalLoad("C"), fx: 1800 }];
   p.nodes.push({
     ...p.nodes[1],
     id: "C",
@@ -211,4 +232,20 @@ test("separa as marcas i e j de duas barras que compartilham o mesmo nó", async
   }
   await checkJoint(planJoint("B1", "j"), planJoint("B2", "i"));
   await checkJoint(space.getByLabel("B1: j N2"), space.getByLabel("B2: i N2"));
+  if (process.env.OOFEM_BIN) {
+    const explorer = page.locator(".explorer");
+    await explorer.getByRole("button", { name: "B1", exact: true }).click();
+    await explorer
+      .getByRole("button", { name: "B2", exact: true })
+      .click({ modifiers: ["Control"] });
+    await showAxialDiagram(page, p, process.env.OOFEM_BIN);
+    await checkJoint(
+      plan
+        .getByRole("img", { name: "B1, j, N 1,8 kN", exact: true })
+        .getByText("j · 1,8 kN", { exact: true }),
+      plan
+        .getByRole("img", { name: "B2, i, N 1,8 kN", exact: true })
+        .getByText("i · 1,8 kN", { exact: true }),
+    );
+  }
 });
