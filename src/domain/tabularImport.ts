@@ -1,4 +1,4 @@
-import { distance, tolerance } from "./geometry";
+import { distance, memberLengthError } from "./geometry";
 import { DEFAULT_UNITS, parseUnitInput, type UnitPreferences } from "../units";
 import { connectionStations } from "./beamMesh";
 import { free, type Project } from "./model";
@@ -482,6 +482,11 @@ export function inspectTabularImport(
     }
 
     if (startNode && endNode) {
+      const lengthError = memberLengthError(
+        { id: idValue, name: nameValue },
+        startNode,
+        endNode,
+      );
       if (startNode.id === endNode.id) {
         errors.push({
           table: "members",
@@ -491,17 +496,13 @@ export function inspectTabularImport(
           reason: "Os nós inicial e final devem ser diferentes.",
         });
         rowValid = false;
-      } else if (
-        !Number.isFinite(distance(startNode, endNode)) ||
-        distance(startNode, endNode) < tolerance
-      ) {
+      } else if (lengthError) {
         errors.push({
           table: "members",
           line: row.line,
           column: "ID final",
           value: rawEnd,
-          reason:
-            "A barra teria comprimento nulo ou fora do intervalo numérico.",
+          reason: lengthError,
         });
         rowValid = false;
       }
@@ -576,11 +577,12 @@ export function inspectTabularImport(
       validBatchNodes.has(id),
     );
     if (!nodeId) continue;
-    const span = distance(
+    const lengthError = memberLengthError(
+      member,
       resolvedNodes.get(member.start)!,
       resolvedNodes.get(member.end)!,
     );
-    if (!Number.isFinite(span) || span < tolerance) {
+    if (lengthError) {
       const row = nodeRows.find(
         (row) => row.cells[nodeColumns.indexOf("id")]?.trim() === nodeId,
       )!;
@@ -589,7 +591,7 @@ export function inspectTabularImport(
         line: row.line,
         column: "Coordenadas",
         value: nodeId,
-        reason: `A posição produziria comprimento nulo ou inválido na barra ${member.name}.`,
+        reason: lengthError,
       });
     }
   }

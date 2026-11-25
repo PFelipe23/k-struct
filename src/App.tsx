@@ -55,7 +55,7 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, addSlab } from "./domain/editing";
+import { addMember, addSlab, inspectNodeCoordinateChanges } from "./domain/editing";
 import {
   onPlane,
   origin,
@@ -1884,10 +1884,13 @@ export default function App() {
           onClose={() => setLaunchDialog(null)}
           onApply={(changes) => {
             const problem = edit((project) => {
-              for (const node of project.nodes) {
-                const position = changes.get(node.id);
-                if (position) Object.assign(node, position);
-              }
+              const { nodes, issues } = inspectNodeCoordinateChanges(
+                project,
+                changes,
+              );
+              if (issues.length)
+                throw new Error(issues.map(({ message }) => message).join(" "));
+              project.nodes = nodes;
             });
             if (!problem)
               setMessage(

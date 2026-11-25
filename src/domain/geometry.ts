@@ -29,6 +29,21 @@ export const cross = (a: Point3, b: Point3): Point3 => ({
 });
 export const length = ({ x, y, z }: Point3) => Math.hypot(x, y, z);
 export const distance = (a: Point3, b: Point3) => length(subtract(a, b));
+export function memberLengthError(
+  member: { id: string; name: string },
+  a: Point3,
+  b: Point3,
+): string | null {
+  const span = distance(a, b);
+  const label = `A barra ${member.name} (${member.id})`;
+  if (!Number.isFinite(span))
+    return `${label} teria comprimento fora do intervalo numérico.`;
+  if (span === 0) return `${label} teria comprimento nulo.`;
+  if (span < tolerance)
+    return `${label} teria comprimento inferior à tolerância de ${tolerance.toLocaleString("pt-BR", { maximumFractionDigits: 6 })} m.`;
+  return null;
+}
+
 export const interpolate = (a: Point3, b: Point3, t: number) =>
   add(a, scale(subtract(b, a), t));
 

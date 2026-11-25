@@ -1,3 +1,4 @@
+import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
   add,
@@ -6,6 +7,7 @@ import {
   dot,
   interiorParameter,
   length,
+  memberLengthError,
   scale,
   subtract,
   tolerance,
@@ -20,6 +22,39 @@ import {
   type Project,
   type Slab,
 } from "./model";
+
+export function inspectNodeCoordinateChanges(
+  project: Project,
+  changes: ReadonlyMap<string, Partial<Point3>>,
+) {
+  const issues: { message: string; nodeIds: string[] }[] = [];
+  if (!changes.size) return { nodes: project.nodes, issues };
+  const nodes = project.nodes.map((node) =>
+    changes.has(node.id) ? { ...node, ...changes.get(node.id) } : node,
+  );
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const member of project.members) {
+    const moved = [member.start, member.end].filter((id) => changes.has(id));
+    if (!moved.length) continue;
+    const message = memberLengthError(
+      member,
+      byId.get(member.start)!,
+      byId.get(member.end)!,
+    );
+    if (message) issues.push({ message, nodeIds: moved });
+  }
+  if (!issues.length && project.meshConnections.length) {
+    try {
+      connectionStations({ ...project, nodes });
+    } catch (error) {
+      issues.push({
+        message: error instanceof Error ? error.message : String(error),
+        nodeIds: [],
+      });
+    }
+  }
+  return { nodes, issues };
+}
 
 export function addMember(
   p: Project,
