@@ -53,6 +53,10 @@ No espaço, x local vai do início ao fim. A projeção de Z global no plano nor
 
 Os esforços espaciais `N, Vy, Vz, Mx, My, Mz` são resultantes na face de corte com normal +x local. Usa-se o oposto da ação na extremidade inicial e o valor da ação na final. N positivo representa tração. As reações e deslocamentos são globais. Os diagramas 2D mostram a ordenada do componente escolhido perpendicular à barra no plano em tela.
 
+O adaptador, o inspetor e as vistas usam `beamAxes` de `src/domain/geometry.ts`. No plano, y local é +Y global. Na perspectiva, pontos e vetores passam de (X, Y, Z) para (X, Z, −Y), preservando a orientação da tríade. A projeção de uma carga global nos eixos locais é o produto escalar com cada vetor unitário.
+
+Ao inverter i e j em XYZ, o programa troca o sinal da rotação em torno de x e mantém z local na mesma direção global. x e y locais mudam de sentido. A nova face +x é a antiga face −x. Ao comparar na mesma posição física, N, Vy, Mx e My conservam o sinal, enquanto Vz e Mz o invertem. Em XZ, x e z locais mudam de sentido e y continua em +Y. Com a convenção de `Beam2d`, N e V conservam o sinal e M o inverte. Em ambos, `x/L` passa a `1 − x/L` e os lados i/j de uma seção interna se trocam. A incidência da malha permanece vinculada ao nó físico. As cargas uniformes continuam armazenadas nos eixos globais.
+
 As tabelas apresentam estações da malha. Deformadas e diagramas são linhas interpoladas entre estas estações, sem pretensão de avaliar extremos exatos entre elas.
 
 Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interface exibe pZ em kN/m², UZ em mm e os momentos Mx e My em kN·m/m. Os eixos locais do painel coincidem com X e Y globais. Mx positivo representa tração na face inferior na direção X, e My positivo representa tração na face inferior na direção Y. Os mapas usam a média por elemento. A consulta central usa os deslocamentos nodais e os momentos recuperados nos vértices.

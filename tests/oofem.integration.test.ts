@@ -16,7 +16,11 @@ import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
 import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
 import { planTransform } from "../src/domain/transform";
-import { addMember, connectMeshJoint } from "../src/domain/editing";
+import {
+  addMember,
+  connectMeshJoint,
+  reverseMember,
+} from "../src/domain/editing";
 import { projectV8, projectV9, rectangle } from "./fixtures/project-v8";
 import {
   assignMaterial,
@@ -744,6 +748,112 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
   it("pórtico espacial assimétrico em dois pavimentos concorda com a rigidez direta independente", () => {
     const model = spatialBenchmark();
     expect(spatialBenchmarkDifferences(model, solve(model))).toEqual([]);
+  });
+  it("KS-19 · inverter a diagonal girada preserva a resposta global e transforma a face de corte", () => {
+    const p = spatialBenchmark();
+    const before = solve(p);
+    reverseMember(p, "B5");
+    const after = solve(p);
+    for (const original of before.reactions) {
+      const reversed = after.reactions.find(
+        ({ nodeId }) => nodeId === original.nodeId,
+      )!;
+      for (const key of ["fx", "fy", "fz", "mx", "my", "mz"] as const)
+        expect(Math.abs(reversed[key] - original[key])).toBeLessThan(
+          0.01 + 6e-5 * Math.abs(original[key]),
+        );
+    }
+    for (const node of p.nodes) {
+      const original = before.displacements[node.id];
+      for (const key of ["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+        expect(after.displacements[node.id][key]).toBeCloseTo(original[key], 9);
+    }
+    expect(after.members.B5).toHaveLength(before.members.B5.length);
+    for (const [index, original] of before.members.B5.entries()) {
+      const reversed = after.members.B5.at(-1 - index)!;
+      expect(reversed.t).toBeCloseTo(1 - original.t, 12);
+      for (const [key, sign] of [
+        ["n", 1],
+        ["vy", 1],
+        ["vz", -1],
+        ["mx", 1],
+        ["my", 1],
+        ["mz", -1],
+      ] as const) {
+        const value = original[key];
+        expect(Math.abs(reversed[key] - sign * value)).toBeLessThan(
+          0.01 + 6e-5 * Math.abs(value),
+        );
+      }
+    }
+  });
+
+  it("KS-19 · muda o lado da seção interna e mantém a tração positiva nos dois modos", () => {
+    const joint = internalJointBeam();
+    const before = solve(joint).members.V1;
+    reverseMember(joint, "V1");
+    const after = solve(joint).members.V1;
+    for (const old of before.filter(({ side }) => side)) {
+      const newSide = old.side === "left" ? "right" : "left";
+      const reversed = after.find((station) => station.side === newSide)!;
+      expect(reversed.t).toBeCloseTo(1 - old.t, 12);
+      expect(reversed.v).toBeCloseTo(old.v, 2);
+      expect(reversed.m).toBeCloseTo(-old.m, 2);
+    }
+    for (const mode of ["planar", "spatial"] as const) {
+      const p = beamExample();
+      p.mode = mode;
+      p.nodes[0].restraints = {
+        ux: true,
+        uy: mode === "spatial",
+        uz: true,
+        rx: mode === "spatial",
+        ry: true,
+        rz: mode === "spatial",
+      };
+      p.nodes[1].restraints = free();
+      p.loadPatterns[0].uniform = [];
+      p.loadPatterns[0].nodal = [{ ...nodalLoad("B"), fx: 1800 }];
+      for (let orientation = 0; orientation < 2; orientation++) {
+        const result = solve(p);
+        for (const { n } of result.members.V1) expect(n).toBeCloseTo(1800, 2);
+        expect(result.reactions[0].fx).toBeCloseTo(-1800, 2);
+        reverseMember(p, "V1");
+      }
+    }
+  });
+
+  it("KS-19 · girar 90° troca as inércias da flexão biaxial do balanço", () => {
+    const p = beamExample();
+    p.mode = "spatial";
+    p.nodes[0].restraints = {
+      ux: true,
+      uy: true,
+      uz: true,
+      rx: true,
+      ry: true,
+      rz: true,
+    };
+    p.nodes[1].restraints = free();
+    p.loadPatterns[0].uniform = [];
+    p.loadPatterns[0].nodal = [{ ...nodalLoad("B"), fy: 1200, fz: -2400 }];
+    const span = p.nodes[1].x;
+    const { width, height } = rectangle(p.sections[0]);
+    const iy = (width * height ** 3) / 12;
+    const iz = (height * width ** 3) / 12;
+    const deflection = (force: number, inertia: number) =>
+      (force * span ** 3) / (3 * p.materials[0].E * inertia);
+    const aligned = solve(p).displacements.B;
+    expect(aligned.uy).toBeCloseTo(deflection(1200, iz), 8);
+    expect(aligned.uz).toBeCloseTo(deflection(-2400, iy), 8);
+    p.members[0].roll = 90;
+    const rotated = solve(p).displacements.B;
+    expect(rotated.uy).toBeCloseTo(deflection(1200, iy), 8);
+    expect(rotated.uz).toBeCloseTo(deflection(-2400, iz), 8);
+    reverseMember(p, "V1");
+    const reversed = solve(p).displacements.B;
+    expect(reversed.uy).toBeCloseTo(rotated.uy, 9);
+    expect(reversed.uz).toBeCloseTo(rotated.uz, 9);
   });
   it("envelope de pórtico em L mantém os esforços simultâneos de cada combinação governante", async () => {
     const project = parseProject(envelopeExample);

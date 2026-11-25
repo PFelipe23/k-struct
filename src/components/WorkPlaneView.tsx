@@ -33,6 +33,8 @@ import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
+import MemberAxes2D from "./MemberAxes2D";
+import { forceLabels, formatResult } from "./resultFormatting";
 
 export type PlaneCamera = {
   projectId: string;
@@ -47,6 +49,7 @@ export type Display = "model" | "deformed" | MemberForceComponent;
 type UV = { u: number; v: number };
 interface Props {
   project: Project;
+  showMemberAxes: boolean;
   plane: WorkPlane;
   orthogonal: boolean;
   selection: SelectedObject[];
@@ -84,6 +87,7 @@ export default function WorkPlaneView({
   layers,
   setLayers,
   project,
+  showMemberAxes,
   plane,
   orthogonal,
   selection,
@@ -133,6 +137,7 @@ export default function WorkPlaneView({
     (m) => nodeMap.has(m.start) && nodeMap.has(m.end),
   );
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
+  const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
   const slab =
     plane.kind === "XY"
@@ -791,6 +796,50 @@ export default function WorkPlaneView({
                   })}
                 </g>
               )}
+              {showMemberAxes &&
+                (!hasMemberSelection || active) &&
+                length >= tolerance && (
+                  <MemberAxes2D
+                    member={m}
+                    a={a}
+                    b={b}
+                    mode={project.mode}
+                    plane={plane.kind}
+                    sx={sx}
+                    sy={sy}
+                  />
+                )}
+              {showMemberAxes &&
+                active &&
+                diagram &&
+                display !== "deformed" &&
+                display !== "model" &&
+                stations?.length && (
+                  <g className="member-axes diagram-ends">
+                    {(
+                      [
+                        ["i", stations[0]],
+                        ["j", stations.at(-1)!],
+                      ] as const
+                    ).map(([end, station]) => {
+                      const value = station[display];
+                      const [x, y] = forcePoint(station.t, value);
+                      const { symbol, unit } = forceLabels[display];
+                      return (
+                        <g
+                          key={end}
+                          role="img"
+                          aria-label={`${m.name}, ${end}, ${symbol} ${formatResult(value / 1000)} ${unit}`}
+                        >
+                          <circle cx={x} cy={y} r={3} />
+                          <text x={x} y={y + 13}>
+                            {end} · {formatResult(value / 1000)}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                )}
             </g>
           );
         })}

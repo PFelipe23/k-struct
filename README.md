@@ -81,6 +81,10 @@ No modo **Selecionar** das vistas 2D, arraste da esquerda para a direita para co
 
 Em **Exibição → Tema**, escolha **Claro** ou **Escuro**. A primeira abertura usa o tema escuro. A escolha é guardada nas preferências locais e vale para a interface e as duas vistas, inclusive durante a consulta de resultados.
 
+Em **Exibição → Eixos locais**, mostre a seta x de i para j e a tríade nas vistas. Selecione uma ou mais barras para mostrar os eixos apenas dessa seleção. Em 2D, ⊙ indica um eixo que aponta para quem observa e ⊗ indica o sentido oposto. No diagrama de esforços, a barra selecionada mostra os valores em i (`x/L = 0`) e j (`x/L = 1`).
+
+No inspetor da barra, **Inverter i/j** troca o início e o fim, mantendo o ID, a seção na mesma orientação física e as cargas globais. Confira o novo sentido e a projeção local do padrão de carga ativo. Em XYZ, edite **Rotação em torno de x local** para girar fisicamente a seção. Em XZ, o giro da seção fica fixo em 0°. A inversão e a edição do ângulo entram no histórico e exigem nova análise.
+
 Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou **Pórtico regular** para definir vãos e alturas dos pavimentos. No modelo espacial, informe também os vãos em Y. Confira as quantidades de nós e barras na prévia e clique em **Gerar projeto**. Os nós começam livres e as cargas podem ser lançadas no editor.
 
 ### Materiais do projeto

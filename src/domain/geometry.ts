@@ -67,9 +67,20 @@ export function planePoint(
   return { ...origin, [a]: u, [b]: v, [c]: offset };
 }
 
-export function beamAxes(a: Point3, b: Point3, roll: number) {
+export function beamAxes(
+  a: Point3,
+  b: Point3,
+  roll: number,
+  mode: "planar" | "spatial" = "spatial",
+) {
   const unit = (v: Point3) => scale(v, 1 / length(v));
-  const x = unit(subtract(b, a));
+  const direction = subtract(b, a);
+  if (mode === "planar") {
+    const x = unit({ ...direction, y: 0 });
+    const y = { ...origin, y: 1 };
+    return [x, y, cross(x, y)] as const;
+  }
+  const x = unit(direction);
   const up =
     Math.abs(x.z) > 1 - 1e-8 ? { ...origin, x: 1 } : { ...origin, z: 1 };
   const y0 = unit(cross(up, x));
@@ -77,4 +88,11 @@ export function beamAxes(a: Point3, b: Point3, roll: number) {
   const angle = (roll * Math.PI) / 180;
   const z = add(scale(z0, Math.cos(angle)), scale(y0, -Math.sin(angle)));
   return [x, cross(z, x), z] as const;
+}
+
+export function localComponents(
+  vector: Point3,
+  [x, y, z]: ReturnType<typeof beamAxes>,
+): Point3 {
+  return { x: dot(vector, x), y: dot(vector, y), z: dot(vector, z) };
 }

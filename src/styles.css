@@ -410,6 +410,10 @@ button.primary {
 .theme-group select {
   min-width: 112px;
 }
+.member-axes-toggle[aria-pressed="true"] {
+  color: var(--selected-text);
+  background: var(--selected-bg);
+}
 .example-button {
   height: 52px;
   text-align: left;
@@ -802,6 +806,39 @@ button.primary {
   font-size: 10px;
   fill: var(--muted);
   pointer-events: none;
+}
+.member-axis-x { --member-axis-color: var(--axis-x); }
+.member-axis-y { --member-axis-color: var(--axis-y); }
+.member-axis-z { --member-axis-color: var(--axis-z); }
+.member-axes { pointer-events: none; }
+.member-axes path {
+  fill: none;
+  stroke: var(--member-axis-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.member-axes .member-axis-halo {
+  stroke: var(--surface-view);
+  stroke-width: 4.5px;
+}
+.member-axes text {
+  fill: var(--member-axis-color, var(--text));
+  stroke: var(--surface-view);
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.diagram-ends {
+  --member-axis-color: var(--geometry-result);
+}
+.diagram-ends circle {
+  fill: var(--surface-view);
+  stroke: var(--member-axis-color);
+  stroke-width: 1.5px;
 }
 .node-label {
   font-size: 10px;
@@ -1667,6 +1704,15 @@ button.primary {
   font-size: 9px;
 }
 .scene-label.selected { color: var(--geometry-selected); }
+.scene-axis-label {
+  color: var(--member-axis-color, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+}
+.scene-axis-label.member-axis-x { margin-left: 4px; }
+.scene-axis-label.member-axis-y { margin: 4px 0 0 5px; }
+.scene-axis-label.member-axis-z { margin: -4px 0 0 -11px; }
+.scene-member-end { margin: -4px -4px 0 0; }
 @media (max-height: 800px) {
   .work-area:has(.viewports.triple) .results { height: 110px; }
   .viewports.triple .view-foot { height: 19px; min-height: 19px; }

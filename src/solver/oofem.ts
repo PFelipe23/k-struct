@@ -3,9 +3,9 @@ import {
   add,
   cross,
   distance,
-  dot,
   interpolate,
   beamAxes,
+  localComponents,
   origin,
   scale,
   subtract,
@@ -120,7 +120,6 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const elements: MeshElement[] = [];
   const modelNodes = new Map(nodes.map((n) => [n.objectId!, n]));
   const nodeNumber = (id: string) => modelNodes.get(id)!.number;
-  const members = new Map(p.members.map((m) => [m.id, m]));
   const axes = new Map<string, ReturnType<typeof beamAxes>>();
   const sectionElements = new Map(
     p.sections.map((s) => [s.id, [] as number[]]),
@@ -130,7 +129,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   for (const m of p.members) {
     const a = modelNodes.get(m.start)!,
       b = modelNodes.get(m.end)!;
-    if (spatial) axes.set(m.id, beamAxes(a, b, m.roll));
+    axes.set(m.id, beamAxes(a, b, m.roll, p.mode));
     const ids: number[] = [];
     let start = nodeNumber(m.start);
     const stations = layout.get(m.id)!;
@@ -197,17 +196,11 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const ids = memberElements
         .get(l.memberId)!
         .flatMap((number) => [number, 1]);
-      const m = members.get(l.memberId)!;
-      const a = modelNodes.get(m.start)!,
-        b = modelNodes.get(m.end)!;
-      const span = distance(a, b);
-      const c = (b.x - a.x) / span,
-        s = (b.z - a.z) / span;
-      // Model loads remain global; both beam elements receive local components.
-      const q = { x: l.qx, y: l.qy, z: l.qz };
-      const values = spatial
-        ? [...axes.get(l.memberId)!.map((axis) => dot(axis, q)), 0, 0, 0]
-        : [c * l.qx + s * l.qz, -s * l.qx + c * l.qz, 0];
+      const { x, y, z } = localComponents(
+        { x: l.qx, y: l.qy, z: l.qz },
+        axes.get(l.memberId)!,
+      );
+      const values = spatial ? [x, y, z, 0, 0, 0] : [x, z, 0];
       bcs.push(
         `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${scaleLoad(values).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
       );

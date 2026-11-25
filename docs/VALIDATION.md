@@ -221,3 +221,18 @@ O KStruct limita a aproximação de J a b/tf ≥ 10 e hw/tw ≥ 10 e exige tw < 
 | I | +2,281279 | −0,544667 | +4,622825 |
 
 O teste roda o OOFEM 3.0 com oito elementos Beam3d para cada seção, primeiro a 0° e depois a 90°. Um quarto de volta troca Iy e Iz nas duas referências de flexão. A tolerância relativa para cada deslocamento e rotação é 2 × 10⁻⁶. O balanço retangular da v9 passa pela migração antes de verificar a flexão biaxial, a força normal, a torção e as reações. Os testes estão em `tests/sections.test.ts` e `tests/oofem.integration.test.ts`.
+
+## KS-19 · inversão de i/j e rotação da seção
+
+No pórtico espacial de referência, a diagonal B5 tem seção de 15 × 20 cm, ângulo de 27° e carga uniforme nas três direções globais. Resolva o mesmo caso antes e depois de inverter i/j. As seis reações e os seis deslocamentos generalizados globais devem coincidir. Para cada estação original, use `1 − x/L` e transforme a base e a face conforme a [convenção de sinais](ARCHITECTURE.md#unidades-e-sinais). A comparação usa 5 × 10⁻¹⁰ m ou rad para deslocamentos e 0,01 N ou N·m mais 6 × 10⁻⁵ do valor de referência para forças e momentos impressos.
+
+Um balanço espacial horizontal de 6 m, com E = 200 GPa e a mesma seção, recebe Fy = +1,2 kN e Fz = −2,4 kN na ponta. Use $I_y = bh^3/12$, $I_z = hb^3/12$ e a referência de Euler–Bernoulli $u = P L^3/(3 E I)$. A rotação a 90° troca as inércias usadas em cada direção. Os deslocamentos conferem com tolerância de 5 × 10⁻⁹ m.
+
+| Orientação da seção | UY na ponta | UZ na ponta |
+| --- | ---: | ---: |
+| 0° | +7,68 mm | −8,64 mm |
+| 90° | +4,32 mm | −15,36 mm |
+
+Depois de inverter i/j com a seção já a 90°, os deslocamentos continuam iguais aos da última linha. Ensaios adicionais conferem N = +1,8 kN nas duas orientações em XZ e XYZ e a troca dos lados de uma seção interna carregada.
+
+Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check` para repetir os ensaios e `OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-axes.spec.ts` para conferir a exibição, a revisão dos resultados, o histórico e a reabertura.
