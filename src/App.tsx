@@ -65,6 +65,7 @@ import {
   type WorkPlane,
 } from "./domain/geometry";
 import { historyReducer } from "./domain/history";
+import { applyTabularImport } from "./domain/tabularImport";
 import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
 import { UnitsDialog, useUnits } from "./components/Units";
 import { formatQuantity } from "./units";
@@ -1891,6 +1892,16 @@ export default function App() {
             if (!problem)
               setMessage(
                 "Coordenadas atualizadas. Clique em Analisar para calcular o caso.",
+              );
+            return problem;
+          }}
+          onImportTabular={(plan) => {
+            const problem = edit((project) =>
+              applyTabularImport(project, plan),
+            );
+            if (!problem)
+              setMessage(
+                `Importação concluída: ${plan.counts.nodesCreated} nós criados, ${plan.counts.nodesUpdated} atualizados · ${plan.counts.membersCreated} barras criadas, ${plan.counts.membersUpdated} atualizadas.`,
               );
             return problem;
           }}

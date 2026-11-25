@@ -1569,6 +1569,87 @@ button.primary {
   margin-top: 4px;
   color: var(--danger);
 }
+.node-editor-wide {
+  width: min(760px, calc(100vw - 24px));
+}
+.tabular-paste-panel {
+  display: grid;
+  gap: 10px;
+}
+.tabular-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.tabular-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.tabular-examples {
+  display: grid;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.tabular-examples code {
+  color: var(--text-strong);
+  background: var(--surface-input);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.tabular-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.tabular-inputs label {
+  display: grid;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.tabular-inputs textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--surface-input);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+.tabular-preview {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--surface-input);
+  display: grid;
+  gap: 8px;
+}
+.tabular-preview h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+.tabular-counts {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text);
+}
+@media (max-width: 720px) {
+  .tabular-inputs {
+    grid-template-columns: 1fr;
+  }
+}
 .load-definition-fields {
   display: grid;
   gap: 12px;
