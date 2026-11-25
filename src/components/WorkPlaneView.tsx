@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useId,
+  useLayoutEffect,
   type RefObject,
   useRef,
   useState,
@@ -178,14 +179,21 @@ export default function WorkPlaneView({
     [tool, slabId, onSelect],
   );
 
-  useEffect(() => {
-    const resize = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      setSize({ width, height });
-    });
-    if (ref.current) resize.observe(ref.current);
-    return () => resize.disconnect();
-  }, []);
+  // A barra de coordenadas muda a altura do SVG ao ativar uma ferramenta.
+  // Atualize a projeção antes de pintar a grade ou receber o primeiro clique.
+  useLayoutEffect(() => {
+    const svg = ref.current!;
+    const measure = ({ width, height }: DOMRectReadOnly) =>
+      setSize(previous =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height },
+      );
+    measure(svg.getBoundingClientRect());
+    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect));
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, [tool, plane.kind, plane.offset, units.length, relativeError]);
 
   const cameraBeforeFit = useRef(camera);
   const fit = () => {
@@ -218,7 +226,7 @@ export default function WorkPlaneView({
       ),
     });
   };
-  useEffect(() => {
+  useLayoutEffect(() => {
     cameraBeforeFit.current = camera;
     const previous = savedCamera.current;
     if (

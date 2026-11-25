@@ -20,7 +20,7 @@ async function clickGrid(
   const drawing = page.getByRole("application", {
     name: `Área de lançamento ${kind}`,
   });
-  const position = await drawing.evaluate(
+  const readPosition = () => drawing.evaluate(
     (svg, { axisU, axisV, u, v, rise }) => {
       const line = (axis: string, value: number) =>
         svg.querySelector<SVGLineElement>(
@@ -36,7 +36,19 @@ async function clickGrid(
     },
     { axisU, axisV, u, v, rise: options.rise },
   );
-  await drawing.click({ position, modifiers: options.shift ? ["Shift"] : [] });
+  const modifiers: "Shift"[] = options.shift ? ["Shift"] : [];
+  let position = await readPosition();
+  await expect.poll(async () => {
+    position = await readPosition();
+    await drawing.hover({ position, modifiers });
+    return drawing.locator(".snap-indicator").evaluateAll(markers =>
+      markers.map(marker => [
+        Number(marker.getAttribute("data-snap-u")),
+        Number(marker.getAttribute("data-snap-v")),
+      ]),
+    );
+  }, {message: `Captura da referência (${u}, ${v}) no plano ${kind}`}).toEqual([[u, v]]);
+  await drawing.click({ position, modifiers });
 }
 
 test("pórtico espacial assimétrico lançado do vazio, salvo e conferido com a referência", async ({
