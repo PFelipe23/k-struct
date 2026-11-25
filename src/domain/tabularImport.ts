@@ -272,7 +272,12 @@ export function inspectTabularImport(
       : ["x", "z"];
     for (const axis of coordCols) {
       const rawCoord = byCol.get(axis) ?? "";
-      const parsed = parseUnitInput(rawCoord.replace(/−/g, "-"), "length", units, existingNodes.get(idValue)?.[axis]);
+      const parsed = parseUnitInput(
+        rawCoord.replace(/−/g, "-"),
+        "length",
+        units,
+        existingNodes.get(idValue)?.[axis],
+      );
       if (parsed === null) {
         errors.push({
           table: "nodes",
@@ -383,13 +388,11 @@ export function inspectTabularImport(
   }
 
   const seenMemberIds = new Set<string>();
-  const updatedIds = new Set(memberRows.slice(memberStartIndex).map(row => row.cells[memberColumns.indexOf("id")]?.trim()));
-  const pairKey = (start: string, end: string) => [start, end].sort().join("|");
-  const occupiedPairs = new Set(project.members.filter(m => !updatedIds.has(m.id)).map(m => pairKey(m.start, m.end)));
-  const batchMemberMap = new Map<
+  const memberLines = new Map<string, number>();
+  const finalMembers = new Map<
     string,
     { id: string; start: string; end: string }
-  >();
+  >(existingMembers);
   const memberActions: TabularMemberAction[] = [];
 
   for (let i = memberStartIndex; i < memberRows.length; i++) {
@@ -488,7 +491,10 @@ export function inspectTabularImport(
           reason: "Os nós inicial e final devem ser diferentes.",
         });
         rowValid = false;
-      } else if (!Number.isFinite(distance(startNode, endNode)) || distance(startNode, endNode) < tolerance) {
+      } else if (
+        !Number.isFinite(distance(startNode, endNode)) ||
+        distance(startNode, endNode) < tolerance
+      ) {
         errors.push({
           table: "members",
           line: row.line,
@@ -514,22 +520,8 @@ export function inspectTabularImport(
     }
 
     if (rowValid && startNode && endNode && section) {
-      const key = pairKey(startNode.id, endNode.id);
-      if (occupiedPairs.has(key)) {
-        errors.push({
-          table: "members",
-          line: row.line,
-          column: "ID final",
-          value: rawEnd,
-          reason: `Já existe uma barra ligando ${startNode.id} a ${endNode.id}.`,
-        });
-        rowValid = false;
-      }
-    }
-
-    if (rowValid && startNode && endNode && section) {
-      occupiedPairs.add(pairKey(startNode.id, endNode.id));
-      batchMemberMap.set(idValue, {
+      memberLines.set(idValue, row.line);
+      finalMembers.set(idValue, {
         id: idValue,
         start: startNode.id,
         end: endNode.id,
@@ -554,29 +546,60 @@ export function inspectTabularImport(
     }
   }
 
-  // Mover um nó também altera as barras incidentes que não aparecem no TSV.
-  for (const member of project.members) {
-    if (updatedIds.has(member.id)) continue;
-    const nodeId = [member.start, member.end].find(id => validBatchNodes.has(id));
-    if (!nodeId) continue;
-    const span = distance(resolvedNodes.get(member.start)!, resolvedNodes.get(member.end)!);
-    if (!Number.isFinite(span) || span < tolerance) {
-      const row = nodeRows.find(row => row.cells[nodeColumns.indexOf("id")]?.trim() === nodeId)!;
-      errors.push({ table: "nodes", line: row.line, column: "Coordenadas", value: nodeId,
-        reason: `A posição produziria comprimento nulo ou inválido na barra ${member.name}.` });
+  // Avalie a configuração final: a ordem da planilha não define a conectividade.
+  const pairKey = (start: string, end: string) => [start, end].sort().join("|");
+  const countsByPair = new Map<string, number>();
+  for (const member of finalMembers.values()) {
+    const key = pairKey(member.start, member.end);
+    countsByPair.set(key, (countsByPair.get(key) ?? 0) + 1);
+  }
+  for (const member of memberActions) {
+    const key = pairKey(member.start, member.end);
+    const original = existingMembers.get(member.id);
+    if (
+      countsByPair.get(key)! > 1 &&
+      (!original || pairKey(original.start, original.end) !== key)
+    ) {
+      errors.push({
+        table: "members",
+        line: memberLines.get(member.id)!,
+        column: "ID final",
+        value: member.end,
+        reason: `Já existe uma barra ligando ${member.start} a ${member.end}.`,
+      });
     }
   }
-  const finalMemberIds = new Set([
-    ...project.members.map((m) => m.id),
-    ...batchMemberMap.keys(),
-  ]);
-  if (finalMemberIds.size > 1000) {
+  // Mover um nó também altera as barras incidentes que não aparecem no TSV.
+  for (const member of project.members) {
+    if (memberLines.has(member.id)) continue;
+    const nodeId = [member.start, member.end].find((id) =>
+      validBatchNodes.has(id),
+    );
+    if (!nodeId) continue;
+    const span = distance(
+      resolvedNodes.get(member.start)!,
+      resolvedNodes.get(member.end)!,
+    );
+    if (!Number.isFinite(span) || span < tolerance) {
+      const row = nodeRows.find(
+        (row) => row.cells[nodeColumns.indexOf("id")]?.trim() === nodeId,
+      )!;
+      errors.push({
+        table: "nodes",
+        line: row.line,
+        column: "Coordenadas",
+        value: nodeId,
+        reason: `A posição produziria comprimento nulo ou inválido na barra ${member.name}.`,
+      });
+    }
+  }
+  if (finalMembers.size > 1000) {
     errors.push({
       table: "members",
       line: 1,
       column: "Lote",
-      value: String(finalMemberIds.size),
-      reason: `O total de barras (${finalMemberIds.size}) excede o limite de 1.000 barras do projeto.`,
+      value: String(finalMembers.size),
+      reason: `O total de barras (${finalMembers.size}) excede o limite de 1.000 barras do projeto.`,
     });
   }
 
@@ -601,11 +624,11 @@ export function inspectTabularImport(
     0;
 
   const plan = {
-      unit,
-      nodes: nodeActions,
-      members: memberActions,
-      counts,
-      hasChanges,
+    unit,
+    nodes: nodeActions,
+    members: memberActions,
+    counts,
+    hasChanges,
   };
   if (hasChanges && project.meshConnections.length) {
     const candidate = structuredClone(project);
@@ -613,7 +636,18 @@ export function inspectTabularImport(
     try {
       connectionStations(candidate);
     } catch (error) {
-      return { ok: false, errors: [{ table: nodesTsv.trim() ? "nodes" : "members", line: 1, column: "Lote", value: "Conexões da malha", reason: (error as Error).message }] };
+      return {
+        ok: false,
+        errors: [
+          {
+            table: nodesTsv.trim() ? "nodes" : "members",
+            line: 1,
+            column: "Lote",
+            value: "Conexões da malha",
+            reason: (error as Error).message,
+          },
+        ],
+      };
     }
   }
   return { ok: true, plan };

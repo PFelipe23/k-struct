@@ -137,4 +137,68 @@ describe("importação tabular TSV de nós e barras (KS-16)", () => {
     });
     expect(parseProject(serializeProject(project))).toEqual(project);
   });
+  it("valida a topologia final e aceita trocar extremidades em qualquer ordem de linhas", () => {
+    const p = createProject("planar");
+    const seed = inspectTabularImport(p, {
+      unit: "m",
+      nodesTsv: "A\tA\t0\t0\nB\tB\t2\t0\nC\tC\t4\t0",
+      membersTsv: "M1\tM1\tA\tB\trect\nM2\tM2\tB\tC\trect",
+    });
+    if (!seed.ok) throw Error("Falha ao preparar o modelo");
+    applyTabularImport(p, seed.plan);
+    const before = serializeProject(p);
+    const collapse = inspectTabularImport(p, {
+      unit: "cm",
+      nodesTsv: "B\tB\t0\t0",
+      membersTsv: "",
+    });
+    expect(collapse).toMatchObject({
+      ok: false,
+      errors: [expect.objectContaining({ table: "nodes", line: 1 })],
+    });
+    const swaps = ["M1\tM1\tB\tC\trect", "M2\tM2\tA\tB\trect"];
+    for (const order of [swaps, [...swaps].reverse()]) {
+      expect(
+        inspectTabularImport(p, {
+          unit: "m",
+          nodesTsv: "",
+          membersTsv: order.join("\n"),
+        }).ok,
+      ).toBe(true);
+    }
+    expect(serializeProject(p)).toBe(before);
+  });
+  it("preserva barras coincidentes existentes e antecipa a invalidação de uma conexão interna", () => {
+    const p = createProject("planar");
+    const input = {
+      unit: "m" as const,
+      nodesTsv: "A\tA\t0\t0\nB\tB\t6\t0\nC\tC\t3\t0",
+      membersTsv: "M1\tM1\tA\tB\trect",
+    };
+    const seed = inspectTabularImport(p, input);
+    if (!seed.ok) throw Error("Falha ao preparar o modelo");
+    applyTabularImport(p, seed.plan);
+    p.members.push({ ...p.members[0], id: "M2", name: "M2" });
+    p.meshConnections.push({ memberId: "M1", nodeId: "C" });
+    expect(inspectTabularImport(p, input)).toMatchObject({
+      ok: true,
+      plan: { hasChanges: false },
+    });
+    expect(
+      inspectTabularImport(p, { ...input, nodesTsv: "C\tC\t3\t1" }),
+    ).toMatchObject({
+      ok: false,
+      errors: [
+        expect.objectContaining({
+          reason: expect.stringContaining("interior"),
+        }),
+      ],
+    });
+    expect(
+      inspectTabularImport(p, { ...input, membersTsv: "M3\tM3\tA\tB\trect" }),
+    ).toMatchObject({
+      ok: false,
+      errors: [expect.objectContaining({ value: "B" })],
+    });
+  });
 });

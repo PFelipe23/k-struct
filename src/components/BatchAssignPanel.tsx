@@ -19,7 +19,12 @@ import {
 } from "../domain/batchAssign";
 import type { Project, SelectedObject } from "../domain/model";
 import { useUnits } from "./Units";
-import { formatQuantity, parseUnitInput, type UnitPreferences, type UnitQuantity } from "../units";
+import {
+  formatQuantity,
+  parseUnitInput,
+  type UnitPreferences,
+  type UnitQuantity,
+} from "../units";
 import { coordinates } from "../domain/geometry";
 import { supportBasis, type SupportFrame } from "../domain/supports";
 import { formatResult } from "./resultFormatting";
@@ -127,7 +132,11 @@ export default function BatchAssignPanel({
     for (const key of activeNodalKeys) {
       const raw = nodalDraft[key] ?? "";
       if (!raw.trim()) continue;
-      const parsed = parseUnitInput(raw, key[0] === "f" ? "force" : "moment", units);
+      const parsed = parseUnitInput(
+        raw,
+        key[0] === "f" ? "force" : "moment",
+        units,
+      );
       if (parsed === null) invalidNodal.add(key);
       else nodalValues[key] = parsed;
     }
@@ -156,7 +165,13 @@ export default function BatchAssignPanel({
         : undefined,
   };
 
-  const preview = previewBatchAssignment(project, selection, patternId, spec, units);
+  const preview = previewBatchAssignment(
+    project,
+    selection,
+    patternId,
+    spec,
+    units,
+  );
 
   const apply = () => {
     if (hasFieldError || !preview.ok) return;
@@ -299,7 +314,12 @@ export default function BatchAssignPanel({
                     />
                     <span>
                       Remover {label} (
-                      {describeSummary(summary.uniform[key], "distributedLoad", units)})
+                      {describeSummary(
+                        summary.uniform[key],
+                        "distributedLoad",
+                        units,
+                      )}
+                      )
                     </span>
                   </label>
                 );
@@ -309,7 +329,11 @@ export default function BatchAssignPanel({
             activeUniformKeys.map((key) => {
               const label = `q${key[1].toUpperCase()}`;
               const invalid = invalidUniform.has(key);
-              const currentDesc = describeSummary(summary.uniform[key], "distributedLoad", units);
+              const currentDesc = describeSummary(
+                summary.uniform[key],
+                "distributedLoad",
+                units,
+              );
               return (
                 <label className="number-field" key={key}>
                   <span>
@@ -399,7 +423,11 @@ export default function BatchAssignPanel({
               const label = `${key[0] === "f" ? "Força" : "Momento"} ${key[1].toUpperCase()}`;
               const quantity = key[0] === "f" ? "force" : "moment";
               const invalid = invalidNodal.has(key);
-              const currentDesc = describeSummary(summary.nodal[key], quantity, units);
+              const currentDesc = describeSummary(
+                summary.nodal[key],
+                quantity,
+                units,
+              );
               return (
                 <label className="number-field" key={key}>
                   <span>

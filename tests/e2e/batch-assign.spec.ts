@@ -289,3 +289,49 @@ test("cargas globais em lote equilibram o rolete no modelo de referência", asyn
     ).toHaveCount(2);
   }
 });
+
+test("o lote exibe e aplica forças, momentos e cargas nas unidades selecionadas", async ({
+  page,
+}) => {
+  const p = inclinedBeam();
+  await page.addInitScript((source) => {
+    localStorage.setItem("kstruct.draft.v11", source);
+    localStorage.setItem(
+      "kstruct.units",
+      JSON.stringify({ force: "N", moment: "N·m", distributedLoad: "N/m" }),
+    );
+  }, serializeProject(p));
+  await page.goto("/");
+  const explorer = page.locator(".explorer");
+  await explorer.getByRole("button", { name: /^N1/ }).click();
+  await explorer
+    .getByRole("button", { name: "B1", exact: true })
+    .click({ modifiers: ["Control"] });
+  const panel = page.getByRole("region", { name: "Atribuição em lote" });
+  await panel
+    .getByLabel("Operação de carga distribuída")
+    .selectOption("replace");
+  await panel.getByLabel("Lote qZ").fill("-2500");
+  await panel.getByLabel("Lote Força Z").fill("-750");
+  await panel.getByLabel("Lote Momento Y").fill("150");
+  await expect(panel).toContainText("qZ = -2500 N/m");
+  await expect(panel).toContainText("FZ = -750 N");
+  await expect(panel).toContainText("MY = 150 N·m");
+  await panel.getByRole("button", { name: "Aplicar lote" }).click();
+  await explorer.getByRole("button", { name: "B1", exact: true }).click();
+  await expect(page.getByLabel("qZ global")).toHaveValue("-2500");
+  await explorer.getByRole("button", { name: /^N1/ }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pattern = JSON.parse(localStorage.getItem("kstruct.draft.v11")!)
+          .loadPatterns[0];
+        return [
+          pattern.uniform[0].qz,
+          pattern.nodal[0].fz,
+          pattern.nodal[0].my,
+        ];
+      }),
+    )
+    .toEqual([-2500, -750, 150]);
+});

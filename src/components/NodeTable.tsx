@@ -27,7 +27,8 @@ export default function NodeTable({
   onClose: () => void;
 }) {
   const { units } = useUnits();
-  const displayLength = (si: number) => formatLength(fromSI(si, "length", units));
+  const displayLength = (si: number) =>
+    formatLength(fromSI(si, "length", units));
   const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<"edit" | "paste">("edit");
   const [draft, setDraft] = useState(
@@ -384,7 +385,7 @@ export default function NodeTable({
                           <th scope="col">Nome</th>
                           <th scope="col">Ligação</th>
                           <th scope="col">Seção</th>
-                          <th scope="col">Comp. (m)</th>
+                          <th scope="col">Comp. ({units.length})</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -403,7 +404,9 @@ export default function NodeTable({
                               {m.start} → {m.end}
                             </td>
                             <td>{m.sectionName}</td>
-                            <td>{displayLength(m.length)} {units.length}</td>
+                            <td>
+                              {displayLength(m.length)} {units.length}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

@@ -30,7 +30,11 @@ describe("geometria auxiliar, captura e coordenadas relativas (KS-07)", () => {
         { x: 0, y: 0, z: 3 },
         { x: 4, y: 4, z: 3 },
       ),
-    ).toEqual({ x: 2, y: 2, z: 3 });
+    ).toMatchObject({
+      x: expect.closeTo(2, 12),
+      y: expect.closeTo(2, 12),
+      z: 3,
+    });
   });
 
   it("captura ponto médio e pé da perpendicular no plano XZ e respeita prioridade em pixels", () => {

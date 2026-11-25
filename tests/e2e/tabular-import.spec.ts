@@ -2,24 +2,12 @@ import { test, expect, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 async function pasteInto(locator: Locator, text: string) {
+  const page = locator.page();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((value) => navigator.clipboard.writeText(value), text);
   await locator.focus();
-  await locator.evaluate((el, value) => {
-    const textarea = el as HTMLTextAreaElement;
-    const data = new DataTransfer();
-    data.setData("text/plain", value);
-    const event = new ClipboardEvent("paste", {
-      clipboardData: data,
-      bubbles: true,
-      cancelable: true,
-    });
-    textarea.dispatchEvent(event);
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value",
-    )!.set!;
-    setter.call(textarea, value);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  }, text);
+  await locator.press("ControlOrMeta+a");
+  await locator.press("ControlOrMeta+v");
 }
 
 test("colar tabela TSV em cm cria nós/barras, atualiza por ID e desfaz em um passo", async ({

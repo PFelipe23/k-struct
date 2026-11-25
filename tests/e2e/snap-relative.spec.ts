@@ -47,7 +47,7 @@ test("captura ponto médio e pé da perpendicular no plano XZ", async ({
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
 
-  await page.getByRole("button", { name: /^Barra/ }).click();
+  await page.getByRole("button", { name: "Barra B", exact: true }).click();
   const deltaX = page.getByLabel("ΔX (m)");
   const deltaZ = page.getByLabel("ΔZ (m)");
   // Barra de (0, 0) até (4, 0): ponto médio em (2, 0), dentro da área visível
@@ -119,7 +119,7 @@ test("coordenadas relativas após zoom e pan e cancelamento de entrada incomplet
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
 
-  await page.getByRole("button", { name: /^Barra/ }).click();
+  await page.getByRole("button", { name: "Barra B", exact: true }).click();
   const deltaX = page.getByLabel("ΔX (m)");
   const deltaZ = page.getByLabel("ΔZ (m)");
   await deltaX.fill("1");
@@ -171,7 +171,7 @@ test("captura em modelo espacial XYZ escolhe apenas referências do pavimento at
   await page.goto("/");
 
   await page.getByRole("button", { name: "Novo pórtico espacial" }).click();
-  await page.getByRole("button", { name: /^Barra/ }).click();
+  await page.getByRole("button", { name: "Barra B", exact: true }).click();
 
   const deltaX = page.getByLabel("ΔX (m)");
   const deltaY = page.getByLabel("ΔY (m)");
@@ -217,4 +217,33 @@ test("captura em modelo espacial XYZ escolhe apenas referências do pavimento at
     .click();
   await expect(page.getByLabel("Z", { exact: true })).toHaveValue("3");
   expect(errors).toEqual([]);
+});
+
+test("o lançamento relativo usa a mesma unidade da tabela de nós e da prévia TSV", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("kstruct.units", JSON.stringify({ length: "cm" })),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Barra B", exact: true }).click();
+  const dx = page.getByLabel("ΔX (cm)", { exact: true });
+  const dz = page.getByLabel("ΔZ (cm)", { exact: true });
+  await dx.fill("0");
+  await dz.fill("0");
+  await dz.press("Enter");
+  await dx.fill("350,5");
+  await dz.fill("0");
+  await dz.press("Enter");
+  await page
+    .getByRole("button", { name: "Tabela de nós", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Tabela de nós" });
+  await expect(dialog.getByLabel("X de N2")).toHaveValue("350.5");
+  await dialog.getByRole("tab", { name: "Colar planilha (TSV)" }).click();
+  await expect(dialog.getByLabel("Unidade das coordenadas")).toHaveValue("cm");
+  await dialog.getByLabel("Colar nós (TSV)").fill("C\tC\t400\t0");
+  await expect(
+    dialog.getByRole("table", { name: "Prévia de nós" }),
+  ).toContainText("400,00");
 });
