@@ -376,3 +376,24 @@ A suíte de interface abre o projeto espacial, cria e edita o vínculo em centí
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/diaphragm.test.ts tests/diaphragm.integration.test.ts
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- diaphragm.spec.ts
 ```
+
+## KS-26 · Fundação acoplada de seis graus de liberdade
+
+Selecione um nó espacial e abra **Propriedades → Apoios e restrições → Importar fundação do MolaStruct**. A prévia mostra a matriz na origem do CSV em kN, kN·m, m e rad. Informe os eixos e o ponto de referência. Para uma origem deslocada, informe o vetor do nó à origem nos eixos da fundação. A opção **No nó, nos eixos globais** exibe a matriz transformada. Confirme a associação depois de conferir os 36 valores.
+
+Com `OOFEM_BIN` apontando para o executável fixado em `docs/OOFEM.md`, reproduza os casos com:
+
+```sh
+npm test -- tests/foundation.test.ts
+npm run test:e2e -- foundation.spec.ts
+```
+
+No caso-base, o bloco (UX, RY) é [[10.000, 2.000], [2.000, 4.000]] nas unidades do CSV. As diagonais restantes são 5.000, 6.000, 3.000 e 7.000 em UY, UZ, RX e RZ. Com FX = 22 kN e MY = 8 kN·m, a solução é UX = 2 mm e RY = 1 mrad. Os outros quatro movimentos são zero. As ações do apoio sobre a estrutura, na mesma origem, são −22 kN e −8 kN·m.
+
+No segundo ensaio os eixos giram +90° em Z e a origem da matriz fica 0,5 m acima do nó. Multiplica-se a matriz do CSV pelo movimento de referência na origem e transfere-se o torsor até o nó usando `M_nó = M_origem + r × F`. As ações globais são (5, 22, 18) kN e (−19, 8,5, −7) kN·m. O OOFEM deve fornecer (0, 1,5, 3) mm e (−1, 2, −1) mrad no nó e reações opostas às seis ações. O ensaio compara movimentos com tolerância absoluta de 10⁻¹² m ou rad e reações com tolerância de 10⁻⁹ vezes o maior entre 1 e o módulo de cada referência em SI.
+
+A fatoração aplica Cholesky após equilibrar a diagonal. Verifica a simetria com tolerância absoluta 10⁻⁸ na matriz adimensional e exige pivôs ativos acima de 10⁻¹². Uma liberdade declarada precisa ter linha e coluna nulas na origem. Cada coluna fatorada produz uma mola sobre uma combinação linear dos seis movimentos, por `GeneralSlaveNode`, `SlaveNode` e `NodalSpring`. A orientação e a mudança de origem preservam o trabalho virtual. A reação da fundação no nó é `−K_nó q_nó`.
+
+Em um terceiro ensaio, a suíte monta diretamente `Tᵀ K T` para uma matriz densa, eixos oblíquos e um deslocamento de origem nas três direções. Os 36 termos transformados são comparados com tolerância relativa de 10⁻¹¹ (piso unitário em SI). O teste resolve o projeto reaberto e compara os seis movimentos e as seis reações à referência independente.
+
+A suíte também resolve a exportação F01 com o termo FX–RY negativo, a rotação RX livre do B16 com um vínculo complementar e a matriz diagonal em uma barra espacial frente às molas da KS-25. O teste de interface cobre arquivo inválido com apoio anterior intacto, confirmação de eixos/origem, substituição, desfazer/refazer, salvar, reabrir e executar.

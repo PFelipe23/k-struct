@@ -18,6 +18,7 @@ import {
 } from "./diaphragms";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
+import { foundationConstraintRows, globalFoundationMatrix } from "./foundation";
 import { hasSpring, supportBasis, supportDofs, supportsDof } from "./supports";
 import {
   coordinates,
@@ -352,26 +353,23 @@ const projectV13 = projectV12.extend({
     .max(1000),
 });
 const spring = finite.nonnegative().optional();
+const elasticNodeSchema = supportNodeSchema.extend({
+  springs: z
+    .strictObject({
+      ux: spring,
+      uy: spring,
+      uz: spring,
+      rx: spring,
+      ry: spring,
+      rz: spring,
+    })
+    .optional(),
+});
 const projectV14 = projectV13.extend({
   schemaVersion: z.literal(14),
-  nodes: z
-    .array(
-      supportNodeSchema.extend({
-        springs: z
-          .strictObject({
-            ux: spring,
-            uy: spring,
-            uz: spring,
-            rx: spring,
-            ry: spring,
-            rz: spring,
-          })
-          .optional(),
-      }),
-    )
-    .max(1000),
+  nodes: z.array(elasticNodeSchema).max(1000),
 });
-export const projectSchema = projectV14.extend({
+const projectV15 = projectV14.extend({
   schemaVersion: z.literal(15),
   diaphragms: z
     .array(
@@ -385,6 +383,24 @@ export const projectSchema = projectV14.extend({
     )
     .max(500)
     .optional(),
+});
+const foundationSchema = z.strictObject({
+  name: z.string().min(1).max(255),
+  fileName: z.string().min(1).max(255),
+  matrix: z.array(z.array(finite).length(6)).length(6),
+  freeDofs: z.array(z.enum(supportDofs)).max(6),
+  metadata: z.array(z.array(z.string().max(8192)).min(2).max(12)).max(512),
+  offset: directionSchema,
+  reference: z.enum(["node", "offset"]),
+  reflected: z.literal(true).optional(),
+});
+export const projectSchema = projectV15.extend({
+  schemaVersion: z.literal(16),
+  nodes: z
+    .array(
+      elasticNodeSchema.extend({ foundation: foundationSchema.optional() }),
+    )
+    .max(1000),
 });
 export type Diaphragm = NonNullable<Project["diaphragms"]>[number];
 export type Section = z.infer<typeof sectionSchema>;
@@ -452,7 +468,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 15,
+    schemaVersion: 16,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -772,6 +788,15 @@ export function parseProject(source: string): Project {
     const old = projectV14.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 15 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 15
+  ) {
+    const old = projectV15.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 16 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -891,6 +916,15 @@ export function referenceErrors(p: Project): string[] {
         errors.push(
           `${n.name} (${n.id}): mola ${dof.toUpperCase()} fora do plano XZ.`,
         );
+    }
+    if (n.foundation) {
+      if (p.mode !== "spatial")
+        errors.push(`${n.name}: uma matriz de fundação exige um nó espacial.`);
+      try {
+        globalFoundationMatrix(n.foundation, n.supportFrame);
+      } catch (error) {
+        errors.push(`${n.name}: ${(error as Error).message}`);
+      }
     }
     if (!n.supportFrame) continue;
     if (n.supportFrame.kind !== p.mode) {
@@ -1074,7 +1108,11 @@ export function analysisErrors(p: Project): string[] {
     return errors;
   }
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
-  if (!p.members.length && !p.diaphragms?.length)
+  if (
+    !p.members.length &&
+    !p.diaphragms?.length &&
+    !p.nodes.some((n) => n.foundation)
+  )
     errors.push("Lance pelo menos uma barra para analisar.");
   if (p.mode === "planar") {
     if (p.nodes.some((n) => Math.abs(n.y) > 1e-8))
@@ -1124,6 +1162,7 @@ export function analysisErrors(p: Project): string[] {
       (m) =>
         interiorParameter(n, byId.get(m.start)!, byId.get(m.end)!) !== null,
     );
+    if (n.foundation && !host) continue;
     errors.push(
       host
         ? `${n.name} está isolado no interior de ${host.name}. Use Conexões da malha.`
@@ -1156,13 +1195,14 @@ export function analysisErrors(p: Project): string[] {
       continue;
     }
     const span = Math.max(
-      tolerance,
+      component.length === 1 && seed.foundation ? 1 : tolerance,
       ...component.map((n) => distance(n, seed)),
     );
     const constraints: number[][] = [];
     for (const n of component) {
       const pos = scale(subtract(n, seed), 1 / span);
       const basis = supportBasis(n.supportFrame);
+      constraints.push(...foundationConstraintRows(n, pos, span));
       const row = (u: Point3, r: Point3) =>
         p.mode === "planar" ? [u.x, u.z, r.y] : [u.x, u.y, u.z, r.x, r.y, r.z];
       for (const k of coordinates) {

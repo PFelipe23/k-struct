@@ -17,7 +17,8 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
-- Salvar e reabrir `.kstruct.json` no esquema v15, com migração dos projetos v1 a v14 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
+- Salvar e reabrir `.kstruct.json` no esquema v16, com migração dos projetos v1 a v15 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.

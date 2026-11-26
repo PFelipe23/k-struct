@@ -32,6 +32,8 @@ import {
   supportBasis,
   supportToGlobal,
 } from "../domain/supports";
+import { foundationRecords } from "./foundation";
+import { foundationReaction } from "../domain/foundation";
 import { beamPropertyRecords } from "./beamProperties";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
@@ -320,6 +322,13 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} values ${dofs.length} ${zeros} set ${set(`nodes 1 ${ground}`)}`,
     );
   }
+  for (const n of p.nodes) if (n.foundation) explicitDofs.add(nodeNumber(n.id));
+  const foundations = foundationRecords(
+    p.nodes,
+    nodeNumber,
+    nodes.length + Number(springs.length > 0),
+    elements.length + springs.length,
+  );
   const deck = [
     "analysis.out",
     `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
@@ -332,7 +341,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${nodes.length + Number(springs.length > 0)} nelem ${elements.length + springs.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${nodes.length + Number(springs.length > 0) + foundations.auxiliary.length} nelem ${elements.length + springs.length + foundations.elements.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
       const floor = floors.records.get(n.number);
       if (floor) return floor;
@@ -352,12 +361,14 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     ...(springs.length
       ? [`Node ${ground} coords 3 0 0 0 dofidmask ${dofList}`]
       : []),
+    ...foundations.auxiliary,
     ...elements.map((e) => {
       if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
       const z = axes.get(e.memberId)![2];
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
     ...springs,
+    ...foundations.elements,
     ...properties.sections,
     ...properties.materials,
     ...bcs,
@@ -392,7 +403,7 @@ export function parseOofemOutput(
     throw new Error("Resultado não finito. Análise rejeitada.");
   const nodeOutput = new Map<number, Map<number, number>>();
   for (const match of rawOutput.matchAll(
-    /^(?:RigidArm)?Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm)?Node|\n\s*Element output)/gm,
+    /^(?:RigidArm|GeneralSlave|Slave)?Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm|GeneralSlave|Slave)?Node|\n\s*Element output)/gm,
   )) {
     const values = new Map<number, number>();
     const node = Number(match[1]);
@@ -577,6 +588,15 @@ export function parseOofemOutput(
           );
         result[axis] = value === 0 ? 0 : value;
       }
+    }
+    if (n.foundation) {
+      const reaction = foundationReaction(
+        n.foundation,
+        dofs.map(([, dof]) => localDisplacements.get(dof)!),
+      );
+      dofs.forEach(([, , axis], i) => {
+        result[axis] += reaction[i];
+      });
     }
     const basis = frames.get(num);
     if (basis) {

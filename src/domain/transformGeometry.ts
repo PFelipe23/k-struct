@@ -16,6 +16,7 @@ import { free, type Project, type StructuralNode } from "./model";
 import {
   hasElasticSupport,
   sameSupportAxes,
+  sameOrientedSupportAxes,
   supportBasis,
   type SupportFrame,
 } from "./supports";
@@ -156,6 +157,7 @@ export function mapSupport(
   node: StructuralNode,
   vector: VectorMap,
   mode: Project["mode"],
+  parity = 1,
 ) {
   if (!node.supportFrame && !hasElasticSupport(node)) {
     const restraints = globalRestraints(node, vector);
@@ -168,11 +170,20 @@ export function mapSupport(
     mode === "planar"
       ? { kind: "planar", angle: (Math.atan2(x.z, x.x) * 180) / Math.PI }
       : { kind: "spatial", x, y: vector(basis.y) };
+  const foundation = node.foundation && structuredClone(node.foundation);
+  if (foundation && parity < 0) {
+    if (foundation.reflected) delete foundation.reflected;
+    else foundation.reflected = true;
+  }
   return {
+    foundation,
     restraints: node.restraints,
     springs: node.springs,
     frame:
-      !node.supportFrame && sameSupportAxes(frame, undefined)
+      !node.supportFrame &&
+      (foundation
+        ? sameOrientedSupportAxes(frame, undefined)
+        : sameSupportAxes(frame, undefined))
         ? undefined
         : frame,
   };

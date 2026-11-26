@@ -63,6 +63,7 @@ export const supportText = (node: StructuralNode) => {
             ]
           : [],
     )
+    .concat(node.foundation ? [`Fundação ${node.foundation.name}`] : [])
     .join(", ");
   return keys
     ? `${keys} · ${node.supportFrame ? "referencial local" : "referencial global"}`
@@ -188,9 +189,10 @@ export function planRepair(
     const restrained = supports.filter(hasSupport);
     const elasticCount = restrained.filter(hasElasticSupport).length;
     const targetFrame = (hasSupport(dst) ? dst : restrained[0])?.supportFrame;
-    const canUnion = restrained.every((n) =>
-      sameSupportAxes(n.supportFrame, targetFrame),
-    );
+    const hasFoundation = restrained.some((n) => n.foundation);
+    const canUnion =
+      !hasFoundation &&
+      restrained.every((n) => sameSupportAxes(n.supportFrame, targetFrame));
     if (
       !canUnion ||
       elasticCount > 1 ||
@@ -229,6 +231,9 @@ export function planRepair(
       } else if (value) {
         const chosen = nodes.get(value.slice(4))!;
         dst.restraints = { ...chosen.restraints };
+        if (chosen.foundation)
+          dst.foundation = structuredClone(chosen.foundation);
+        else delete dst.foundation;
         if (chosen.springs) dst.springs = { ...chosen.springs };
         else delete dst.springs;
         if (chosen.supportFrame) dst.supportFrame = chosen.supportFrame;

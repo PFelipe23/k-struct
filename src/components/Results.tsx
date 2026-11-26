@@ -104,7 +104,8 @@ export function buildResultTable(
         row.push(
           ...keys.map((key) => {
             const axis = key[1] as "x" | "y" | "z";
-            return supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
+            return node.foundation ||
+              supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
               ? fromSI(local[key], quantity(key), units)
               : 0;
           }),
@@ -137,7 +138,9 @@ export function buildResultTable(
       : [];
     headers = [
       "Nó / estação",
-      ...components(hasLocal ? " global" : ""),
+      ...components(
+        hasLocal || project.nodes.some((n) => n.foundation) ? " global" : "",
+      ),
       ...localColumns,
     ];
     rows = [
@@ -398,12 +401,14 @@ export default function Results({
           </div>
         ) : (
           <table>
-            {project.members.some((m) => m.offsets) && (
+            {(project.members.some((m) => m.offsets) ||
+              (tab !== "forces" &&
+                project.nodes.some((n) => n.foundation))) && (
               <caption>
                 {tab === "forces"
                   ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
                   : tab === "reactions"
-                    ? "Reações referidas aos nós de apoio."
+                    ? "Ações dos apoios sobre a estrutura, com forças e momentos referidos ao nó."
                     : headers.includes("Referencial do apoio")
                       ? "Deslocamentos nos nós de lançamento e nas estações do trecho deformável. As colunas identificam o referencial."
                       : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}

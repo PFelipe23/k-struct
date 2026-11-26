@@ -52,6 +52,7 @@ import {
   type MeasuredQuantity,
 } from "../units";
 import { useUnits } from "./Units";
+import FoundationDialog from "./FoundationDialog";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
 import { selectionKey } from "../domain/selection";
@@ -366,6 +367,7 @@ export default function Inspector({
   onSections: (id: string) => void;
 }) {
   const { units } = useUnits();
+  const [foundationId, setFoundationId] = useState<string>();
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
   const dofs = spatial
@@ -435,6 +437,7 @@ export default function Inspector({
         if (!selectedNodes.has(n.id)) continue;
         n.restraints = free();
         delete n.springs;
+        delete n.foundation;
         for (const k of dofs) n.restraints[k] = fixed;
       }
     });
@@ -537,6 +540,22 @@ export default function Inspector({
               </div>
             )}
             <h4>Apoios e restrições</h4>
+            {spatial && (
+              <button onClick={() => setFoundationId(node.id)}>
+                {node.foundation
+                  ? `Fundação · ${node.foundation.name}`
+                  : "Importar fundação do MolaStruct"}
+              </button>
+            )}
+            {spatial && foundationId === node.id && (
+              <FoundationDialog
+                key={node.id}
+                node={node}
+                edit={edit}
+                onClose={() => setFoundationId(undefined)}
+              />
+            )}
+
             <SupportFrameEditor
               mode={p.mode}
               frame={node.supportFrame}
