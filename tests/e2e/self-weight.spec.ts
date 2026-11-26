@@ -32,7 +32,7 @@ test("edita e persiste peso próprio por padrão com contribuição por barra", 
   await editor.getByRole("button", { name: "Aplicar definições" }).click();
   await expect(editor).toHaveCount(0);
   const saved = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("kstruct.draft.v27")!),
+    JSON.parse(localStorage.getItem("kstruct.draft.v28")!),
   );
   expect(saved.loadPatterns[0].selfWeight).toMatchObject({
     enabled: true,

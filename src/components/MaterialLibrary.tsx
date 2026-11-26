@@ -29,7 +29,7 @@ function objectName(
 }
 
 function Usage({ project, id }: { project: Project; id: string }) {
-  const { sections, slabs } = materialUsage(project, id);
+  const { sections, slabs, panels } = materialUsage(project, id);
   return (
     <section className="material-usage" aria-label="Uso do material">
       <h3>Uso no projeto</h3>
@@ -40,6 +40,12 @@ function Usage({ project, id }: { project: Project; id: string }) {
         {sections.length > 0 &&
           ` · ${sections.map((s) => objectName(s, project.sections)).join(", ")}`}
       </p>
+      {panels.length > 0 && (
+        <p>
+          Painéis espaciais ·{" "}
+          {panels.map((s) => objectName(s, project.surfacePanels!)).join(", ")}
+        </p>
+      )}
       {slabs.length > 0 && (
         <p>
           <strong>{slabs.length} laje</strong> ·{" "}

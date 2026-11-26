@@ -286,7 +286,7 @@ test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lot
 
   const positions = () =>
     page.evaluate(() =>
-      JSON.parse(localStorage.getItem("kstruct.draft.v27")!).nodes.map(
+      JSON.parse(localStorage.getItem("kstruct.draft.v28")!).nodes.map(
         (n: { id: string; x: number }) => [n.id, n.x],
       ),
     );
@@ -1294,7 +1294,7 @@ test("gera ELU/ELS, revisa exclusões e edições, salva e usa a combinação na
   await page.getByRole("checkbox", { name: "ELU · Q1", exact: true }).check();
   await button("Aplicar definições").click();
   const stored = () =>
-    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v27")!));
+    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v28")!));
   await expect
     .poll(async () => (await stored()).resultCombinations.length)
     .toBe(4);

@@ -2819,3 +2819,15 @@ button.primary {
   border-top: 1px dashed currentColor;
   vertical-align: middle;
 }
+
+.spatial-panel-dialog { width: min(40rem, 95vw); max-height: 90vh; overflow: auto; }
+.spatial-panel-dialog form, .spatial-panel-dialog fieldset { display: grid; gap: .65rem; }
+.spatial-panel-dialog fieldset { min-width: 0; border: 1px solid var(--line); }
+.spatial-panel-dialog fieldset p { margin: 0; font-size: .8rem; }
+.panel-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.panel-columns :is(input, select) { width: 100%; min-width: 0; }
+.panel-edges { display: flex; gap: 1rem; flex-wrap: wrap; }
+.spatial-panel-trace { cursor: pointer; }
+.spatial-panel-trace :is(polygon,polyline) { stroke: var(--geometry-member); stroke-width: 3; fill: none; }
+.spatial-panel-trace polygon { fill: var(--geometry-member); fill-opacity: .14; }
+.spatial-panel-trace text { fill: var(--geometry-member); font-size: 12px; }

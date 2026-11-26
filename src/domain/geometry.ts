@@ -162,3 +162,23 @@ export function relativePointOnPlane(
 export function parseDecimalInput(raw: string): number {
   return parseUnitNumber(raw.replace(/−/g, "-")) ?? NaN;
 }
+
+export function matrixRank(rows: number[][], columns: number): number {
+  const a = rows.map((row) => [...row]);
+  let r = 0;
+  for (let c = 0; c < columns && r < a.length; c++) {
+    let pivot = r;
+    for (let i = r + 1; i < a.length; i++)
+      if (Math.abs(a[i][c]) > Math.abs(a[pivot][c])) pivot = i;
+    if (Math.abs(a[pivot][c]) <= 1e-8) continue;
+    [a[r], a[pivot]] = [a[pivot], a[r]];
+    const v = a[r][c];
+    a[r] = a[r].map((x) => x / v);
+    for (let i = r + 1; i < a.length; i++) {
+      const f = a[i][c];
+      a[i] = a[i].map((x, j) => x - f * a[r][j]);
+    }
+    r++;
+  }
+  return r;
+}

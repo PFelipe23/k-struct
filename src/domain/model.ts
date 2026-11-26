@@ -1,3 +1,4 @@
+import { panelModelErrors, panelAssembly } from "./surfacePanel";
 import { slabRings } from "./slabPolygon";
 import {
   jointGeometryErrors,
@@ -45,6 +46,7 @@ import {
   cross,
   distance,
   interiorParameter,
+  matrixRank as rank,
   subtract,
   origin,
   scale,
@@ -695,7 +697,7 @@ const slabJointSchema = z
       (j.support === "beam") === (j.memberId !== undefined),
     "Rigidez ou viga incompatível com a opção da borda.",
   );
-export const projectSchema = projectV26.extend({
+const projectV27 = projectV26.extend({
   schemaVersion: z.literal(27),
   slabs: z.array(z.union([sizedRectangle, sizedPolygon])).max(2),
   slabJoint: slabJointSchema.optional(),
@@ -708,6 +710,42 @@ export const projectSchema = projectV26.extend({
     .min(1)
     .max(100),
 });
+const panelPoint = z.strictObject({ x: finite, y: finite, z: finite });
+const panelEdge = z.enum(["AB", "BC", "CD", "DA"]);
+const surfacePanel = z.strictObject({
+  id,
+  name: text,
+  kind: z.enum(["membrane", "plate", "shell"]),
+  materialId: id,
+  a: panelPoint,
+  b: panelPoint,
+  d: panelPoint,
+  thickness: finite.positive(),
+  nu: z.number().int().min(1).max(32),
+  nv: z.number().int().min(1).max(32),
+  fixed: z.array(panelEdge).max(4),
+});
+const panelAction = z.strictObject({
+  panelId: id,
+  edge: panelEdge,
+  traction: panelPoint,
+  pressure: finite,
+});
+export const projectSchema = projectV27.extend({
+  schemaVersion: z.literal(28),
+  surfacePanels: z.array(surfacePanel).max(2).optional(),
+  loadPatterns: z
+    .array(
+      projectV27.shape.loadPatterns.element.extend({
+        panelActions: z.array(panelAction).max(2).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type SurfacePanel = z.infer<typeof surfacePanel>;
+export type PanelAction = z.infer<typeof panelAction>;
+export type PanelEdge = z.infer<typeof panelEdge>;
 export type SlabJoint = z.infer<typeof slabJointSchema>;
 export type SlabSizing = z.infer<typeof sizingSchema>;
 export function defaultSelfWeight() {
@@ -795,7 +833,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 27,
+    schemaVersion: 28,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1234,6 +1272,15 @@ export function parseProject(source: string): Project {
     const old = projectV26.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 27 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 27
+  ) {
+    const old = projectV27.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 28 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1277,7 +1324,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 27, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 28, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)
@@ -1300,7 +1347,9 @@ function projectObjectIds(p: Pick<Project, "nodes" | "members" | "slabs">) {
 
 export function referenceErrors(p: Project): string[] {
   const errors: string[] = [];
+  errors.push(...panelModelErrors(p));
   for (const list of [
+    p.surfacePanels ?? [],
     p.nodes,
     p.members,
     p.slabs,
@@ -1628,29 +1677,17 @@ export function referenceErrors(p: Project): string[] {
   return errors;
 }
 
-function rank(rows: number[][], columns: number): number {
-  const a = rows.map((row) => [...row]);
-  let r = 0;
-  for (let c = 0; c < columns && r < a.length; c++) {
-    let pivot = r;
-    for (let i = r + 1; i < a.length; i++)
-      if (Math.abs(a[i][c]) > Math.abs(a[pivot][c])) pivot = i;
-    if (Math.abs(a[pivot][c]) <= 1e-8) continue;
-    [a[r], a[pivot]] = [a[pivot], a[r]];
-    const v = a[r][c];
-    a[r] = a[r].map((x) => x / v);
-    for (let i = r + 1; i < a.length; i++) {
-      const f = a[i][c];
-      a[i] = a[i].map((x, j) => x - f * a[r][j]);
-    }
-    r++;
-  }
-  return r;
-}
-
 export function analysisErrors(p: Project): string[] {
   const errors = referenceErrors(p);
   if (errors.length) return errors;
+  if (p.surfacePanels?.length) {
+    try {
+      panelAssembly(p);
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+    }
+    return errors;
+  }
   if (p.slabs.length === 2) {
     errors.push(...jointGeometryErrors(p));
     const edge = sharedEdges(p)[0];

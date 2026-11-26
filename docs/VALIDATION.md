@@ -704,3 +704,27 @@ Configure `OOFEM_BIN` e execute os ensaios abaixo. [Configuração do OOFEM 3.0]
 npm test -- tests/slab-joint.test.ts
 npm run test:e2e -- slab.spec.ts -g KS-43
 ```
+
+
+## KS-44 · membranas e cascas em planos arbitrários
+
+### Tração e flexão em uma faixa
+
+Abra o [exemplo inclinado](../examples/faixa-inclinada.kstruct.json). O painel tem comprimento de 3 m, largura de 1,20 m e espessura de 0,10 m. O material é elástico isotrópico, E = 30 GPa e ν = 0. A borda DA é engastada e a borda oposta BC recebe tração uniforme q₁ = +100 kN/m e carga transversal q₃ = −1 kN/m. A carga positiva segue os eixos que aparecem no painel. Para reproduzir os ensaios individuais, selecione **Membrana** e zere q₃ ou selecione **Placa em flexão** e zere q₁. A opção **Casca** recebe as duas ações simultaneamente.
+
+Com q₁, a solução uniforme é N11 = 100 kN/m e U1 = q₁ L/(Eh) = +0,100 mm na borda livre. Com q₃, a solução de flexão cilíndrica é U3 = q₃ L³/(3D) = −3,600 mm, onde D = Eh³/12. O ensaio mantém a seção e as cargas locais ao passar do plano XY para o vertical e para uma orientação oblíqua. A orientação oblíqua usa os vetores unitários (1, 2, 2)/3 e (2, 1, −2)/3 para os eixos 1 e 2.
+
+| Subdivisões AB × AD | Média de U3 nos nós de BC (mm) | Referência (mm) |
+| --- | ---: | ---: |
+| 2 × 1 | −3,604187 | −3,600000 |
+| 4 × 2 | −3,598385 | −3,600000 |
+| 8 × 4 | −3,599402 | −3,600000 |
+| 16 × 8 | −3,599841 | −3,600000 |
+
+Na malha 8 × 4, os três planos reproduzem a tração, a flecha e a superposição na casca. Os testes admitem 0,016 mm de diferença em cada nó livre sob flexão e 0,000001 mm no alongamento. Conferem também o esforço normal em cada ponto de integração, o momento médio, as forças globais e o momento de engaste. Em outro ensaio, a pressão e o peso próprio em Z global são somados com fator de caso 1,3.
+
+### Parede ligada à laje
+
+No [exemplo parede–laje](../examples/parede-laje-em-balanco.kstruct.json), a parede tem 3 m de altura, a laje tem 3 m de balanço e a largura comum é de 1,20 m. A base da parede é o único engaste. O carregamento de −1 kN/m na borda livre da laje totaliza −1,200 kN em Z. Cinco nós compartilhados na borda transmitem os deslocamentos e as rotações. Em relação a A da parede, as reações esperadas são **FZ = +1,200 kN, MX = +0,720 kN·m e MY = −3,600 kN·m**. O teste verifica esses valores, as translações na borda, a compressão no plano da parede e a flecha da laje. O conjunto também é ensaiado após rotação e translação no espaço. A suíte inclui ainda a laje de placa acoplada à parede de casca e um mecanismo ao substituir a parede por uma membrana.
+
+A versão inicial admite um ou dois painéis planos em paralelogramo, espessura uniforme, material isotrópico, uma carga uniforme de borda e uma pressão por painel e padrão. A ligação é contínua em toda a borda, com as mesmas subdivisões nos dois lados. Os engastes são aplicados por borda inteira. O cálculo atende a casos estáticos com fatores de padrão. Os modelos de painéis espaciais e os de pórticos com lajes de pavimento têm rotinas de análise próprias.

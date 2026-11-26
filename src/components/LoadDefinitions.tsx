@@ -126,10 +126,15 @@ export default function LoadDefinitions({
     pattern,
   );
   const selfWeightTotal = {
-    x: selfWeight.members.reduce((sum, load) => sum + load.totalX, 0),
-    y: selfWeight.members.reduce((sum, load) => sum + load.totalY, 0),
+    x:
+      selfWeight.members.reduce((sum, load) => sum + load.totalX, 0) +
+      selfWeight.panels.reduce((sum, load) => sum + load.total.x, 0),
+    y:
+      selfWeight.members.reduce((sum, load) => sum + load.totalY, 0) +
+      selfWeight.panels.reduce((sum, load) => sum + load.total.y, 0),
     z:
       selfWeight.members.reduce((sum, load) => sum + load.totalZ, 0) +
+      selfWeight.panels.reduce((sum, load) => sum + load.total.z, 0) +
       selfWeight.slabs.reduce((sum, load) => sum + load.totalZ, 0),
   };
   const envelope = envelopes.find((item) => item.id === envelopeId);
@@ -458,7 +463,9 @@ export default function LoadDefinitions({
               {pattern.prescribed?.length ?? 0} movimentos prescritos
               {project.slabs.length > 0 &&
                 ` · ${pattern.pressure.length} pressões em laje`}
-              . Atribua as cargas pelo painel de propriedades.
+              {project.surfacePanels?.length
+                ? ` · ${pattern.panelActions?.length ?? 0} ações em painéis espaciais. Edite as ações em Modelo → Painel espacial.`
+                : ". Atribua as cargas pelo painel de propriedades."}
             </p>
             {!project.slabs.length && (
               <WindStrips
@@ -598,6 +605,12 @@ export default function LoadDefinitions({
                       ))}
                     </ul>
                   )}
+                  {selfWeight.panels.map((load) => (
+                    <p key={load.id}>
+                      {load.name} · peso em XYZ ({formatSI(load.total.x)},{" "}
+                      {formatSI(load.total.y)}, {formatSI(load.total.z)}) N
+                    </p>
+                  ))}
                   {selfWeight.slabs.map((load) => (
                     <p key={load.slabId}>
                       {load.slabName}: pZ = {formatSI(load.pz)} N/m²; total ={" "}
