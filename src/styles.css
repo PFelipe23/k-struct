@@ -1038,6 +1038,21 @@ button.primary {
 .drawing-select .slab-plan {
   cursor: pointer;
 }
+.slab-trace-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+.slab-contour-fields { display: grid; gap: 6px; }
+.slab-contour-fields p { margin: 2px 0; }
+.slab-contour-fields .coordinate-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.slab-contour-fields .coordinate-fields input { width: 100%; min-width: 0; }
+.slab-contour-fields [role=alert], .slab-trace-controls [role=alert] { color: var(--danger); }
 .slab-mesh,
 .slab-supported-edge,
 .slab-free-edge,
@@ -1045,6 +1060,7 @@ button.primary {
   fill: none;
   pointer-events: none;
 }
+.drawing-select .slab-plan polyline { pointer-events: stroke; }
 .slab-mesh {
   stroke: var(--muted);
   stroke-width: 0.65;

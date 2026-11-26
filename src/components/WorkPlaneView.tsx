@@ -44,6 +44,7 @@ import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
+import { slabRings } from "../domain/slabPolygon";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 import { formatQuantity, fromSI, toSI } from "../units";
@@ -69,6 +70,8 @@ export type Tool =
   | "node"
   | "member"
   | "slab"
+  | "slabPolygon"
+  | "slabHole"
   | "pointLoad"
   | "distributedLoad";
 export type Display = "model" | "deformed" | MemberForceComponent;
@@ -100,6 +103,7 @@ interface Props {
   active: boolean;
   savedCamera: RefObject<PlaneCamera | null>;
   onActivate: () => void;
+  outline: Point3[];
   pending: Point3 | null;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -136,6 +140,7 @@ export default function WorkPlaneView({
   patternId,
   resultPatterns,
   pending,
+  outline,
   onPoint,
   onSelect,
 }: Props & LayerControls) {
@@ -213,6 +218,7 @@ export default function WorkPlaneView({
           ),
         )
       : undefined;
+  const tracing = tool === "slabPolygon" || tool === "slabHole";
   const slabId = slab?.id;
   const selectSlab = useCallback(
     (event: MouseEvent<SVGGElement>) => {
@@ -245,6 +251,9 @@ export default function WorkPlaneView({
   const fit = () => {
     const points = [
       ...project.nodes,
+      ...(slab
+        ? slabRings(slab)[0].map((v) => ({ ...v, z: plane.offset }))
+        : []),
       ...floors.map((floor) => ({ ...floor.reference, z: plane.offset })),
       ...bars.flatMap((m) => {
         if (!m.offsets) return [];
@@ -255,12 +264,10 @@ export default function WorkPlaneView({
     const us = [
       ...points.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
-      ...(slab ? [slab.x, slab.x + slab.lengthX] : []),
     ];
     const vs = [
       ...points.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
-      ...(slab ? [slab.y, slab.y + slab.lengthY] : []),
     ];
     const minU = Math.min(0, ...us),
       maxU = Math.max(6, ...us);
@@ -310,11 +317,13 @@ export default function WorkPlaneView({
   }, [units.length]);
 
   const snapAnchor =
-    tool === "member" && pending && onPlane(pending, plane)
-      ? pending
-      : tool === "node" && lastNodeAnchor && onPlane(lastNodeAnchor, plane)
-        ? lastNodeAnchor
-        : null;
+    tracing && outline.length
+      ? outline.at(-1)!
+      : tool === "member" && pending && onPlane(pending, plane)
+        ? pending
+        : tool === "node" && lastNodeAnchor && onPlane(lastNodeAnchor, plane)
+          ? lastNodeAnchor
+          : null;
   const relativeAnchor = snapAnchor ?? planePoint(0, 0, plane);
 
   const sx = useCallback(
@@ -343,7 +352,7 @@ export default function WorkPlaneView({
       spatial,
       orthogonal,
       shiftKey: event.shiftKey,
-      tool,
+      tool: tracing ? "slab" : tool,
       anchor: snapAnchor,
       nodes: project.nodes,
       members: project.members,
@@ -365,7 +374,7 @@ export default function WorkPlaneView({
     ? Math.hypot(parsedDeltaU, parsedDeltaV)
     : NaN;
   const relativePreview: SnapCandidate | null =
-    (tool === "member" || tool === "node") &&
+    (tool === "member" || tool === "node" || tracing) &&
     hasRelativeBoth &&
     !(
       tool === "member" &&
@@ -1557,6 +1566,36 @@ export default function WorkPlaneView({
               </g>
             );
           })()}
+        {tracing && outline.length > 0 && (
+          <g className="slab-trace" pointerEvents="none">
+            <polyline
+              fill="none"
+              stroke="var(--geometry-selected)"
+              strokeWidth="2"
+              points={outline.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ")}
+            />
+            {activeCandidate && (
+              <line
+                x1={sx(outline.at(-1)!.x)}
+                y1={sy(outline.at(-1)!.y)}
+                x2={sx(activeCandidate.u)}
+                y2={sy(activeCandidate.v)}
+                stroke="var(--geometry-selected)"
+                strokeDasharray="6 4"
+              />
+            )}
+            {outline.map((p, i) => (
+              <circle
+                key={i}
+                cx={sx(p.x)}
+                cy={sy(p.y)}
+                r={i === 0 ? 5 : 3}
+                fill="var(--geometry-node-fill)"
+                stroke="var(--geometry-selected)"
+              />
+            ))}
+          </g>
+        )}
         {pending &&
           (tool === "slab"
             ? cursor && (
@@ -1584,18 +1623,21 @@ export default function WorkPlaneView({
                 />
               ))}
       </svg>
-      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
-        <div className="empty-canvas">
-          <h2>Lance a primeira barra</h2>
-          <p>
-            Ative <b>Barra</b> e marque duas extremidades na malha.
-          </p>
-          <div>
-            <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+      {!project.nodes.length &&
+        !project.slabs.length &&
+        tool !== "slab" &&
+        !tracing && (
+          <div className="empty-canvas">
+            <h2>Lance a primeira barra</h2>
+            <p>
+              Ative <b>Barra</b> e marque duas extremidades na malha.
+            </p>
+            <div>
+              <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+            </div>
           </div>
-        </div>
-      )}
-      {(tool === "member" || tool === "node") && (
+        )}
+      {(tool === "member" || tool === "node" || tracing) && (
         <form
           className="relative-input-bar"
           aria-label="Coordenadas relativas no plano"

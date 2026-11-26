@@ -16,12 +16,12 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nos nós ou ao longo das barras, além de cargas uniformes. Em **Modelo → Carga concentrada**, clique na barra e ajuste a distância a partir de i ou a fração x/L (por exemplo, `1/3`). Escolha o padrão de cargas e o referencial global ou local. O inspetor permite editar e excluir cada ação. A malha cria ou reaproveita o nó de análise na posição indicada e conserva a barra física inteira. A tabela de esforços e o CSV identificam os lados i e j da seção. O peso próprio pode ser ativado por padrão em **Cargas**, com direção, gravidade e multiplicador.
 - Aplicar cargas distribuídas em todo o comprimento ou em parte da barra. Em **Modelo → Carga por trecho**, clique perto do início da carga, informe o início e o fim a partir de i (em distância ou x/L) e as intensidades nas duas pontas. Para um triângulo, deixe uma ponta com intensidade zero. Para um trapézio, use intensidades diferentes. Sinais opostos invertem as setas ao longo do trecho. O inspetor reúne as cargas do padrão ativo para edição.
-- Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
+- Lançar uma laje isolada em planta XY, por dois cantos ou por contorno poligonal com aberturas. Editar bordas, apoios, pressão e malha e consultar mapas de flecha e momentos.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
 - Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
 - Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
 - Aplicar temperatura por barra e por padrão no inspetor, em **Ação térmica**. Informe a variação média e a diferença entre faces da seção em K. A vista indica a face mais quente. Para o material, use o coeficiente de dilatação linear α em 1/K.
-- Salvar e reabrir `.kstruct.json` no esquema v23, com migração dos projetos v1 a v22 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v24, com migração dos projetos v1 a v23 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -141,6 +141,14 @@ Para ajustar uma única barra, abra **Modificadores de rigidez** no inspetor. In
 4. Para reproduzir a [placa de referência QDKT](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada), use 4 × 3 m, espessura de 10 cm, E = 30 GPa, ν = 0,20, as quatro bordas apoiadas e pZ = −5 kN/m². Repita com 8 × 6, 16 × 12 e 32 × 24 subdivisões.
 
 O fluxo de laje usa um painel isolado por projeto e resultados por caso estático. As propriedades do painel e da malha são guardadas no arquivo. Edições, desfazer e refazer descartam os resultados da revisão anterior.
+
+### Laje poligonal com aberturas
+
+Em **Modelo → Laje poligonal**, marque os vértices na planta XY do pavimento. Para posicionar um vértice com precisão, informe ΔX e ΔY a partir do anterior. Feche o anel pelo primeiro vértice, por **Enter** ou por **Fechar contorno**. Use **Desfazer vértice** para corrigir o traçado ou **Esc** para cancelá-lo.
+
+Com o painel lançado, escolha **Abertura na laje**, desenhe o novo anel e feche-o. As bordas externas começam simplesmente apoiadas e as das aberturas começam livres. Para editar, selecione a laje, escolha o contorno e o vértice no inspetor. O vínculo corresponde à borda que vai desse vértice ao próximo. Ao inserir um vértice na borda, ambos os trechos recebem o vínculo anterior. **Desfazer** recupera cada edição, inclusive a malha retangular original quando se abre um furo em um retângulo existente.
+
+A pressão e o peso próprio atuam sobre a área líquida. Os mapas de resultados mostram apenas o material e identificam o ponto da consulta. Quando o centroide cai em um vazio, a tabela informa as coordenadas de um ponto material próximo. [Ensaio do painel em L com abertura](docs/VALIDATION.md#ks-41--painel-poligonal-com-abertura)
 
 ### Padrões, casos, combinações e envelopes
 

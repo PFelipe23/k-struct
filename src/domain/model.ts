@@ -1,3 +1,11 @@
+import { meshPolygon } from "./polygonMesh";
+import {
+  normalizeRings,
+  polygonError,
+  stablePolygonSupports,
+  maxSlabVertices,
+  maxSlabRings,
+} from "./slabPolygon";
 import { distributeWind } from "./wind";
 import { z } from "zod";
 import { generationKey } from "./combinationFamilies";
@@ -553,7 +561,7 @@ const generatedBy = z.strictObject({
     factors: z.array(oldCombo.shape.factors.element).max(100),
   }),
 });
-export const projectSchema = projectV22.extend({
+const projectV23 = projectV22.extend({
   schemaVersion: z.literal(23),
   combinationProfile: z
     .strictObject({
@@ -587,6 +595,43 @@ export const projectSchema = projectV22.extend({
     .array(oldCombo.extend({ generation: generatedBy.optional() }))
     .max(100),
 });
+const rectangleSlab = projectV23.shape.slabs.element.extend({
+  polygon: z.undefined().optional(),
+});
+const polygonSlab = slabSchema
+  .pick({
+    id: true,
+    name: true,
+    levelId: true,
+    thickness: true,
+    materialId: true,
+  })
+  .extend({
+    formulation: z.literal("dkt"),
+    polygon: z.strictObject({
+      refinements: z.number().int().min(1).max(3),
+      rings: z
+        .array(
+          z
+            .array(
+              z.strictObject({
+                x: finite,
+                y: finite,
+                edgeId: id,
+                supported: flag,
+              }),
+            )
+            .min(3)
+            .max(maxSlabVertices),
+        )
+        .min(1)
+        .max(maxSlabRings),
+    }),
+  });
+export const projectSchema = projectV23.extend({
+  schemaVersion: z.literal(24),
+  slabs: z.array(z.union([rectangleSlab, polygonSlab])).max(1),
+});
 export function defaultSelfWeight() {
   return {
     enabled: false,
@@ -612,7 +657,8 @@ export type ResultEnvelope = Project["resultEnvelopes"][number];
 export type StructuralNode = Project["nodes"][number];
 export type Member = Project["members"][number];
 export type Slab = Project["slabs"][number];
-export type SlabEdge = keyof Slab["supports"];
+export type RectangleSlab = z.infer<typeof rectangleSlab>;
+export type PolygonSlab = z.infer<typeof polygonSlab>;
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
 export type UniformLoad = Project["loadPatterns"][number]["uniform"][number];
 export type SelectedObject = z.infer<typeof objectRef>;
@@ -662,7 +708,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 23,
+    schemaVersion: 24,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -746,6 +792,8 @@ function exceedsFileLimit(json: string) {
 }
 export function serializeProject(p: Project) {
   const data = projectSchema.parse(p);
+  for (const slab of data.slabs)
+    if (slab.polygon) slab.polygon.rings = normalizeRings(slab.polygon.rings);
   const pretty = JSON.stringify(data, null, 2);
   if (!exceedsFileLimit(pretty)) return pretty;
   const compact = JSON.stringify(data);
@@ -1063,6 +1111,15 @@ export function parseProject(source: string): Project {
     const old = projectV22.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 23 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 23
+  ) {
+    const old = projectV23.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 24 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1106,9 +1163,11 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 23, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 24, com valores numéricos finitos.",
     );
   }
+  for (const slab of parsed.data.slabs)
+    if (slab.polygon) slab.polygon.rings = normalizeRings(slab.polygon.rings);
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
   if (source.length * 3 > projectFileLimit) serializeProject(parsed.data);
@@ -1250,6 +1309,20 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${slab.name}: material inexistente.`);
     if (!p.guides.z.some((level) => level.id === slab.levelId))
       errors.push(`${slab.name}: pavimento inexistente.`);
+    if (slab.polygon) {
+      const error = polygonError(slab.polygon.rings);
+      if (error) errors.push(`${slab.name} · ${error}`);
+      else {
+        try {
+          meshPolygon(slab.polygon, 0);
+        } catch (e) {
+          errors.push(
+            `${slab.name} · ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      continue;
+    }
     for (const [start, span, count] of [
       [slab.x, slab.lengthX, slab.divisionsX],
       [slab.y, slab.lengthY, slab.divisionsY],
@@ -1454,9 +1527,13 @@ export function analysisErrors(p: Project): string[] {
       errors.push(
         `${slab.name}: a análise QDKT exige apoio simples nas quatro bordas.`,
       );
-    else if (Object.values(slab.supports).filter(Boolean).length < 2)
+    else if (
+      slab.polygon
+        ? !stablePolygonSupports(slab.polygon.rings)
+        : Object.values(slab.supports).filter(Boolean).length < 2
+    )
       errors.push(
-        `${slab.name}: aplique apoio simples em pelo menos duas bordas para impedir movimento de corpo rígido.`,
+        `${slab.name}: aplique apoio simples em pelo menos duas bordas que não estejam na mesma reta para impedir movimento de corpo rígido.`,
       );
     const material = p.materials.find((item) => item.id === slab.materialId)!;
     const rigidity =
@@ -1464,7 +1541,7 @@ export function analysisErrors(p: Project): string[] {
     if (
       !(rigidity > 0) ||
       !Number.isFinite(rigidity) ||
-      !Number.isFinite(slab.lengthX * slab.lengthY)
+      (!slab.polygon && !Number.isFinite(slab.lengthX * slab.lengthY))
     )
       errors.push(
         `${slab.name}: espessura, material ou área fora do intervalo numérico da análise.`,

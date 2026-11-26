@@ -31,7 +31,7 @@ export function slabBenchmarkProject() {
     nu,
   });
   project.loadPatterns[0].pressure = [{ slabId: slab.id, pz: pressureZ }];
-  return project;
+  return { ...project, slabs: [slab] };
 }
 
 // Navier's double sine series for a thin, simply supported plate, in SI.

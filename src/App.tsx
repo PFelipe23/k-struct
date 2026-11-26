@@ -34,6 +34,7 @@ import {
   ListChecks,
   Table2,
   Square,
+  Pentagon,
   PanelLeft,
   PanelRight,
   Scissors,
@@ -60,6 +61,9 @@ import {
 import {
   addMember,
   addSlab,
+  addPolygonSlab,
+  addSlabOpening,
+  newSlabRing,
   inspectNodeCoordinateChanges,
 } from "./domain/editing";
 import {
@@ -72,6 +76,7 @@ import {
   type Point3,
   type WorkPlane,
 } from "./domain/geometry";
+import { maxSlabVertices } from "./domain/slabPolygon";
 import MemberPointLoadDialog from "./components/MemberPointLoadDialog";
 import MemberDistributedLoadDialog from "./components/MemberDistributedLoadDialog";
 import type { MemberLoadSelection } from "./components/memberLoadInput";
@@ -167,6 +172,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v24") ??
       localStorage.getItem("kstruct.draft.v23") ??
       localStorage.getItem("kstruct.draft.v22") ??
       localStorage.getItem("kstruct.draft.v21") ??
@@ -280,8 +286,16 @@ export default function App() {
     guides: planeGuides,
     guide: activeGuide,
   } = viewPlane(planePanel);
+  const [outline, setOutline] = useState<Point3[]>([]);
+  const [outlineError, setOutlineError] = useState("");
+  const tracing = tool === "slabPolygon" || tool === "slabHole";
   const [pending, setPending] = useState<Point3 | null>(null),
     [display, setDisplay] = useState<Display | SlabDisplay>("model");
+  const clearPlacement = () => {
+    setPending(null);
+    setOutline([]);
+    setOutlineError("");
+  };
   const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
     () => new Map(),
   );
@@ -422,12 +436,7 @@ export default function App() {
     }
     const controller = new AbortController();
     const context = { project: p, envelope, cases: caseResults };
-    void evaluateEnvelope(
-      p,
-      envelope,
-      caseResults,
-      controller.signal,
-    ).then(
+    void evaluateEnvelope(p, envelope, caseResults, controller.signal).then(
       (result) => {
         if (!controller.signal.aborted)
           setCalculatedEnvelope({ ...context, result, problem: "" });
@@ -538,7 +547,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v23", serialized);
+      localStorage.setItem("kstruct.draft.v24", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -596,7 +605,7 @@ export default function App() {
       setEnvelopeView("members");
       setDerivedChoice({ kind: "envelope", id: selectedEnvelope.id });
       setTool("select");
-      setPending(null);
+      clearPlacement();
       return;
     }
     const selectedCombination = p.resultCombinations.find(
@@ -641,18 +650,18 @@ export default function App() {
   const activatePanel = (panel: Panel) => {
     if (panel === activePanel) return;
     setActivePanel(panel);
-    setPending(null);
+    clearPlacement();
     if (
-      tool === "slab" &&
+      (tool === "slab" || tracing) &&
       (panel === "perspective" || viewPlane(panel).plane.kind !== "XY")
     )
       setTool("select");
   };
   const changeLayout = (next: Layout) => {
     setLayout(next);
-    setPending(null);
+    clearPlacement();
     setActivePanel("primary");
-    if (tool === "slab") setTool("select");
+    if (tool === "slab" || tracing) setTool("select");
     if (next === "planes" || next === "triple")
       setPlanes((v) =>
         v.primary.kind === "XY"
@@ -661,7 +670,16 @@ export default function App() {
       );
   };
   const changeTool = (t: Tool) => {
-    if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
+    if (
+      (t === "slab" || t === "slabPolygon") &&
+      (!spatial || plane.kind !== "XY" || slab)
+    )
+      return;
+    if (
+      t === "slabHole" &&
+      (plane.kind !== "XY" || slab?.levelId !== activeGuide.id)
+    )
+      return;
     if (
       t !== "select" &&
       t !== "pointLoad" &&
@@ -670,7 +688,7 @@ export default function App() {
     )
       activatePanel("primary");
     setTool(t);
-    setPending(null);
+    clearPlacement();
     setDisplay("model");
   };
   const pickMemberLoad = (id: string, point: Point3) => {
@@ -697,7 +715,7 @@ export default function App() {
         primary: { kind: "XY", guideId: slab.levelId },
       }));
       setTool("select");
-      setPending(null);
+      clearPlacement();
     }
     setDisplay(value);
   };
@@ -709,7 +727,7 @@ export default function App() {
     selectObject({ kind: "member", id: target.memberId });
     setPreferredSection(target);
     setTool("select");
-    setPending(null);
+    clearPlacement();
   };
   const sectionControls =
     diagram && reading
@@ -731,7 +749,7 @@ export default function App() {
     setLaunchSection("");
     setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
-    setPending(null);
+    clearPlacement();
     setActivePanel("primary");
     setPlanes(initialPlanes(project.slabs[0]?.levelId));
     if (
@@ -776,21 +794,45 @@ export default function App() {
   const remove = () => {
     if (edit((p) => removeSelection(p, selection))) return;
     setSelection([]);
-    setPending(null);
+    clearPlacement();
+  };
+  const finishOutline = () => {
+    let id = "";
+    const error = edit((draft) => {
+      if (tool === "slabHole" && slab && slab.levelId === activeGuide.id) {
+        addSlabOpening(draft, slab.id, outline);
+        id = slab.id;
+      } else if (tool === "slabPolygon")
+        id = addPolygonSlab(draft, activeGuide.id, [
+          newSlabRing(outline, true),
+        ]).id;
+      else throw new Error("Ative a planta da laje para lançar a abertura.");
+    });
+    if (error) {
+      setOutlineError(error);
+      return;
+    }
+    selectObject({ kind: "slab", id });
+    changeTool("select");
   };
   const undo = () => {
+    if (tracing) {
+      setOutline((points) => points.slice(0, -1));
+      setOutlineError("");
+      return;
+    }
     if (!history.past.length) return;
     invalidateResults();
     dispatch({ type: "undo" });
     setSelection([]);
-    setPending(null);
+    clearPlacement();
   };
   const redo = () => {
     if (!history.future.length) return;
     invalidateResults();
     dispatch({ type: "redo" });
     setSelection([]);
-    setPending(null);
+    clearPlacement();
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -815,6 +857,29 @@ export default function App() {
         (e.target as HTMLElement).blur();
         setTimeout(() => void save(), 0);
         return;
+      }
+      if (
+        tracing &&
+        !(e.target as HTMLElement).closest("input,textarea,select")
+      ) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          changeTool("select");
+          return;
+        }
+        if (
+          e.key === "Backspace" ||
+          ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z")
+        ) {
+          e.preventDefault();
+          if (!e.shiftKey) undo();
+          return;
+        }
+        if (e.key === "Enter" && !(e.target as HTMLElement).closest("button")) {
+          e.preventDefault();
+          finishOutline();
+          return;
+        }
       }
       if (e.key === "Escape" && tool === "member") {
         changeTool("select");
@@ -871,6 +936,22 @@ export default function App() {
     }
   };
   const onPoint = (point: Point3) => {
+    if (tracing) {
+      if (
+        outline.length >= 3 &&
+        Math.hypot(point.x - outline[0].x, point.y - outline[0].y) < 1e-6
+      ) {
+        finishOutline();
+        return;
+      }
+      if (outline.length >= maxSlabVertices) {
+        setOutlineError(`Use até ${maxSlabVertices} vértices por painel.`);
+        return;
+      }
+      setOutlineError("");
+      setOutline((points) => [...points, point]);
+      return;
+    }
     if (tool === "node") {
       let id = "";
       const error = edit((p) => {
@@ -1124,7 +1205,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
     }
     setTab("Modelo");
     setTool("select");
-    setPending(null);
+    clearPlacement();
     const selectedSlab = available.find(({ kind }) => kind === "slab");
     if (spatial && selectedSlab) {
       const item = p.slabs.find(({ id }) => id === selectedSlab.id);
@@ -1218,7 +1299,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
           <button
             title="Desfazer (Ctrl+Z)"
             aria-label="Desfazer"
-            disabled={!history.past.length}
+            disabled={tracing ? !outline.length : !history.past.length}
             onClick={undo}
           >
             <Undo2 size={17} />
@@ -1226,7 +1307,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
           <button
             title="Refazer (Ctrl+Shift+Z)"
             aria-label="Refazer"
-            disabled={!history.future.length}
+            disabled={tracing || !history.future.length}
             onClick={redo}
           >
             <Redo2 size={17} />
@@ -1308,6 +1389,29 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                     <Square size={21} />
                     <span>Laje</span>
                     <kbd>L</kbd>
+                  </button>
+                )}
+                {spatial && (
+                  <button
+                    className={`tool-button ${tracing ? "active" : ""}`}
+                    aria-pressed={tracing}
+                    disabled={
+                      plane.kind !== "XY" ||
+                      (!!slab && slab.levelId !== activeGuide.id)
+                    }
+                    title={
+                      slab
+                        ? "Traçar abertura e analisar o painel com triângulos DKT"
+                        : "Traçar o contorno da laje na planta XY"
+                    }
+                    onClick={() =>
+                      changeTool(
+                        tracing ? "select" : slab ? "slabHole" : "slabPolygon",
+                      )
+                    }
+                  >
+                    <Pentagon size={21} />
+                    <span>{slab ? "Abertura na laje" : "Laje poligonal"}</span>
                   </button>
                 )}
                 <button
@@ -1405,7 +1509,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   <select
                     value={memberMode}
                     onChange={(e) => {
-                      setPending(null);
+                      clearPlacement();
                       setMemberMode(e.target.value as typeof memberMode);
                     }}
                   >
@@ -1553,7 +1657,9 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               </b>
               <span>
                 {slab
-                  ? `Placa delgada DKT · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
+                  ? slab.polygon
+                    ? "Placa triangular DKT · contornos e aberturas"
+                    : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
                   : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
@@ -1912,7 +2018,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             <button
               className="selection-trigger"
               onClick={() => {
-                setPending(null);
+                clearPlacement();
                 setTool("select");
                 setLaunchDialog("selection");
               }}
@@ -1979,29 +2085,48 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   : selection.length
               }
               onPlane={(kind) => {
-                setPending(null);
+                clearPlacement();
                 setPlanes((v) => ({
                   ...v,
                   [planePanel]: { kind, guideId: "" },
                 }));
-                if (tool === "slab") changeTool("select");
+                if (tool === "slab" || tracing) changeTool("select");
               }}
               onGuide={(id) => {
+                if (tracing) changeTool("select");
                 setPlanes((v) => ({
                   ...v,
                   [planePanel]: { kind: plane.kind, guideId: id },
                 }));
-                setPending(null);
+                clearPlacement();
               }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
               editGuides={() => {
-                setPending(null);
+                clearPlacement();
                 setLaunchDialog("guides");
               }}
               selectPlane={selectPlane}
               replicate={() => setLaunchDialog("replicate")}
               connect={() => setLaunchDialog("mesh")}
             />
+          )}
+          {tracing && (
+            <div className="slab-trace-controls" aria-label="Traçado da laje">
+              <span>
+                {tool === "slabHole" ? "Abertura" : "Contorno externo"} ·{" "}
+                {outline.length} vértices
+              </span>
+              <button disabled={outline.length < 3} onClick={finishOutline}>
+                Fechar contorno
+              </button>
+              <button disabled={!outline.length} onClick={undo}>
+                Desfazer vértice
+              </button>
+              <button onClick={() => changeTool("select")}>
+                Cancelar traçado
+              </button>
+              {outlineError && <span role="alert">{outlineError}</span>}
+            </div>
           )}
           <div className={`viewports ${layout}`}>
             {(
@@ -2057,6 +2182,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   }
                   onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                   onSpan={placeMember}
+                  outline={active && tracing ? outline : []}
                   pending={active ? pending : null}
                   onPoint={onPoint}
                   onSelect={selectObject}
@@ -2204,21 +2330,23 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             ? "Clique na barra na posição da força ou do momento"
             : tool === "distributedLoad"
               ? "Clique na barra para indicar o início da carga por trecho"
-              : tool === "slab"
-                ? pending
-                  ? "Marque o canto oposto da laje · Esc para cancelar"
-                  : "Marque o primeiro canto da laje na planta XY"
-                : pending
-                  ? "Marque a segunda extremidade · Esc para cancelar"
-                  : tool === "member"
-                    ? memberMode === "span"
-                      ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
-                      : "Marque a primeira extremidade da barra"
-                    : tool === "node"
-                      ? "Clique na malha para inserir um nó"
-                      : selection.length > 1
-                        ? `${selection.length} objetos selecionados`
-                        : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+              : tracing
+                ? "Marque os vértices em sequência · Enter ou primeiro vértice para fechar · Esc para cancelar"
+                : tool === "slab"
+                  ? pending
+                    ? "Marque o canto oposto da laje · Esc para cancelar"
+                    : "Marque o primeiro canto da laje na planta XY"
+                  : pending
+                    ? "Marque a segunda extremidade · Esc para cancelar"
+                    : tool === "member"
+                      ? memberMode === "span"
+                        ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
+                        : "Marque a primeira extremidade da barra"
+                      : tool === "node"
+                        ? "Clique na malha para inserir um nó"
+                        : selection.length > 1
+                          ? `${selection.length} objetos selecionados`
+                          : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           {units.force} · {units.length} · rad <i />{" "}
@@ -2319,7 +2447,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             if (next.envelopeId) {
               setEnvelopeView("members");
               setTool("select");
-              setPending(null);
+              clearPlacement();
             }
             setDisplay("model");
             setMessage("Definições de carga aplicadas.");
