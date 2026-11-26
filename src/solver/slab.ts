@@ -1,6 +1,7 @@
 import type { AnalysisCase, Project, Slab } from "../domain/model";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { meshSlab, type SlabDof, type SlabMesh } from "../domain/slab";
+import { selfWeightSummary } from "../domain/selfWeight";
 
 const slabDofs = [3, 4, 5] as const;
 interface SlabInput {
@@ -51,7 +52,22 @@ export function exportSlab(
   const pressureZ = analysisCase.factors.reduce(
     (sum, { patternId, factor }) => {
       const pattern = project.loadPatterns.find(({ id }) => id === patternId)!;
-      return sum + (pattern.pressure[0]?.pz ?? 0) * factor;
+      const manualPressure =
+        pattern.pressure.find(({ slabId }) => slabId === definition.id)?.pz ??
+        0;
+      if (
+        pattern.selfWeight.enabled &&
+        !pattern.selfWeight.direction.endsWith("Z")
+      )
+        throw new Error(
+          `O padrão ${pattern.name} direciona o peso próprio fora do eixo Z, que não é suportado pelo painel horizontal ${definition.name}.`,
+        );
+      const automaticPressure = pattern.selfWeight.enabled
+        ? (selfWeightSummary(project, pattern).slabs.find(
+            ({ slabId }) => slabId === definition.id,
+          )?.pz ?? 0)
+        : 0;
+      return sum + (manualPressure + automaticPressure) * factor;
     },
     0,
   );

@@ -28,6 +28,7 @@ describe("atribuição em lote de seção, apoios e cargas (KS-11)", () => {
       nodal: [],
       uniform: [{ ...uniformLoad(b1.id), qz: -9000 }],
       pressure: [],
+      selfWeight: { ...p.loadPatterns[0].selfWeight },
     });
     p.loadPatterns[0].uniform = [
       { ...uniformLoad(b1.id), qx: 1500, qz: -2000 },

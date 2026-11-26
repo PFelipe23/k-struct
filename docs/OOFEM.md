@@ -34,7 +34,7 @@ A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python.
 ## Contrato de análise
 
 - Um passo de `StaticStructural`. As barras no plano usam `Beam2d` no domínio `2dBeam`. As barras espaciais usam `Beam3d` no domínio `3dShell`, com seis graus de liberdade por nó.
-- Barras retangulares elásticas com ligações rígidas e cargas uniformes e nodais. O peso próprio é atribuído como carga.
+- Barras retangulares elásticas com ligações rígidas e cargas uniformes e nodais. O peso próprio automático é exportado como carga distribuída por barra; painéis horizontais convertem a componente vertical em pressão uniforme.
 - `beamShearCoeff = 1e18` aproxima a hipótese de Euler–Bernoulli.
 - `Beam3d` usa inércias Iy/Iz e a constante de torção de Saint-Venant calculada pela série para uma seção retangular maciça.
 - Uma execução ativa por vez, com diretório temporário, prazo de 60 s e limite de 32 MB por arquivo de saída.

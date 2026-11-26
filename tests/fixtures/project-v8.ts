@@ -11,6 +11,10 @@ export function projectV9(project: Project) {
   return {
     ...project,
     schemaVersion: 9,
+    loadPatterns: project.loadPatterns.map(({ selfWeight, ...pattern }) => {
+      void selfWeight;
+      return pattern;
+    }),
     sections: project.sections.map((s) => {
       const { shape, ...legacy } = rectangle(s);
       return legacy;

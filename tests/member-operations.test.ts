@@ -61,6 +61,7 @@ describe("edição de barras físicas", () => {
       nodal: [],
       pressure: [],
       uniform: [{ ...uniformLoad("V1"), qz: 1500 }],
+      selfWeight: { ...p.loadPatterns[0].selfWeight },
     });
     const snapshot = structuredClone(p),
       plan = planMemberEdit(p, split),
@@ -114,6 +115,7 @@ describe("edição de barras físicas", () => {
           nodal: [{ ...nodalLoad(joint), my: 5 }],
           uniform: [],
           pressure: [],
+          selfWeight: { ...p.loadPatterns[0].selfWeight },
         });
       }),
     ).toThrow(/carga nodal.*Vento/);

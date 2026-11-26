@@ -64,6 +64,47 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
   expect(parseProject(serializeProject(project))).toEqual(project);
 });
 
+it.skipIf(!executable)(
+  "KS-28 · peso próprio de barras e painéis fecha as reações no OOFEM",
+  () => {
+    const beam = beamExample();
+    beam.materials[0].density = 2500;
+    Object.assign(beam.sections[0], { width: 0.2, height: 0.4 });
+    beam.loadPatterns[0].uniform = [];
+    Object.assign(beam.loadPatterns[0].selfWeight, {
+      enabled: true,
+      direction: "-Z",
+      gravity: 10,
+      multiplier: 1,
+    });
+
+    const beamResult = solve(beam);
+    expect(
+      beamResult.reactions.find(({ nodeId }) => nodeId === "A")!.fz,
+    ).toBeCloseTo(6000, 0);
+    expect(
+      beamResult.reactions.find(({ nodeId }) => nodeId === "B")!.fz,
+    ).toBeCloseTo(6000, 0);
+
+    const slab = slabBenchmarkProject();
+    const definition = slab.slabs[0];
+    slab.materials.find(({ id }) => id === definition.materialId)!.density =
+      2500;
+    slab.loadPatterns[0].pressure = [];
+    Object.assign(slab.loadPatterns[0].selfWeight, {
+      enabled: true,
+      direction: "-Z",
+      gravity: 10,
+      multiplier: 1,
+    });
+
+    const slabResult = solve(slab).slab!;
+    expect(slabResult.totalLoadZ).toBeCloseTo(-30_000, 0);
+    expect(slabResult.totalReactionZ).toBeCloseTo(30_000, 0);
+    expect(slabResult.center.uz).toBeLessThan(0);
+  },
+);
+
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
   it("KS-20 · rolete XZ transmite somente a reação normal", () => {
     const p = inclinedBeam();
@@ -557,6 +598,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       nodal: [],
       uniform: [],
       pressure: [{ slabId: slab.id, pz: 500 }],
+      selfWeight: { ...p.loadPatterns[0].selfWeight },
     });
     p.analysisCases.push({
       id: "S",
@@ -1104,6 +1146,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         nodal: secondary,
         uniform: [],
         pressure: [],
+        selfWeight: { ...permanent.selfWeight },
       });
       const factors = (g: number, w: number) => [
         { patternId: permanent.id, factor: g },

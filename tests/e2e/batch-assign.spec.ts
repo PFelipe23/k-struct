@@ -164,6 +164,7 @@ for (const mode of ["planar", "spatial"] as const) {
       nodal: [{ ...nodalLoad("B"), fz: -2387 }],
       uniform: [],
       pressure: [],
+      selfWeight: { ...p.loadPatterns[0].selfWeight },
     });
     await page.addInitScript(
       (source) => localStorage.setItem("kstruct.draft.v11", source),

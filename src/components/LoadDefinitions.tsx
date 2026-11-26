@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
+  defaultSelfWeight,
   nextName,
   uid,
   type Project,
   type ResultEnvelope,
 } from "../domain/model";
+import { selfWeightSummary } from "../domain/selfWeight";
 
 export type LoadDefinitionsPage =
   | "patterns"
@@ -30,6 +32,11 @@ type DraftDefinition = {
 };
 const parseFactor = (value: string) =>
   value.trim() ? Number(value.replace(",", ".")) : NaN;
+const formatSI = (value: number) =>
+  value.toLocaleString("pt-BR", {
+    useGrouping: false,
+    maximumFractionDigits: 4,
+  });
 
 export default function LoadDefinitions({
   project,
@@ -83,6 +90,14 @@ export default function LoadDefinitions({
   const [envelopeId, setEnvelopeId] = useState(initialEnvelopeId);
   const [error, setError] = useState("");
   const pattern = patterns.find((item) => item.id === patternId)!;
+  const selfWeight = selfWeightSummary(project, pattern);
+  const selfWeightTotal = {
+    x: selfWeight.members.reduce((sum, load) => sum + load.totalX, 0),
+    y: selfWeight.members.reduce((sum, load) => sum + load.totalY, 0),
+    z:
+      selfWeight.members.reduce((sum, load) => sum + load.totalZ, 0) +
+      selfWeight.slabs.reduce((sum, load) => sum + load.totalZ, 0),
+  };
   const envelope = envelopes.find((item) => item.id === envelopeId);
   const editingCase = page === "cases";
   const definitions = editingCase ? cases : combinations;
@@ -113,6 +128,7 @@ export default function LoadDefinitions({
         nodal: [],
         uniform: [],
         pressure: [],
+        selfWeight: defaultSelfWeight(),
       },
     ]);
     setPatternId(id);
@@ -385,6 +401,154 @@ export default function LoadDefinitions({
                 ` · ${pattern.pressure.length} pressões em laje`}
               . Atribua as cargas pelo painel de propriedades.
             </p>
+            <fieldset className="case-factors">
+              <legend>Peso próprio automático</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Ativar peso próprio no padrão"
+                  checked={pattern.selfWeight.enabled}
+                  onChange={(event) =>
+                    setPatterns(
+                      patterns.map((item) =>
+                        item.id === patternId
+                          ? {
+                              ...item,
+                              selfWeight: {
+                                ...item.selfWeight,
+                                enabled: event.target.checked,
+                              },
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+                Considerar peso próprio neste padrão
+              </label>
+              {pattern.selfWeight.enabled && (
+                <>
+                  <label>
+                    Direção global
+                    <select
+                      aria-label="Direção do peso próprio"
+                      value={pattern.selfWeight.direction}
+                      onChange={(event) =>
+                        setPatterns(
+                          patterns.map((item) =>
+                            item.id === patternId
+                              ? {
+                                  ...item,
+                                  selfWeight: {
+                                    ...item.selfWeight,
+                                    direction: event.target
+                                      .value as typeof item.selfWeight.direction,
+                                  },
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    >
+                      {(["-Z", "+Z", "-Y", "+Y", "-X", "+X"] as const).map(
+                        (direction) => (
+                          <option key={direction} value={direction}>
+                            {direction}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    Gravidade (m/s²)
+                    <input
+                      aria-label="Gravidade do peso próprio"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={pattern.selfWeight.gravity}
+                      onChange={(event) =>
+                        setPatterns(
+                          patterns.map((item) =>
+                            item.id === patternId
+                              ? {
+                                  ...item,
+                                  selfWeight: {
+                                    ...item.selfWeight,
+                                    gravity: Number(event.target.value),
+                                  },
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Multiplicador
+                    <input
+                      aria-label="Multiplicador do peso próprio"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={pattern.selfWeight.multiplier}
+                      onChange={(event) =>
+                        setPatterns(
+                          patterns.map((item) =>
+                            item.id === patternId
+                              ? {
+                                  ...item,
+                                  selfWeight: {
+                                    ...item.selfWeight,
+                                    multiplier: Number(event.target.value),
+                                  },
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <p>
+                    Intensidades calculadas a partir da massa específica e da
+                    geometria bruta. Para barras, q em N/m; para painéis, p em
+                    N/m².
+                  </p>
+                  {selfWeight.members.length > 0 && (
+                    <ul aria-label="Contribuições de peso próprio das barras">
+                      {selfWeight.members.map((load) => (
+                        <li key={load.memberId}>
+                          {load.memberName}: ({formatSI(load.qx)},{" "}
+                          {formatSI(load.qy)}, {formatSI(load.qz)}) N/m; total (
+                          {formatSI(load.totalX)}, {formatSI(load.totalY)},{" "}
+                          {formatSI(load.totalZ)}) N
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {selfWeight.slabs.map((load) => (
+                    <p key={load.slabId}>
+                      {load.slabName}: pZ = {formatSI(load.pz)} N/m²; total ={" "}
+                      {formatSI(load.totalZ)} N
+                    </p>
+                  ))}
+                  <strong>
+                    Total do padrão (barras e painéis): (
+                    {formatSI(selfWeightTotal.x)}, {formatSI(selfWeightTotal.y)}
+                    , {formatSI(selfWeightTotal.z)}) N
+                  </strong>
+                  {selfWeight.warnings.map((warning) => (
+                    <p key={warning} role="status" className="solver-error">
+                      {warning}
+                    </p>
+                  ))}
+                  <p>
+                    Confira cargas manuais coincidentes e não ative o peso
+                    próprio em mais de um padrão usado pelo mesmo caso.
+                  </p>
+                </>
+              )}
+            </fieldset>
           </div>
         ) : page === "envelopes" ? (
           <div className="load-definition-fields">

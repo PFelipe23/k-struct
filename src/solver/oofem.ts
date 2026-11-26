@@ -20,6 +20,7 @@ import {
 } from "../domain/model";
 import { beamStations, type SectionLocation } from "../domain/beamMesh";
 import { supportBasis, supportToGlobal } from "../domain/supports";
+import { selfWeightSummary } from "../domain/selfWeight";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
@@ -110,6 +111,18 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     };
   }
   const spatial = p.mode === "spatial";
+  const unsupportedPlanarWeight = analysisCase.factors
+    .filter(({ factor }) => factor !== 0)
+    .map(({ patternId }) => p.loadPatterns.find(({ id }) => id === patternId)!)
+    .find(
+      (pattern) =>
+        pattern.selfWeight.enabled &&
+        pattern.selfWeight.direction.endsWith("Y"),
+    );
+  if (!spatial && unsupportedPlanarWeight)
+    throw new Error(
+      `O padrão ${unsupportedPlanarWeight.name} direciona o peso próprio para Y, fora do plano XZ. Use um projeto espacial ou escolha ±X/±Z.`,
+    );
   const dofs = spatial ? spatialDofs : planarDofs;
   const dofList = `${dofs.length} ${dofs.map(([, number]) => number).join(" ")}`;
   const nodes: MeshNode[] = p.nodes.map((n, i) => ({
@@ -211,6 +224,35 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       bcs.push(
         `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${scaleLoad(values).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
       );
+    }
+    if (pat.selfWeight.enabled) {
+      const summary = selfWeightSummary(p, pat);
+      if (
+        summary.warnings.some((warning) =>
+          warning.includes("intervalo numérico"),
+        )
+      )
+        throw new Error(
+          `O peso próprio do padrão ${pat.name} excede o intervalo numérico.`,
+        );
+      for (const load of summary.members) {
+        const local = localComponents(
+          { x: load.qx, y: load.qy, z: load.qz },
+          axes.get(load.memberId)!,
+        );
+        const values = scaleLoad(
+          spatial
+            ? [local.x, local.y, local.z, 0, 0, 0]
+            : [local.x, local.z, 0],
+        );
+        if (!values.some(Boolean)) continue;
+        const ids = memberElements
+          .get(load.memberId)!
+          .flatMap((number) => [number, 1]);
+        bcs.push(
+          `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${values.join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
+        );
+      }
     }
   }
   const deck = [
@@ -512,6 +554,20 @@ export function checkEquilibrium(
         interpolate(a, b, 0.5),
       );
     }
+    if (pat.selfWeight.enabled)
+      for (const load of selfWeightSummary(p, pat).members) {
+        const member = members.get(load.memberId)!;
+        const a = byId.get(member.start)!,
+          b = byId.get(member.end)!;
+        accumulate(
+          scale(
+            { x: load.qx, y: load.qy, z: load.qz },
+            distance(a, b) * f.factor,
+          ),
+          origin,
+          interpolate(a, b, 0.5),
+        );
+      }
   }
   if (
     sum.some(

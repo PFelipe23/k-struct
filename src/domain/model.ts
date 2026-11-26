@@ -83,6 +83,14 @@ const patternSchema = legacyPattern.extend({
     .max(patternLoadLimit),
   uniform: z.array(legacyUniform.extend({ qy: finite })).max(patternLoadLimit),
 });
+const selfWeightSchema = z
+  .object({
+    enabled: flag,
+    direction: z.enum(["+X", "-X", "+Y", "-Y", "+Z", "-Z"]),
+    gravity: finite.nonnegative(),
+    multiplier: finite.nonnegative(),
+  })
+  .strict();
 const guideSchema = z.object({ id, name: text, position: finite }).strict();
 const legacySchema = z
   .object({
@@ -180,6 +188,10 @@ const slabSchema = z
   })
   .strict();
 const slabPressureSchema = z.object({ slabId: id, pz: finite }).strict();
+const selfWeightPatternSchema = patternSchema.extend({
+  pressure: z.array(slabPressureSchema).max(1),
+  selfWeight: selfWeightSchema,
+});
 const triangleProjectV5 = envelopeSchema.extend({
   schemaVersion: z.literal(5),
   slabs: z.array(slabSchema).max(1),
@@ -287,11 +299,15 @@ const supportFrameSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
-export const projectSchema = projectV10.extend({
+const projectV11 = projectV10.extend({
   schemaVersion: z.literal(11),
   nodes: z
     .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
     .max(1000),
+});
+export const projectSchema = projectV11.extend({
+  schemaVersion: z.literal(12),
+  loadPatterns: z.array(selfWeightPatternSchema).min(1).max(100),
 });
 export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
@@ -358,7 +374,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 11,
+    schemaVersion: 12,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -387,6 +403,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
         nodal: [],
         uniform: [],
         pressure: [],
+        selfWeight: defaultSelfWeight(),
       },
     ],
     analysisCases: [
@@ -400,6 +417,15 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
     resultCombinations: [],
     resultEnvelopes: [],
     mesh: { segmentsPerMember: 8 },
+  };
+}
+
+export function defaultSelfWeight() {
+  return {
+    enabled: false,
+    direction: "-Z" as const,
+    gravity: 9.80665,
+    multiplier: 1,
   };
 }
 
@@ -642,10 +668,27 @@ export function parseProject(source: string): Project {
     const old = projectV10.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 11 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 11
+  ) {
+    const old = projectV11.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 12,
+        loadPatterns: old.data.loadPatterns.map((pattern) => ({
+          ...pattern,
+          selfWeight: defaultSelfWeight(),
+        })),
+      };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 11, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 12, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));

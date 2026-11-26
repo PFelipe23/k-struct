@@ -58,7 +58,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(11);
+    expect(p.schemaVersion).toBe(12);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -183,10 +183,15 @@ describe("laje retangular isolada", () => {
     const quadV5 = {
       ...v5,
       slabs: [{ ...geometry, z: 1.25, nx: divisionsX, ny: divisionsY }],
-      loadPatterns: original.loadPatterns.map(({ pressure, ...pattern }) => ({
-        ...pattern,
-        pressures: pressure.map(({ slabId, pz }) => ({ slabId, qz: pz })),
-      })),
+      loadPatterns: original.loadPatterns.map(
+        ({ pressure, selfWeight, ...pattern }) => {
+          void selfWeight;
+          return {
+            ...pattern,
+            pressures: pressure.map(({ slabId, pz }) => ({ slabId, qz: pz })),
+          };
+        },
+      ),
     };
     const imported = parseProject(JSON.stringify(quadV5));
     const [panel] = imported.slabs;
