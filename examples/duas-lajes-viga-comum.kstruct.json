@@ -1,0 +1,227 @@
+{
+  "format": "kstruct",
+  "schemaVersion": 27,
+  "id": "pavimento-ks43",
+  "name": "Duas lajes sobre viga comum",
+  "units": "N-m-kg-s",
+  "nodes": [
+    {
+      "id": "apoio-i",
+      "name": "N1",
+      "x": 4,
+      "y": 0,
+      "z": 3,
+      "restraints": {
+        "ux": true,
+        "uz": true,
+        "ry": true,
+        "uy": true,
+        "rx": false,
+        "rz": false
+      }
+    },
+    {
+      "id": "apoio-j",
+      "name": "N2",
+      "x": 4,
+      "y": 3,
+      "z": 3,
+      "restraints": {
+        "ux": true,
+        "uz": true,
+        "ry": false,
+        "uy": false,
+        "rx": false,
+        "rz": false
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": "viga-comum",
+      "name": "B1",
+      "start": "apoio-i",
+      "end": "apoio-j",
+      "sectionId": "rect",
+      "roll": 0
+    }
+  ],
+  "materials": [
+    {
+      "id": "steel",
+      "name": "Material M1",
+      "E": 200000000000,
+      "nu": 0.3,
+      "density": 7850,
+      "alpha": 0
+    },
+    {
+      "id": "concreto-c30",
+      "name": "Concreto",
+      "E": 30000000000,
+      "nu": 0.2,
+      "density": 2500,
+      "alpha": 0
+    }
+  ],
+  "sections": [
+    {
+      "shape": "rectangle",
+      "width": 0.25,
+      "height": 0.5,
+      "id": "rect",
+      "name": "Retangular R1",
+      "materialId": "concreto-c30"
+    }
+  ],
+  "loadPatterns": [
+    {
+      "id": "G",
+      "name": "Carga permanente",
+      "nodal": [],
+      "uniform": [],
+      "pressure": [
+        {
+          "slabId": "laje-1",
+          "pz": -5000
+        }
+      ],
+      "selfWeight": {
+        "enabled": false,
+        "direction": "-Z",
+        "gravity": 9.80665,
+        "multiplier": 1
+      }
+    }
+  ],
+  "analysisCases": [
+    {
+      "id": "EL",
+      "name": "EL · Estática linear",
+      "type": "linear-static",
+      "factors": [
+        {
+          "patternId": "G",
+          "factor": 1
+        }
+      ]
+    }
+  ],
+  "mesh": {
+    "segmentsPerMember": 16
+  },
+  "mode": "spatial",
+  "guides": {
+    "x": [
+      {
+        "id": "X1",
+        "name": "1",
+        "position": 0
+      },
+      {
+        "id": "X2",
+        "name": "2",
+        "position": 4
+      },
+      {
+        "id": "X3",
+        "name": "3",
+        "position": 8
+      }
+    ],
+    "y": [
+      {
+        "id": "YA",
+        "name": "A",
+        "position": 0
+      },
+      {
+        "id": "YB",
+        "name": "B",
+        "position": 4
+      },
+      {
+        "id": "YC",
+        "name": "C",
+        "position": 8
+      }
+    ],
+    "z": [
+      {
+        "id": "base",
+        "name": "Base",
+        "position": 0
+      },
+      {
+        "id": "level1",
+        "name": "Pav. 1",
+        "position": 3
+      },
+      {
+        "id": "level2",
+        "name": "Pav. 2",
+        "position": 6
+      }
+    ]
+  },
+  "resultCombinations": [],
+  "resultEnvelopes": [],
+  "slabs": [
+    {
+      "id": "laje-1",
+      "name": "L1",
+      "levelId": "level1",
+      "x": 0,
+      "y": 0,
+      "lengthX": 4,
+      "lengthY": 3,
+      "thickness": 0.1,
+      "materialId": "concreto-c30",
+      "divisionsX": 16,
+      "divisionsY": 16,
+      "supports": {
+        "xMin": true,
+        "xMax": true,
+        "yMin": true,
+        "yMax": true
+      },
+      "formulation": "qdkt"
+    },
+    {
+      "id": "laje-2",
+      "name": "L2",
+      "levelId": "level1",
+      "x": 4,
+      "y": 0,
+      "lengthX": 4,
+      "lengthY": 3,
+      "thickness": 0.1,
+      "materialId": "concreto-c30",
+      "divisionsX": 16,
+      "divisionsY": 16,
+      "supports": {
+        "xMin": true,
+        "xMax": true,
+        "yMin": true,
+        "yMax": true
+      },
+      "formulation": "qdkt"
+    }
+  ],
+  "selectionGroups": [],
+  "meshConnections": [],
+  "slabJoint": {
+    "a": {
+      "slabId": "laje-1",
+      "edgeId": "xMax"
+    },
+    "b": {
+      "slabId": "laje-2",
+      "edgeId": "xMin"
+    },
+    "kind": "elastic",
+    "stiffness": 1000000,
+    "support": "beam",
+    "memberId": "viga-comum"
+  }
+}

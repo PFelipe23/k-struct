@@ -655,3 +655,52 @@ Com `OOFEM_BIN` configurado para a versão 3.0 do projeto, reproduza os ensaios 
 npm test -- tests/slab-sizing.test.ts tests/plate.integration.test.ts tests/polygon-slab.test.ts tests/oofem.integration.test.ts
 npm run test:e2e -- slab.spec.ts
 ```
+
+## KS-43 · vínculo entre duas lajes e viga comum
+
+Abra o [projeto de exemplo](../examples/duas-lajes-viga-comum.kstruct.json) no KStruct desktop. L1 e L2 medem 4 × 3 m cada, com espessura de 0,10 m, E de 30 GPa e ν de 0,20. Em X = 4 m há uma viga de concreto de 0,25 × 0,50 m, entre Y = 0 e Y = 3 m. O primeiro nó restringe UX, UY, UZ e RY. O segundo restringe UX e UZ. As demais bordas externas das lajes têm apoio simples. O padrão G aplica −5 kN/m² apenas em L1. A resultante vertical aplicada é −60 kN.
+
+Em **Modelo → Vínculo entre lajes**, mantenha a mesma viga e altere apenas a ligação à flexão. A orientação da borda no contorno de L1 é +Y. Na tabela, Δθ é a rotação de L2 menos a de L1 nessa direção. M₁ e M₂ são os momentos integrados nas faces de L1 e L2. A força vertical é a ação líquida das lajes sobre a viga. Parte da carga vai diretamente aos apoios externos das placas. As verificações usam o executável OOFEM 3.0 fixado no projeto.
+
+| Malha de cada painel QDKT | Ligação | FZ na viga (kN) | M₁ (kN·m) | M₂ (kN·m) | Máx. abs. Δθ (mrad) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 8 × 8 | Articulada | −8,6580 | 0 | 0 | 0,77900 |
+| 8 × 8 | Semirrígida | −11,0248 | +1,06815 | −1,06815 | 0,55567 |
+| 8 × 8 | Contínua | −17,0378 | +3,76211 | −3,76211 | 0 |
+| 16 × 16 | Articulada | −7,8302 | 0 | 0 | 0,78824 |
+| 16 × 16 | Semirrígida | −10,6144 | +1,10525 | −1,10525 | 0,56726 |
+| 16 × 16 | Contínua | −18,0638 | +4,00786 | −4,00786 | 0 |
+| 32 × 32 | Articulada | −7,5477 | 0 | 0 | 0,79056 |
+| 32 × 32 | Semirrígida | −10,5755 | +1,11475 | −1,11475 | 0,57018 |
+| 32 × 32 | Contínua | −18,8487 | +4,07622 | −4,07622 | 0 |
+
+A ligação semirrígida da tabela usa kθ = 1.000 kN·m/(rad·m). Entre as malhas 16 × 16 e 32 × 32, sua carga na viga varia cerca de 0,37% e o momento integrado, 0,86%. Na contínua, a carga na viga varia cerca de 4,35% no mesmo refinamento. A conservação da carga total e a convergência de uma grandeza local são verificações distintas.
+
+Em cada uma das quatro discretizações de 4 × 4 até 32 × 32, o ensaio varia kθ entre 0,001 e 10⁸ kN·m/(rad·m). No limite flexível, a rotação difere menos de 0,001% da articulada. No limite rígido, a força na viga e o momento diferem menos de 0,1% da contínua. Nesta última a igualdade de rotações é imposta exatamente pelo modelo de graus de liberdade.
+
+A rigidez de cada mola é kθ ℓ, com ℓ igual ao comprimento tributário da estação. As duas meias estações de ponta e as interiores somam 3 m em todas as malhas. Os deslocamentos impressos conferem a lei de mola e as reações das duas faces conferem o momento transmitido no mesmo referencial. O ensaio admite 3 N na soma vertical global, 1 N entre a carga da laje transferida e a reação da viga sem carregamento próprio e 2 N·m na soma dos momentos das faces. Essas tolerâncias incluem o arredondamento das reações e dos esforços no arquivo de saída. A mudança de malha produz uma discretização diferente e os valores de uma malha não são usados como reações esperadas de outra.
+
+### Referência analítica independente
+
+Para isolar a lei da ligação, retire a viga, adote apoio vertical de linha na borda comum e mantenha os apoios exteriores paralelos a ela. Deixe as duas bordas paralelas a X livres. Adote ν = 0 nos dois painéis. O carregamento uniforme em L1 e a geometria são constantes ao longo de Y. A solução de flexão cilíndrica é a de duas faixas de Euler–Bernoulli com vão L = 4 m. A rigidez por metro é D = Eh³/12. Para q = 5.000 N/m², a diferença angular livre, em módulo, é qL³/(24D). Um momento por metro m reduz a diferença em 2mL/(3D). Logo,
+
+$$
+|\Delta\theta|=\frac{qL^3/(24D)}{1+2k_\theta L/(3D)},\qquad |m|=k_\theta|\Delta\theta|.
+$$
+
+Na contínua, |m| tende a qL²/16. Multiplique m pela largura de 3 m para comparar com o momento integrado do OOFEM.
+
+| Ligação | Momento analítico (kN·m) | OOFEM 12 × 4 (kN·m) | Rotação analítica (mrad) | OOFEM (mrad) |
+| --- | ---: | ---: | ---: | ---: |
+| Articulada | 0 | 0 | 5,33333 | 5,29630 |
+| Semirrígida, kθ = 1.000 kN·m/(rad·m) | 7,74194 | 7,68804 | 2,58065 | 2,56272 |
+| Contínua | 15,00000 | 14,89600 | 0 | 0 |
+
+Os valores não nulos diferem menos de 0,7% no ensaio. A regressão admite 3% para a discretização 12 × 4. Outros ensaios cobrem a combinação DKT/QDKT com números de divisões diferentes e viga lançada em sentido inverso, um par de painéis poligonais rodado em planta e o equilíbrio com carregamento próprio da barra. Ao desassociar a viga, o teste mantém a ligação entre as lajes. Quando o apoio exterior coincide com uma extremidade livre da viga, a reação do encontro é contabilizada uma única vez.
+
+Configure `OOFEM_BIN` e execute os ensaios abaixo. [Configuração do OOFEM 3.0](OOFEM.md)
+
+```sh
+npm test -- tests/slab-joint.test.ts
+npm run test:e2e -- slab.spec.ts -g KS-43
+```

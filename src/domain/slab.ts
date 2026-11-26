@@ -21,7 +21,11 @@ export interface SlabMesh {
   grid?: { x: number[]; y: number[] };
 }
 
-export function meshSlab(slab: Slab, z: number): SlabMesh {
+export function meshSlab(
+  slab: Slab,
+  z: number,
+  extra?: { axis: "x" | "y"; values: number[] },
+): SlabMesh {
   const sizing = slab.sizing;
   if (sizing) {
     const error = sizingError(slabRings(slab), sizing);
@@ -54,9 +58,17 @@ export function meshSlab(slab: Slab, z: number): SlabMesh {
         x: uniform(slab.lengthX, slab.divisionsX),
         y: uniform(slab.lengthY, slab.divisionsY),
       };
+  if (extra) {
+    const ordered = [...grid[extra.axis], ...extra.values].sort(
+      (a, b) => a - b,
+    );
+    grid[extra.axis] = ordered.filter(
+      (v, i) => !i || Math.abs(v - ordered[i - 1]) > 1e-8,
+    );
+  }
   const nx = grid.x.length - 1,
     ny = grid.y.length - 1;
-  if (sizing)
+  if (sizing || extra)
     checkMeshBudget(
       nx * ny * (slab.formulation === "qdkt" ? 1 : 2),
       (nx + 1) * (ny + 1),

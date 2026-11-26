@@ -2763,3 +2763,59 @@ button.primary {
 .slab-comparison-coordinates input {
   width: 95px;
 }
+
+.slab-joint-plan {
+  cursor: pointer;
+}
+.slab-joint-plan .joint-hit {
+  stroke: transparent;
+  stroke-width: 14;
+}
+.slab-joint-plan .joint-line,
+.slab-joint-plan path,
+.slab-joint-plan circle {
+  stroke: var(--geometry-selected);
+  stroke-width: 2;
+  fill: var(--surface-view);
+}
+.slab-joint-plan[data-kind="hinged"] .joint-line {
+  stroke-dasharray: 7 5;
+}
+.slab-joint-plan[data-kind="elastic"] .joint-line {
+  stroke-dasharray: 10 3 2 3;
+}
+.joint-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 3px 10px;
+  color: var(--text);
+  background: var(--panel);
+}
+.slab-joint-dialog .stack-field {
+  margin: 12px 0;
+}
+.floor-result p {
+  margin: 6px 0;
+}
+.floor-result details {
+  margin: 5px 0 8px;
+}
+@media print {
+  .slab-joint-plan .joint-line,
+  .slab-joint-plan path,
+  .slab-joint-plan circle {
+    stroke: black;
+    fill: white;
+  }
+}
+
+.legend-free-edge::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  margin-right: 4px;
+  border-top: 1px dashed currentColor;
+  vertical-align: middle;
+}

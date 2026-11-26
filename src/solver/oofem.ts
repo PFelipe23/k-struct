@@ -1,3 +1,10 @@
+import { prepareFloor } from "./floorMesh";
+import {
+  floorRecords,
+  readFloor,
+  type FloorInput,
+  type FloorResult,
+} from "./floor";
 import { connectionFreedom, checkMemberFreedom } from "./connectionFreedom";
 import { patternWind } from "../domain/wind";
 import {
@@ -88,6 +95,7 @@ export interface AnalysisInput {
   project: Project;
   caseId: string;
   slab?: ReturnType<typeof exportSlab>["slab"];
+  floor?: FloorInput;
 }
 export interface Displacement {
   ux: number;
@@ -128,6 +136,7 @@ export interface AnalysisResult extends StructuralResult {
   completedAt: string;
   rawOutput: string;
   slab?: SlabResult;
+  floor?: FloorResult;
 }
 
 const spatialDofs = [
@@ -146,7 +155,8 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   if (errors.length) throw new Error(errors.join("\n"));
   const analysisCase = p.analysisCases.find((c) => c.id === caseId);
   if (!analysisCase) throw new Error("Caso de análise inexistente.");
-  if (p.slabs.length) {
+  const pair = p.slabs.length === 2 ? prepareFloor(p, analysisCase) : undefined;
+  if (p.slabs.length === 1) {
     const plate = exportSlab(p, analysisCase, p.slabs[0]);
     return {
       ...plate,
@@ -266,6 +276,15 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const ids: number[] = [];
     let start = endNode("i", m.start);
     const stations = layout.get(m.id)!;
+    if (pair?.member?.id === m.id) {
+      const extra = pair.ts
+        .map(pair.beamT)
+        .filter(
+          (t) => !stations.some((s) => Math.abs(t - s.t) * line.span <= 1e-6),
+        );
+      stations.push(...extra.map((t) => ({ t })));
+      stations.sort((a, b) => a.t - b.t);
+    }
     checkMemberFreedom(
       m,
       spatial,
@@ -607,9 +626,20 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     set,
     bcs,
   );
+  const counts = {
+    node:
+      nodes.length + Number(hasGroundSprings) + foundations.auxiliary.length,
+    element: elements.length + springs.length + foundations.elements.length,
+    section: properties.sections.length,
+  };
+  const floor = pair
+    ? floorRecords(p, pair, nodes, elements, counts, bcs, set)
+    : undefined;
   const deck = [
     "analysis.out",
-    `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
+    floor
+      ? "KStruct - coupled floor - SI N m kg s"
+      : `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
     // Additional prescribed directions introduce Lagrange multipliers. GMRES
     // can solve that indefinite system even with a zero diagonal pivot.
     "StaticStructural nsteps 1 deltat 1" +
@@ -620,7 +650,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${nodes.length + Number(hasGroundSprings) + foundations.auxiliary.length} nelem ${elements.length + springs.length + foundations.elements.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${counts.node + (floor?.nodes.length ?? 0)} nelem ${counts.element + (floor?.elements.length ?? 0)} ncrosssect ${counts.section + (floor?.sections.length ?? 0)} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
       const floor = floors.records.get(n.number);
       if (floor) return floor;
@@ -648,6 +678,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       ? [`Node ${ground} coords 3 0 0 0 dofidmask ${dofList}`]
       : []),
     ...foundations.auxiliary,
+    ...(floor?.nodes ?? []),
     ...elements.map((e) => {
       if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
       const z = axes.get(e.memberId)![2];
@@ -655,14 +686,24 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     }),
     ...springs,
     ...foundations.elements,
+    ...(floor?.elements ?? []),
     ...properties.sections,
+    ...(floor?.sections ?? []),
     ...properties.materials,
     ...bcs,
     "ConstantFunction 1 f(t) 1",
     ...sets,
     "",
   ].join("\n");
-  return { deck, nodes, elements, project: p, caseId, memberIntensities };
+  return {
+    deck,
+    nodes,
+    elements,
+    project: p,
+    caseId,
+    memberIntensities,
+    ...(floor ? { floor: floor.data } : {}),
+  };
 }
 
 function numberList(line: string) {
@@ -725,6 +766,9 @@ export function parseOofemOutput(
       throw new Error(`Reação duplicada no nó ${m[1]}, GL ${m[2]}.`);
     reactionMap.set(key, numberList(m[3])[0]);
   }
+  const floor = input.floor
+    ? readFloor(rawOutput, input.floor, nodeOutput, reactionMap)
+    : undefined;
   const metadata = {
     caseId: input.caseId,
     solver: rawOutput.match(/OOFEM ver\.[^\n]+/)?.[0] ?? "OOFEM",
@@ -966,6 +1010,7 @@ export function parseOofemOutput(
     input.caseId,
     reactions,
     printedLocalReactions,
+    floor?.stations,
   );
   return {
     ...metadata,
@@ -977,6 +1022,7 @@ export function parseOofemOutput(
     reactions,
     members,
     memberIntensities: input.memberIntensities,
+    ...(floor ? { floor, slab: floor.panels[0] } : {}),
   };
 }
 
@@ -993,6 +1039,7 @@ export function checkEquilibrium(
   caseId: string,
   reactions: Reaction[],
   printedLocalReactions: readonly Reaction[] = [],
+  beamTransfers: readonly { point: Point3; beamForce: number }[] = [],
 ) {
   const sum = [0, 0, 0, 0, 0, 0];
   const magnitudes = [1, 1, 1, 1, 1, 1];
@@ -1047,6 +1094,8 @@ export function checkEquilibrium(
       scale({ x: f.mx, y: f.my, z: f.mz }, factor),
       byId.get(f.nodeId)!,
     );
+  for (const station of beamTransfers)
+    accumulate({ x: 0, y: 0, z: station.beamForce }, origin, station.point);
   for (const r of reactions) {
     accumulateNodal(r, 1);
   }

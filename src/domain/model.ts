@@ -1,3 +1,10 @@
+import { slabRings } from "./slabPolygon";
+import {
+  jointGeometryErrors,
+  refreshJoint,
+  rigidFloorRows,
+  sharedEdges,
+} from "./slabJoint";
 import { meshSlab } from "./slab";
 import {
   normalizeRings,
@@ -668,10 +675,40 @@ const sizedRectangle = rectangleSlab.extend({
   sizing: sizingSchema.optional(),
 });
 const sizedPolygon = polygonSlab.extend({ sizing: sizingSchema.optional() });
-export const projectSchema = projectV25.extend({
+const projectV26 = projectV25.extend({
   schemaVersion: z.literal(26),
   slabs: z.array(z.union([sizedRectangle, sizedPolygon])).max(1),
 });
+const jointSide = z.strictObject({ slabId: id, edgeId: id });
+const slabJointSchema = z
+  .strictObject({
+    a: jointSide,
+    b: jointSide,
+    kind: z.enum(["hinged", "elastic", "continuous"]),
+    stiffness: finite.positive().optional(),
+    support: z.enum(["none", "line", "beam"]),
+    memberId: id.optional(),
+  })
+  .refine(
+    (j) =>
+      (j.kind === "elastic") === (j.stiffness !== undefined) &&
+      (j.support === "beam") === (j.memberId !== undefined),
+    "Rigidez ou viga incompatível com a opção da borda.",
+  );
+export const projectSchema = projectV26.extend({
+  schemaVersion: z.literal(27),
+  slabs: z.array(z.union([sizedRectangle, sizedPolygon])).max(2),
+  slabJoint: slabJointSchema.optional(),
+  loadPatterns: z
+    .array(
+      projectV26.shape.loadPatterns.element.extend({
+        pressure: z.array(slabPressureSchema).max(2),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type SlabJoint = z.infer<typeof slabJointSchema>;
 export type SlabSizing = z.infer<typeof sizingSchema>;
 export function defaultSelfWeight() {
   return {
@@ -758,7 +795,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 26,
+    schemaVersion: 27,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1188,6 +1225,15 @@ export function parseProject(source: string): Project {
     const old = projectV25.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 26 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 26
+  ) {
+    const old = projectV26.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 27 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1231,11 +1277,13 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 26, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 27, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)
     if (slab.polygon) slab.polygon.rings = normalizeRings(slab.polygon.rings);
+  if (!parsed.data.slabJoint && parsed.data.slabs.length === 2)
+    refreshJoint(parsed.data);
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
   if (source.length * 3 > projectFileLimit) serializeProject(parsed.data);
@@ -1368,6 +1416,25 @@ export function referenceErrors(p: Project): string[] {
   for (const s of p.sections)
     if (!p.materials.some((m) => m.id === s.materialId))
       errors.push(`${s.name}: material inexistente.`);
+  if (p.slabJoint) {
+    const j = p.slabJoint;
+    if (
+      j.a.slabId === j.b.slabId ||
+      [j.a, j.b].some(
+        (ref) =>
+          !p.slabs.some(
+            (s) =>
+              s.id === ref.slabId &&
+              slabRings(s)[0].some((v) => v.edgeId === ref.edgeId),
+          ),
+      )
+    )
+      errors.push(
+        "A ligação referencia uma laje ou borda externa inexistente.",
+      );
+    if (j.memberId && !p.members.some((m) => m.id === j.memberId))
+      errors.push("A viga referenciada pela borda comum não existe.");
+  }
   for (const slab of p.slabs) {
     if (p.mode !== "spatial")
       errors.push(
@@ -1498,6 +1565,8 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${pat.name}: carga em nó inexistente.`);
     if (pat.uniform.some((l) => !p.members.some((m) => m.id === l.memberId)))
       errors.push(`${pat.name}: carga em barra inexistente.`);
+    if (new Set(pat.pressure.map((l) => l.slabId)).size !== pat.pressure.length)
+      errors.push(`${pat.name}: há duas pressões para a mesma laje no padrão.`);
     if (
       pat.pressure.some(
         (load) => !p.slabs.some((slab) => slab.id === load.slabId),
@@ -1582,6 +1651,16 @@ function rank(rows: number[][], columns: number): number {
 export function analysisErrors(p: Project): string[] {
   const errors = referenceErrors(p);
   if (errors.length) return errors;
+  if (p.slabs.length === 2) {
+    errors.push(...jointGeometryErrors(p));
+    const edge = sharedEdges(p)[0];
+    if (!errors.length && edge && rank(rigidFloorRows(p, edge), 6) < 6)
+      errors.push(
+        "Apoios insuficientes nas lajes. A borda deixa movimento de corpo rígido em pelo menos um dos painéis.",
+      );
+    if (p.members.length) frameAnalysisErrors(p, errors);
+    return errors;
+  }
   const [slab] = p.slabs;
   if (slab) {
     if (p.nodes.length || p.members.length)
@@ -1616,6 +1695,10 @@ export function analysisErrors(p: Project): string[] {
       );
     return errors;
   }
+  return frameAnalysisErrors(p, errors);
+}
+
+function frameAnalysisErrors(p: Project, errors: string[]) {
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
   if (
     !p.members.length &&
@@ -1723,7 +1806,50 @@ export function analysisErrors(p: Project): string[] {
       }
     }
     const dofs = p.mode === "planar" ? 3 : 6;
-    if (rank(constraints, dofs) < dofs)
+    const bearing =
+      p.slabJoint?.support === "beam"
+        ? p.members.find((m) => m.id === p.slabJoint?.memberId)
+        : undefined;
+    const edge =
+      bearing && component.some((n) => n.id === bearing.start)
+        ? sharedEdges(p)[0]
+        : undefined;
+    let rigidRank = rank(constraints, dofs),
+      required = dofs;
+    if (edge && p.slabJoint) {
+      // A supported panel can restrain the frame vertically, and vice versa.
+      // Rank the rigid motions of the connected frame and both panels together.
+      const zero = Array<number>(6).fill(0),
+        coupled = constraints.map((row) => [...row, ...zero]);
+      coupled.push(
+        ...rigidFloorRows(p, edge, false).map((row) => [...zero, ...row]),
+      );
+      const length = Math.hypot(
+        edge.end.x - edge.start.x,
+        edge.end.y - edge.start.y,
+      );
+      for (const pt of [edge.start, edge.end]) {
+        const x = (pt.x - seed.x) / span,
+          y = (pt.y - seed.y) / span;
+        coupled.push([
+          0,
+          0,
+          1,
+          y,
+          -x,
+          0,
+          -1,
+          -(pt.y - edge.start.y) / length,
+          (pt.x - edge.start.x) / length,
+          0,
+          0,
+          0,
+        ]);
+      }
+      required = 12;
+      rigidRank = rank(coupled, required);
+    }
+    if (rigidRank < required)
       errors.push(
         `Estrutura ligada a ${seed.name}: apoios insuficientes para impedir movimento de corpo rígido.`,
       );
@@ -1791,6 +1917,14 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   remapDiaphragmNodes(p, new Map([...nodes].map((id) => [id, []])));
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
+  if (p.slabJoint) {
+    if (slabs.has(p.slabJoint.a.slabId) || slabs.has(p.slabJoint.b.slabId))
+      delete p.slabJoint;
+    else if (p.slabJoint.memberId && bars.has(p.slabJoint.memberId)) {
+      p.slabJoint.support = "none";
+      delete p.slabJoint.memberId;
+    }
+  }
   const removed = { node: nodes, member: bars, slab: slabs };
   for (const group of p.selectionGroups)
     group.objects = group.objects.filter((o) => !removed[o.kind].has(o.id));

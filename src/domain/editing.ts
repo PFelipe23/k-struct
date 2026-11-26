@@ -1,3 +1,4 @@
+import { refreshJoint } from "./slabJoint";
 import {
   normalizeRings,
   slabRings,
@@ -178,8 +179,8 @@ export function reverseMember(p: Project, id: string) {
 function slabDefaults(p: Project, levelId: string) {
   if (p.mode !== "spatial" || !p.guides.z.some((level) => level.id === levelId))
     throw new Error("Lance a laje na planta XY de um pavimento.");
-  if (p.slabs.length)
-    throw new Error("Este projeto já contém uma laje isolada.");
+  if (p.slabs.length >= 2)
+    throw new Error("Este pavimento acoplado já contém duas lajes.");
   const concrete = { E: 30e9, nu: 0.2, density: 2500, alpha: 0 };
   let material = p.materials.find(
     (item) =>
@@ -194,7 +195,7 @@ function slabDefaults(p: Project, levelId: string) {
   }
   return {
     id: uid(),
-    name: "L1",
+    name: nextName("L", p.slabs),
     levelId,
     thickness: 0.1,
     materialId: material.id,
@@ -217,6 +218,7 @@ export function addPolygonSlab(
     polygon,
   };
   p.slabs.push(slab);
+  refreshJoint(p);
   return slab;
 }
 
@@ -240,6 +242,7 @@ export function addSlabOpening(p: Project, slabId: string, points: XY[]) {
     ...(slab.sizing ? { sizing: slab.sizing } : {}),
     polygon: { rings, refinements: slab.polygon?.refinements ?? 2 },
   };
+  refreshJoint(p);
 }
 
 export function addSlab(
@@ -272,6 +275,7 @@ export function addSlab(
     supports: { xMin: true, xMax: true, yMin: true, yMax: true },
   };
   p.slabs.push(slab);
+  refreshJoint(p);
   return slab;
 }
 

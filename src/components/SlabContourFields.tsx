@@ -17,9 +17,11 @@ import { useUnits } from "./Units";
 
 export default function SlabContourFields({
   slab,
+  sharedEdge,
   update,
 }: {
   slab: PolygonSlab;
+  sharedEdge?: string;
   update: (
     rings: SlabRing[],
     split?: { from: string; to: string },
@@ -133,13 +135,19 @@ export default function SlabContourFields({
         </span>
         <select
           aria-label="Vínculo da borda"
-          value={v.supported ? "simple" : "free"}
+          disabled={sharedEdge === v.edgeId}
+          value={
+            sharedEdge === v.edgeId ? "joint" : v.supported ? "simple" : "free"
+          }
           onChange={(e) =>
             apply((draft) => {
               draft[r][i].supported = e.target.value === "simple";
             })
           }
         >
+          {sharedEdge === v.edgeId && (
+            <option value="joint">Vínculo entre lajes</option>
+          )}
           <option value="simple">Apoio simples</option>
           <option value="free">Livre</option>
         </select>

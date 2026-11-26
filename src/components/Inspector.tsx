@@ -208,6 +208,13 @@ function SlabFields({
     edit((draft) => {
       Object.assign(draft.slabs.find(({ id }) => id === slab.id)!, changes);
     });
+  const joint = project.slabJoint;
+  const shared =
+    joint?.a.slabId === slab.id
+      ? joint.a.edgeId
+      : joint?.b.slabId === slab.id
+        ? joint.b.edgeId
+        : undefined;
   const pressure =
     pattern.pressure.find(({ slabId }) => slabId === slab.id)?.pz ?? 0;
   return (
@@ -239,6 +246,7 @@ function SlabFields({
       <h4>Geometria da laje</h4>
       {slab.polygon ? (
         <SlabContourFields
+          sharedEdge={shared}
           slab={slab}
           update={(rings, split) => {
             const ids = new Set(rings.flat().map((v) => v.edgeId));
@@ -337,7 +345,12 @@ function SlabFields({
               <label key={edge}>
                 <input
                   type="checkbox"
-                  checked={slab.supports[edge]}
+                  disabled={shared === edge}
+                  checked={
+                    shared === edge
+                      ? joint?.support !== "none"
+                      : slab.supports[edge]
+                  }
                   aria-label={`Apoio simples na borda ${label}`}
                   onChange={(e) =>
                     updateSlab({
@@ -346,6 +359,7 @@ function SlabFields({
                   }
                 />
                 Borda {label}
+                {shared === edge ? " · vínculo entre lajes" : ""}
               </label>
             ))}
           </div>
@@ -385,7 +399,7 @@ function SlabFields({
             {slab.sizing
               ? "Malha por tamanho-alvo"
               : slab.formulation === "qdkt"
-                ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
+                ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT`
                 : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
           </p>
         </>
@@ -403,8 +417,10 @@ function SlabFields({
         value={pressure / 1000}
         onChange={(value) =>
           edit((draft) => {
-            draft.loadPatterns.find(({ id }) => id === pattern.id)!.pressure =
-              value === 0 ? [] : [{ slabId: slab.id, pz: value * 1000 }];
+            const pat = draft.loadPatterns.find(({ id }) => id === pattern.id)!;
+            pat.pressure = pat.pressure.filter((v) => v.slabId !== slab.id);
+            if (value !== 0)
+              pat.pressure.push({ slabId: slab.id, pz: value * 1000 });
           })
         }
       />

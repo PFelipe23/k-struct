@@ -1,3 +1,4 @@
+import { SlabJointPlan } from "./SlabJointPlan";
 import { patternWind } from "../domain/wind";
 import ThermalLoadGlyph from "./ThermalLoadGlyph";
 import {
@@ -98,6 +99,8 @@ interface Props {
   onSection: (section: SectionCursor) => void;
   display: Display;
   slabMap: SlabMap | null;
+  floorMaps?: SlabMap[];
+  onJoint?: () => void;
   patternId: string;
   resultPatterns: ReadonlySet<string>;
   active: boolean;
@@ -137,12 +140,14 @@ export default function WorkPlaneView({
   onSection,
   display,
   slabMap,
+  floorMaps,
   patternId,
   resultPatterns,
   pending,
   outline,
   onPoint,
   onSelect,
+  onJoint,
 }: Props & LayerControls) {
   const { units } = useUnits();
   const ref = useRef<SVGSVGElement>(null);
@@ -209,26 +214,16 @@ export default function WorkPlaneView({
           ),
         )
       : [];
-  const slab =
+  const slabs =
     plane.kind === "XY"
-      ? project.slabs.find((item) =>
+      ? project.slabs.filter((item) =>
           project.guides.z.some(
             (level) =>
               level.id === item.levelId && level.position === plane.offset,
           ),
         )
-      : undefined;
+      : [];
   const tracing = tool === "slabPolygon" || tool === "slabHole";
-  const slabId = slab?.id;
-  const selectSlab = useCallback(
-    (event: MouseEvent<SVGGElement>) => {
-      if (tool !== "select" || !slabId) return;
-      event.stopPropagation();
-      onSelect({ kind: "slab", id: slabId }, additiveSelection(event));
-    },
-    [tool, slabId, onSelect],
-  );
-
   // A barra de coordenadas muda a altura do SVG ao ativar uma ferramenta.
   // Atualize a projeção antes de pintar a grade ou receber o primeiro clique.
   useLayoutEffect(() => {
@@ -251,9 +246,9 @@ export default function WorkPlaneView({
   const fit = () => {
     const points = [
       ...project.nodes,
-      ...(slab
-        ? slabRings(slab)[0].map((v) => ({ ...v, z: plane.offset }))
-        : []),
+      ...slabs.flatMap((slab) =>
+        slabRings(slab)[0].map((v) => ({ ...v, z: plane.offset })),
+      ),
       ...floors.map((floor) => ({ ...floor.reference, z: plane.offset })),
       ...bars.flatMap((m) => {
         if (!m.offsets) return [];
@@ -784,24 +779,43 @@ export default function WorkPlaneView({
             strokeDasharray="8 3"
           />
         )}
-        {slab && (
+        {slabs.map((slab) => (
           <SlabPlan
+            key={slab.id}
+            jointEdge={
+              project.slabJoint?.a.slabId === slab.id
+                ? project.slabJoint.a.edgeId
+                : project.slabJoint?.b.slabId === slab.id
+                  ? project.slabJoint.b.edgeId
+                  : undefined
+            }
             slab={slab}
             z={plane.offset}
             sx={sx}
             sy={sy}
             active={selected.has(`slab:${slab.id}`)}
             labels={labels}
-            map={slabMap}
+            map={
+              floorMaps?.find((m) => m.result.slabId === slab.id) ??
+              (slabMap?.result.slabId === slab.id ? slabMap : null)
+            }
             pressure={
               layers.loads
                 ? (patterns.pressure.find(({ slabId }) => slabId === slab.id)
                     ?.pz ?? 0)
                 : 0
             }
-            onClick={selectSlab}
+            onClick={(event) => {
+              if (tool === "select") {
+                event.stopPropagation();
+                onSelect(
+                  { kind: "slab", id: slab.id },
+                  additiveSelection(event),
+                );
+              }
+            }}
           />
-        )}
+        ))}
         {bars.map((m) => {
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
@@ -1656,6 +1670,14 @@ export default function WorkPlaneView({
                   pointerEvents="none"
                 />
               ))}
+        {slabs.length === 2 && (
+          <SlabJointPlan
+            project={project}
+            sx={sx}
+            sy={sy}
+            select={tool === "select" ? onJoint : undefined}
+          />
+        )}
       </svg>
       {!project.nodes.length &&
         !project.slabs.length &&
