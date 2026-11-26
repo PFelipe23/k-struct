@@ -6,6 +6,8 @@ import {
   parseProject,
   serializeProject,
 } from "../../src/domain/model";
+import { runDeck } from "../fixtures/solve-oofem";
+import { openProjectInBrowser } from "../fixtures/open-project";
 import { twoSpanBeam } from "../fixtures/two-span-beam";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
@@ -16,13 +18,14 @@ const output = readFileSync(
 );
 async function bridge(
   page: Page,
-  { delayed = false, solverOutput = output } = {},
+  { delayed = false, solverOutput = output, realSolver = false } = {},
 ) {
   await page.addInitScript(
-    ({ output, delayed }) => {
+    ({ output, delayed, realSolver }) => {
       type InvokeArgs = {
         runContext: { runId: string; projectName: string; caseName: string };
         runId: string;
+        deck: string;
         response: { onmessage: (outcome: unknown) => void };
       };
       const w = window as unknown as {
@@ -31,7 +34,11 @@ async function bridge(
           invoke: (cmd: string, args: InvokeArgs) => Promise<unknown>;
           transformCallback: () => number;
         };
-        finishAnalysis?: () => void;
+        finishAnalysis?: (options?: {
+          fail?: boolean;
+          cancelNext?: boolean;
+        }) => void;
+        solveQueueDeck: (deck: string) => Promise<string>;
       };
       const engine = {
         origin: "bundled",
@@ -55,17 +62,34 @@ async function bridge(
         transformCallback: () => ++callbackId,
         invoke: async (cmd, args) => {
           if (cmd === "start_oofem") {
-            const finish = (cancelled: boolean) => {
+            const starts = JSON.parse(
+              sessionStorage.getItem("e2e-case-starts") ?? "[]",
+            );
+            sessionStorage.setItem(
+              "e2e-case-starts",
+              JSON.stringify([...starts, args.runContext.caseName]),
+            );
+            const finish = (
+              cancelled: boolean,
+              failed = false,
+              result = output,
+            ) => {
               const log = {
                 summary: {
                   ...args.runContext,
                   startedAt: Date.now(),
                   durationMs: 123,
                   engine,
-                  status: cancelled ? "cancelled" : "completed",
+                  status: cancelled
+                    ? "cancelled"
+                    : failed
+                      ? "failed"
+                      : "completed",
                   message: cancelled
                     ? "Análise cancelada."
-                    : "Execução do OOFEM concluída.",
+                    : failed
+                      ? "Falha controlada no motor."
+                      : "Execução do OOFEM concluída.",
                 },
                 stdout: "Saída do OOFEM para a viga de referência",
                 stderr: "",
@@ -77,15 +101,30 @@ async function bridge(
               );
               pending = null;
               args.response.onmessage({
-                output: cancelled ? null : output,
+                output: cancelled || failed ? null : result,
                 log,
                 historyError: null,
               });
             };
             if (delayed) {
               pending = { runId: args.runContext.runId, finish };
-              w.finishAnalysis = () => finish(false);
-            } else finish(false);
+              w.finishAnalysis = (options) => {
+                if (options?.cancelNext)
+                  setTimeout(() =>
+                    document
+                      .querySelector<HTMLButtonElement>(
+                        '[aria-label="Cancelar análise"]',
+                      )
+                      ?.click(),
+                  );
+                finish(false, options?.fail);
+              };
+            } else
+              finish(
+                false,
+                false,
+                realSolver ? await w.solveQueueDeck(args.deck) : output,
+              );
             return;
           }
           if (cmd === "cancel_oofem" && pending?.runId === args.runId) {
@@ -114,7 +153,7 @@ async function bridge(
         },
       };
     },
-    { output: solverOutput, delayed },
+    { output: solverOutput, delayed, realSolver },
   );
 }
 
@@ -995,4 +1034,198 @@ test("configurações exibem origem, versão e resultado do diagnóstico", async
   );
   await expect(settings.getByRole("status")).toContainText("OOFEM 3.0");
   await expect(settings.getByRole("status")).toContainText("Flecha -8,4375 mm");
+});
+
+test("fila serial retoma após cancelamento e falha e descarta revisão obsoleta", async ({
+  page,
+}) => {
+  await bridge(page, { delayed: true });
+  await page.goto("/");
+  const project = beamExample();
+  project.analysisCases.push(
+    { ...project.analysisCases[0], id: "CP", name: "Segundo caso" },
+    { ...project.analysisCases[0], id: "ZERO", name: "Caso de fator zero" },
+  );
+  project.resultCombinations = ["C1", "C2"].map((id) => ({
+    id,
+    name: id,
+    type: "linear",
+    factors: [
+      { caseId: "CP", factor: 0.2 },
+      { caseId: "EL", factor: 1 },
+      { caseId: "ZERO", factor: 0 },
+    ],
+  }));
+  project.resultEnvelopes = [
+    { id: "E1", name: "Envelope de teste", combinationIds: ["C1", "C2"] },
+  ];
+  await openProjectInBrowser(
+    page,
+    "fila.kstruct.json",
+    serializeProject(project),
+  );
+  await page
+    .getByLabel("Caso, combinação ou envelope")
+    .selectOption("envelope:E1");
+  const queue = page.getByRole("region", { name: "Fila de casos" });
+  const start = queue.getByRole("button", {
+    name: "Analisar casos necessários",
+  });
+  const cancel = page.getByRole("button", { name: "Cancelar análise" });
+  const starts = () =>
+    page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("e2e-case-starts") ?? "[]"),
+    );
+  const finish = (options?: { fail?: boolean; cancelNext?: boolean }) =>
+    page.evaluate(
+      (options) =>
+        (
+          window as unknown as { finishAnalysis: (options: unknown) => void }
+        ).finishAnalysis(options),
+      options,
+    );
+  const first = project.analysisCases[0].name;
+
+  await expect(queue.locator("li")).toHaveCount(2);
+  await start.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(queue).toContainText("Executando 1 de 2");
+  await expect(cancel).toBeEnabled();
+  expect(await starts()).toEqual([first]);
+  await finish({ cancelNext: true });
+  await expect(queue).toContainText("Fila interrompida");
+  await expect(queue.locator("li").first()).toContainText("Disponível");
+  expect(await starts()).toEqual([first]);
+
+  await start.click();
+  await expect(queue).toContainText("Executando 1 de 1");
+  await expect(cancel).toBeEnabled();
+  await finish({ fail: true });
+  await expect(queue).toContainText("Falha controlada no motor");
+  await expect(queue).toContainText("Segundo caso [CP] · Falhou");
+  expect(await starts()).toEqual([first, "Segundo caso"]);
+
+  await start.click();
+  await expect(cancel).toBeEnabled();
+  await cancel.click();
+  await expect(queue).toContainText("Análise cancelada");
+  await expect(queue).toContainText("Segundo caso [CP] · Pendente");
+
+  await start.click();
+  await expect(cancel).toBeEnabled();
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  await page.getByLabel("qZ global").fill("-20");
+  await page.getByLabel("qZ global").press("Tab");
+  await finish();
+  await expect(queue).toContainText("O modelo mudou durante a análise");
+  await expect(queue.getByText(/Pendente/)).toHaveCount(2);
+  await expect(
+    page
+      .getByRole("region", { name: "Resultados do envelope" })
+      .getByRole("status"),
+  ).toContainText("Analise os casos pendentes");
+  expect(await starts()).toEqual([
+    first,
+    "Segundo caso",
+    "Segundo caso",
+    "Segundo caso",
+  ]);
+
+  await start.click();
+  await expect(cancel).toBeEnabled();
+  expect((await starts()).at(-1)).toBe(first);
+  await cancel.click();
+  await expect(start).toBeEnabled();
+
+  await page.getByRole("button", { name: "Análise", exact: true }).click();
+  await page.getByRole("button", { name: "Histórico de análises" }).click();
+  const history = page.getByRole("dialog", { name: "Histórico de análises" });
+  await expect(history).toContainText("Segundo caso");
+  await expect(history).toContainText("Falha");
+});
+
+test("pórtico em L com fila e análise manual no OOFEM 3.0", async ({
+  page,
+}) => {
+  const executable = process.env.OOFEM_BIN;
+  test.skip(!executable, "Configure OOFEM_BIN para o ensaio real.");
+  test.setTimeout(90_000);
+  await page.exposeFunction("solveQueueDeck", (deck: string) =>
+    runDeck(deck, executable!),
+  );
+  await bridge(page, { realSolver: true });
+  const example = readFileSync(
+    new URL(
+      "../../examples/portico-em-l-envelopes.kstruct.json",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  await page.goto("/");
+  const picker = page.getByLabel("Caso, combinação ou envelope");
+  const queue = page.getByRole("region", { name: "Fila de casos" });
+  const start = queue.getByRole("button", {
+    name: "Analisar casos necessários",
+  });
+  const run = page.getByRole("button", { name: "Analisar", exact: true });
+  const envelope = page.getByRole("region", { name: "Resultados do envelope" });
+  const starts = () =>
+    page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("e2e-case-starts") ?? "[]"),
+    );
+  async function openExample() {
+    await openProjectInBrowser(page, "portico.kstruct.json", example);
+    await page.evaluate(() => sessionStorage.removeItem("e2e-case-starts"));
+  }
+  async function midspan() {
+    await envelope
+      .getByLabel("Barra do envelope")
+      .selectOption("V1", { timeout: 5000 });
+    await envelope
+      .getByLabel("Estação x/L")
+      .selectOption({ label: "0,5" }, { timeout: 5000 });
+    const table = envelope.getByRole("table");
+    await expect(table).toContainText("11,99");
+    return table.innerText();
+  }
+
+  await openExample();
+  await picker.selectOption("envelope:E1");
+  await start.click();
+  await expect(queue).toContainText("Casos necessários concluídos");
+  expect(await starts()).toEqual(["EL · Estática linear", "CP · Compressão"]);
+  const batch = await midspan();
+  await start.click();
+  await expect(queue).toContainText("já estão disponíveis");
+  expect(await starts()).toHaveLength(2);
+
+  await openExample();
+  await run.click();
+  await expect(page.getByRole("status")).toContainText(
+    "Análise concluída · EL",
+  );
+  await picker.selectOption("envelope:E1");
+  await expect(queue).toContainText("1 de 2 casos disponíveis");
+  await start.click();
+  await expect(queue).toContainText("Casos necessários concluídos");
+  expect(await starts()).toEqual(["EL · Estática linear", "CP · Compressão"]);
+  expect(await midspan()).toBe(batch);
+
+  await openExample();
+  await run.click();
+  await expect(page.getByRole("status")).toContainText(
+    "Análise concluída · EL",
+  );
+  await picker.selectOption("CP");
+  await run.click();
+  await expect(page.getByRole("status")).toContainText(
+    "Análise concluída · CP",
+  );
+  await picker.selectOption("envelope:E1");
+  expect(await midspan()).toBe(batch);
 });

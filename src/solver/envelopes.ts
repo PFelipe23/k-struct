@@ -17,13 +17,10 @@ export type EnvelopeStation = SectionLocation & {
 export type MemberEnvelopeResult = Record<string, EnvelopeStation[]>;
 export type EnvelopeSection = { memberId: string; index: number };
 
-export async function evaluateMemberEnvelope(
+export function envelopeCombinations(
   project: Project,
   envelope: ResultEnvelope,
-  caseResults: ReadonlyMap<string, AnalysisResult>,
-  signal?: AbortSignal,
-): Promise<MemberEnvelopeResult> {
-  signal?.throwIfAborted();
+) {
   const combinations = envelope.combinationIds.map((id) => {
     const combination = project.resultCombinations.find(
       (item) => item.id === id,
@@ -34,6 +31,17 @@ export async function evaluateMemberEnvelope(
   });
   if (!combinations.length)
     throw new Error("Inclua uma combinação no envelope.");
+  return combinations;
+}
+
+export async function evaluateMemberEnvelope(
+  project: Project,
+  envelope: ResultEnvelope,
+  caseResults: ReadonlyMap<string, AnalysisResult>,
+  signal?: AbortSignal,
+): Promise<MemberEnvelopeResult> {
+  signal?.throwIfAborted();
+  const combinations = envelopeCombinations(project, envelope);
   requireAvailableCases(
     project,
     combinations.flatMap((item) => item.factors),

@@ -150,6 +150,8 @@ Para gerar vento estático, abra **Cargas e casos → Padrões → Adicionar fai
 
 No desktop, escolha um caso estático em **Caso, combinação ou envelope** e clique em **Analisar**. Repita para os demais casos. O seletor alterna entre os resultados da revisão atual.
 
+Ao selecionar uma combinação ou envelope, a **Fila de casos** mostra os casos necessários em ordem de execução. **Analisar casos necessários** reaproveita os resultados da revisão atual e executa os pendentes em série. Depois de cancelar ou corrigir uma falha do motor, use o mesmo comando para retomar. Uma edição do modelo exige resultados da nova revisão.
+
 Para combinar os resultados, abra **Cargas e casos** → **Combinações lineares** e cadastre os casos e seus fatores. Informe ao menos um fator diferente de zero. Depois de aplicar as definições e analisar os casos com fatores diferentes de zero, selecione a combinação em **Caso, combinação ou envelope**. O KStruct exibe a composição, a deformada, os diagramas e as tabelas. Os CSVs identificam a origem das linhas e registram os IDs e fatores dos casos que compõem cada combinação.
 
 Na aba **Esforços** de um caso ou combinação, use **Barra** para filtrar as estações da tabela e do CSV. A opção inicial é **Todas as barras**. Quando dois nomes coincidem ou uma barra se chama “Todas as barras”, o seletor, a tabela e o CSV identificam as barras pelo ID seguido do nome, por exemplo, `[V2] Viga`. O filtro acompanha a troca de resultados do projeto e volta a **Todas as barras** se a barra selecionada for removida.

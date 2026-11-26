@@ -128,8 +128,9 @@ import LoadDefinitions, {
   type LoadDefinitionsPage,
 } from "./components/LoadDefinitions";
 import { version } from "../package.json";
-import { combineLinearResults } from "./solver/combinations";
+import { combineLinearResults, requiredCaseIds } from "./solver/combinations";
 import {
+  envelopeCombinations,
   evaluateMemberEnvelope,
   type EnvelopeSection,
   type MemberEnvelopeResult,
@@ -280,11 +281,18 @@ export default function App() {
   );
   const modelRevision = useRef(0);
   const [activeRun, setActiveRun] = useState<{
-    id: string;
+    id: string | null;
     ready: boolean;
     cancelling: boolean;
   } | null>(null);
-  const activeRunId = useRef<string | null>(null);
+  const runLock = useRef<{ stop: boolean } | null>(null);
+  const [queue, setQueue] = useState<{
+    revision: number;
+    target: string;
+    caseId?: string;
+    failedId?: string;
+    message: string;
+  } | null>(null);
   const running = activeRun !== null;
   const [lastLog, setLastLog] = useState<RunLog | null>(null);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<
@@ -355,35 +363,36 @@ export default function App() {
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
-  const resultPatterns = useMemo(() => {
+  const requiredCases = useMemo(() => {
     const combinations = envelope
-      ? p.resultCombinations.filter((c) =>
-          envelope.combinationIds.includes(c.id),
-        )
+      ? envelopeCombinations(p, envelope)
       : combination
         ? [combination]
         : [];
-    const caseIds = new Set(
-      combinations.flatMap((c) =>
-        c.factors.filter((f) => f.factor !== 0).map((f) => f.caseId),
+    const ids = requiredCaseIds(combinations.flatMap(({ factors }) => factors));
+    return p.analysisCases.filter(({ id }) => ids.has(id));
+  }, [p, envelope, combination]);
+  const missingCases = requiredCases.filter(
+    ({ id }) => caseResults.get(id)?.caseId !== id,
+  );
+  const queueTarget = envelope
+    ? `envelope:${envelope.id}`
+    : `combination:${combination?.id}`;
+  const queueView =
+    queue?.revision === modelRevision.current && queue.target === queueTarget
+      ? queue
+      : null;
+  const resultPatterns = useMemo(
+    () =>
+      new Set(
+        (derived ? requiredCases : [analysisCase]).flatMap(({ factors }) =>
+          factors
+            .filter(({ factor }) => factor !== 0)
+            .map(({ patternId }) => patternId),
+        ),
       ),
-    );
-    const cases =
-      envelope || combination
-        ? p.analysisCases.filter((c) => caseIds.has(c.id))
-        : [analysisCase];
-    return new Set(
-      cases.flatMap((c) =>
-        c.factors.filter((f) => f.factor !== 0).map((f) => f.patternId),
-      ),
-    );
-  }, [
-    p.analysisCases,
-    p.resultCombinations,
-    analysisCase,
-    combination,
-    envelope,
-  ]);
+    [derived, requiredCases, analysisCase],
+  );
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -857,34 +866,15 @@ export default function App() {
     }
     return error;
   };
-  const run = async () => {
-    if (activeRunId.current) return;
-    const snapshot = current.current;
-    const revision = modelRevision.current;
-    const modelIssues = diagnoseModel(snapshot);
-    setAnalysisDiagnostics(modelIssues);
-    setDiagnosticRevision(revision);
-    if (modelIssues.length) {
-      setDisplay("model");
-      setMessage(
-        `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.\n${modelIssues[0].message}`,
-      );
-      return;
-    }
-    const requestedCase =
-      snapshot.analysisCases.find((item) => item.id === caseId) ??
-      snapshot.analysisCases[0];
+  const runCase = async (
+    snapshot: Project,
+    revision: number,
+    requestedCase: Project["analysisCases"][number],
+  ) => {
     const id = uid();
-    activeRunId.current = id;
     setActiveRun({ id, ready: false, cancelling: false });
     let executionLogReceived = false;
-    setCaseResults((results) => {
-      const updated = new Map(results);
-      updated.delete(requestedCase.id);
-      return updated;
-    });
-    setDisplay("model");
-    setMessage(`Analisando ${requestedCase.name}…`);
+    let historyNotice = "";
     try {
       const { execution, input } = await analyze(
         snapshot,
@@ -899,54 +889,154 @@ export default function App() {
       );
       setLastLog(execution.log);
       executionLogReceived = true;
-      const failedRunDiagnostics =
-        execution.log.summary.status !== "completed" ||
-        execution.output === null
-          ? diagnoseSolverFailure(
-              execution.log.summary.message,
-              execution.log.stdout,
-              execution.log.stderr,
-              input,
-            )
-          : [];
-      if (failedRunDiagnostics.length)
-        saveDiagnosticContext(id, snapshot, failedRunDiagnostics);
-      const historyNotice = execution.historyError
-        ? `\n${execution.historyError}`
+      historyNotice = execution.historyError
+        ? `
+${execution.historyError}`
         : "";
-      if (modelRevision.current !== revision) {
-        setAnalysisDiagnostics(failedRunDiagnostics);
-        setMessage(
-          `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
-        );
-        return;
-      }
       if (
         execution.log.summary.status !== "completed" ||
         execution.output === null
       ) {
-        setAnalysisDiagnostics(failedRunDiagnostics);
-        setMessage(`${execution.log.summary.message}${historyNotice}`);
-        return;
+        const diagnostics = diagnoseSolverFailure(
+          execution.log.summary.message,
+          execution.log.stdout,
+          execution.log.stderr,
+          input,
+        );
+        if (diagnostics.length)
+          saveDiagnosticContext(id, snapshot, diagnostics);
+        if (modelRevision.current === revision)
+          setAnalysisDiagnostics(diagnostics);
+        return {
+          status:
+            execution.log.summary.status === "cancelled"
+              ? ("cancelled" as const)
+              : ("failed" as const),
+          message: execution.log.summary.message + historyNotice,
+        };
       }
-      const completed = parseOofemOutput(execution.output, input);
+      if (modelRevision.current !== revision)
+        return { status: "obsolete" as const, message: historyNotice };
+      const result = parseOofemOutput(execution.output, input);
       setAnalysisDiagnostics([]);
-      setCaseResults((results) =>
-        new Map(results).set(completed.caseId, completed),
-      );
-      showDisplay(defaultDiagram);
-      setMessage(
-        `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. ${completed.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${historyNotice}`,
-      );
-    } catch (e) {
-      const failure = e instanceof Error ? e.message : String(e);
+      setCaseResults((results) => new Map(results).set(result.caseId, result));
+      return { status: "completed" as const, result, message: historyNotice };
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error);
       const diagnostics = diagnoseSolverFailure(failure, "", "");
-      setAnalysisDiagnostics(diagnostics);
+      if (modelRevision.current === revision)
+        setAnalysisDiagnostics(diagnostics);
       if (executionLogReceived)
         saveDiagnosticContext(id, snapshot, diagnostics);
-      setMessage(failure);
+      return { status: "failed" as const, message: failure + historyNotice };
+    }
+  };
+
+  const run = async (batch: boolean) => {
+    if (runLock.current) return;
+    const snapshot = current.current;
+    const revision = modelRevision.current;
+    const context = { revision, target: queueTarget };
+    const planned = batch ? missingCases : [analysisCase];
+    if (!planned.length) {
+      setQueue({
+        ...context,
+        message: "Todos os casos desta revisão já estão disponíveis.",
+      });
+      return;
+    }
+    const modelIssues = diagnoseModel(snapshot);
+    setAnalysisDiagnostics(modelIssues);
+    setDiagnosticRevision(revision);
+    if (modelIssues.length) {
+      setDisplay("model");
+      const problem = `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.
+${modelIssues[0].message}`;
+      setMessage(problem);
+      if (batch) setQueue({ ...context, message: problem });
+      return;
+    }
+
+    const lock = { stop: false };
+    runLock.current = lock;
+    if (!batch) {
+      setCaseResults((results) => {
+        const updated = new Map(results);
+        updated.delete(caseId);
+        return updated;
+      });
+    }
+    setDisplay("model");
+
+    const warnings: string[] = [];
+    try {
+      for (const [index, requestedCase] of planned.entries()) {
+        if (batch && index > 0) {
+          setActiveRun({ id: null, ready: true, cancelling: false });
+          setQueue({
+            ...context,
+            message: `${index} de ${planned.length} casos da fila concluídos.`,
+          });
+          // Let input and model edits reach the queue before reserving the next native slot.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+        if (modelRevision.current !== revision || lock.stop) break;
+
+        if (batch)
+          setQueue({
+            ...context,
+            caseId: requestedCase.id,
+            message: `Executando ${index + 1} de ${planned.length} · ${requestedCase.name}`,
+          });
+        setMessage(`Analisando ${requestedCase.name}…`);
+        const outcome = await runCase(snapshot, revision, requestedCase);
+        if (modelRevision.current !== revision) {
+          break;
+        }
+        if (outcome.status !== "completed") {
+          setMessage(outcome.message);
+          if (batch)
+            setQueue({
+              ...context,
+              failedId:
+                outcome.status === "failed" ? requestedCase.id : undefined,
+              message: [
+                `${requestedCase.name} · ${outcome.message} Use Analisar casos necessários para retomar.`,
+                ...warnings,
+              ].join("\n"),
+            });
+          return;
+        }
+        if (!batch) {
+          showDisplay(defaultDiagram);
+          setMessage(
+            `Análise concluída · ${requestedCase.name}
+Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${outcome.message}`,
+          );
+          return;
+        }
+        if (outcome.message)
+          warnings.push(`${requestedCase.name} · ${outcome.message.trim()}`);
+      }
+      if (modelRevision.current !== revision) {
+        const obsolete =
+          "O modelo mudou durante a análise. Execute novamente para obter resultados atuais.";
+        setMessage(obsolete);
+        if (batch)
+          setQueue({
+            target: queueTarget,
+            revision: modelRevision.current,
+            message: obsolete,
+          });
+      } else {
+        const status = lock.stop
+          ? "Fila interrompida. Use Analisar casos necessários para retomar."
+          : "Casos necessários concluídos.";
+        if (!lock.stop) showDisplay(defaultDiagram);
+        setQueue({ ...context, message: [status, ...warnings].join("\n") });
+      }
     } finally {
-      activeRunId.current = null;
+      runLock.current = null;
       setActiveRun(null);
     }
   };
@@ -991,13 +1081,16 @@ export default function App() {
     setMessage(diagnostic.action);
   };
   const cancel = async () => {
-    if (!activeRun?.ready || activeRun.cancelling) return;
+    const lock = runLock.current;
+    if (!lock || !activeRun?.ready || activeRun.cancelling) return;
+    lock.stop = true;
     const { id } = activeRun;
     setActiveRun({ ...activeRun, cancelling: true });
+    if (!id) return;
     try {
       if (await cancelAnalysis(id)) return;
     } catch (e) {
-      if (activeRunId.current === id) setMessage(String(e));
+      if (runLock.current === lock) setMessage(String(e));
     }
     setActiveRun((active) =>
       active?.id === id ? { ...active, cancelling: false } : active,
@@ -1533,7 +1626,7 @@ export default function App() {
           <button
             className="run-button"
             disabled={running || Boolean(derived)}
-            onClick={() => void run()}
+            onClick={() => void run(false)}
           >
             <Play size={15} fill="currentColor" />
             {running ? "Analisando…" : "Analisar"}
@@ -1552,6 +1645,37 @@ export default function App() {
           )}
         </div>
       </div>
+      {derived && (
+        <section className="case-queue" aria-label="Fila de casos">
+          <button
+            type="button"
+            onClick={() => void run(true)}
+            disabled={running}
+          >
+            Analisar casos necessários
+          </button>
+          <div>
+            <div aria-live="polite" className="case-queue-message">
+              {queueView?.message ||
+                `${requiredCases.length - missingCases.length} de ${requiredCases.length} casos disponíveis nesta revisão.`}
+            </div>
+            <ol aria-label="Ordem de execução">
+              {requiredCases.map((item) => (
+                <li key={item.id}>
+                  {item.name} [{item.id}] ·{" "}
+                  {queueView?.caseId === item.id
+                    ? "Em execução"
+                    : queueView?.failedId === item.id
+                      ? "Falhou"
+                      : caseResults.get(item.id)?.caseId === item.id
+                        ? "Disponível para reaproveitar"
+                        : "Pendente"}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
       <div className="workspace">
         {left && (
           <aside className="explorer">

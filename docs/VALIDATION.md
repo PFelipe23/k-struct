@@ -502,3 +502,11 @@ Abra uma viga biapoiada de 5 m em X, com rotações livres, deslocamento axial l
 O ensaio compara 2 e 8 elementos e a inversão de i/j. Para os deslocamentos em metros e a curvatura em m⁻¹, o erro absoluto deve ficar abaixo de 5 × 10⁻¹¹. Para a normal impedida admite-se 0,01 N. Para normal ou momento esperados nulos, exige-se menos de 10⁻⁵ N ou N·m. Um segundo padrão com fator −0,5 sobre o mesmo campo produz metade do alongamento e da flecha. Também são exercitados o campo nulo, α nulo e a alteração de EIy. Com braços rígidos de 0,5 m nas duas extremidades, o comprimento deformável cai para 4 m e o alongamento livre para 0,96 mm. A migração conserva as faixas de vento dos projetos v21. No ensaio de coluna de 3 m com ambas as ações, obtêm-se +0,72 mm de alongamento, −12 kN de reação horizontal e −18 kN·m de momento na base.
 
 Configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md). Execute `npm test -- tests/thermal-loads.test.ts` e `npm run test:e2e -- thermal-loads.spec.ts`. A regressão usa o executável real e confere os resultados importados. O teste de interface aplica e desfaz a temperatura, salva e reabre o projeto e consulta o deslocamento.
+
+## KS-34 — Fila de casos estáticos
+
+Abra o [pórtico em L](../examples/portico-em-l-envelopes.kstruct.json), selecione **Envelope** e clique em **Analisar casos necessários**. A fila executa EL e CP uma vez cada na ordem do projeto. Se EL já foi analisado na mesma revisão, só CP inicia. Com ambos disponíveis, o comando não faz chamadas nativas.
+
+No envelope, selecione V1 na estação x/L = 0,5. O máximo de My é 11,99 kN·m, governado por CF · Flexão. O teste compara todas as células da tabela desse extremo e do mínimo exibido com as da execução manual dos dois casos, na mesma unidade e precisão de exibição. As tolerâncias numéricas seguem o [benchmark de envelopes](#envelopes-de-esforços).
+
+Com o [OOFEM 3.0 configurado](OOFEM.md), execute `npm run test:e2e -- results.spec.ts -g 'fila serial|pórtico em L com fila'`. A ponte controlada cobre clique repetido, fator zero, dependências duplicadas, cancelamento entre casos e com o motor ativo, falha no segundo caso, histórico e edição antes de uma resposta tardia. O segundo ensaio usa o motor real para comparar fila e execução manual.

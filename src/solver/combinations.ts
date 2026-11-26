@@ -57,18 +57,23 @@ function sumComponents<K extends string, C extends WeightedCase>(
   return total;
 }
 
+export function requiredCaseIds(
+  factors: readonly ResultCombination["factors"][number][],
+) {
+  return new Set(
+    factors.filter(({ factor }) => factor !== 0).map(({ caseId }) => caseId),
+  );
+}
+
 export function requireAvailableCases(
   project: Project,
   factors: readonly ResultCombination["factors"][number][],
   caseResults: ReadonlyMap<string, AnalysisResult>,
 ): void {
   const pending = new Set(
-    factors
-      .filter(
-        ({ caseId, factor }) =>
-          factor !== 0 && caseResults.get(caseId)?.caseId !== caseId,
-      )
-      .map(({ caseId }) => caseId),
+    [...requiredCaseIds(factors)].filter(
+      (id) => caseResults.get(id)?.caseId !== id,
+    ),
   );
   if (pending.size) {
     const caseNames = new Map(
