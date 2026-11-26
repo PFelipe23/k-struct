@@ -23,6 +23,13 @@ import {
   pointFraction,
   type MemberPointLoad,
 } from "../domain/memberPointLoads";
+import { elementDensities, type LinearDensity } from "./distributedBeamLoads";
+import {
+  globalIntensity,
+  intensityAt,
+  linearEndForces,
+  loadInterval,
+} from "../domain/memberDistributedLoads";
 import { memberAxis } from "../domain/memberOffsets";
 import { floorConstraints } from "./diaphragm";
 import { rigidJointEquations } from "./rigidOffsets";
@@ -254,6 +261,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
     );
   }
+  const densities = new Map<string, LinearDensity[]>();
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
     const scaleLoad = (values: number[]) => {
@@ -293,6 +301,66 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         ),
       );
     }
+    for (const load of pat.distributed ?? []) {
+      if (!factor.factor) continue;
+      const m = membersById.get(load.memberId)!,
+        line = lines.get(m.id)!,
+        basis = axes.get(m.id)!;
+      const [a, b] = loadInterval(load, line.span),
+        faceI = m.offsets?.i.rigidLength ?? 0,
+        faceJ = faceI + line.clear;
+      const localIntensity = (v: Point3) => {
+        const local = load.system === "local" ? v : localComponents(v, basis);
+        const [x, y, z] = scaleLoad([local.x, local.y, local.z]);
+        return { x, y, z };
+      };
+      const density = {
+        start: a,
+        end: b,
+        qStart: localIntensity(load.qStart),
+        qEnd: localIntensity(load.qEnd),
+      };
+      const profiles = densities.get(m.id);
+      if (profiles) profiles.push(density);
+      else densities.set(m.id, [density]);
+      for (const [id, left, right] of [
+        [m.start, 0, faceI],
+        [m.end, faceJ, line.span],
+      ] as const) {
+        const start = Math.max(a, left),
+          end = Math.min(b, right);
+        if (end <= start) continue;
+        const [f0, f1] = linearEndForces(
+          globalIntensity(
+            intensityAt(load, line.span, start),
+            load.system,
+            basis,
+          ),
+          globalIntensity(
+            intensityAt(load, line.span, end),
+            load.system,
+            basis,
+          ),
+          end - start,
+        );
+        const joint = modelNodes.get(id)!;
+        const momentAt = (x: number, force: Point3) =>
+          cross(
+            subtract(interpolate(line.start, line.end, x / line.span), joint),
+            force,
+          );
+        const force = add(f0, f1),
+          moment = add(momentAt(start, f0), momentAt(end, f1));
+        addNodalLoad(
+          joint.number,
+          scaleLoad(
+            spatial
+              ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+              : [force.x, force.z, moment.y],
+          ),
+        );
+      }
+    }
     for (const l of pat.uniform) {
       if (!factor.factor || !(l.qx || l.qy || l.qz)) continue;
       const m = membersById.get(l.memberId)!;
@@ -324,6 +392,23 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const values = spatial ? [x, y, z, 0, 0, 0] : [x, z, 0];
       bcs.push(
         `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${scaleLoad(values).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
+      );
+    }
+  }
+  for (const [id, profiles] of densities) {
+    const line = lines.get(id)!,
+      faceI = membersById.get(id)!.offsets?.i.rigidLength ?? 0;
+    const stations = layout.get(id)!.map((s) => faceI + s.t * line.clear);
+    const ids = memberElements.get(id)!;
+    const edgeComponents = (q: Point3) =>
+      spatial ? [q.x, q.y, q.z, 0, 0, 0] : [q.x, q.z, 0];
+    for (const { index, qStart, qEnd } of elementDensities(
+      stations,
+      profiles,
+    )) {
+      const values = [...edgeComponents(qStart), ...edgeComponents(qEnd)];
+      bcs.push(
+        `LinearEdgeLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")} loadType 3 csType 1 set ${set(`elementedges 2 ${ids[index]} 1`)}`,
       );
     }
   }
@@ -766,6 +851,23 @@ export function checkEquilibrium(
           pointFraction(load.position, line.span),
         ),
       );
+    }
+    for (const load of pat.distributed ?? []) {
+      const m = members.get(load.memberId)!,
+        line = memberAxis(m, byId.get(m.start)!, byId.get(m.end)!);
+      const basis = beamAxes(line.start, line.end, m.roll, p.mode),
+        [a, b] = loadInterval(load, line.span);
+      const q0 = globalIntensity(load.qStart, load.system, basis),
+        q1 = globalIntensity(load.qEnd, load.system, basis);
+      // About the interval midpoint the first moment remains nonzero for q0 = −q1.
+      const pa = interpolate(line.start, line.end, a / line.span),
+        pb = interpolate(line.start, line.end, b / line.span);
+      const force = scale(add(q0, q1), ((b - a) * f.factor) / 2);
+      const couple = cross(
+        subtract(pb, pa),
+        scale(subtract(q1, q0), ((b - a) * f.factor) / 12),
+      );
+      accumulate(force, couple, interpolate(pa, pb, 0.5));
     }
     for (const l of pat.uniform) {
       const m = members.get(l.memberId)!;

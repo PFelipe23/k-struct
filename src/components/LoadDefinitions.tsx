@@ -381,7 +381,8 @@ export default function LoadDefinitions({
             <p>
               {pattern.nodal.length} cargas nodais ·{" "}
               {pattern.points?.length ?? 0} concentradas em barras ·{" "}
-              {pattern.uniform.length} cargas distribuídas
+              {pattern.uniform.length} uniformes ·{" "}
+              {pattern.distributed?.length ?? 0} por trecho
               {project.slabs.length > 0 &&
                 ` · ${pattern.pressure.length} pressões em laje`}
               . Atribua as cargas pelo painel de propriedades.

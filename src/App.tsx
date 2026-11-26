@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArrowDownToLine,
+  ChartNoAxesCombined,
   Box,
   Boxes,
   ChevronDown,
@@ -67,9 +68,9 @@ import {
   type Point3,
   type WorkPlane,
 } from "./domain/geometry";
-import MemberPointLoadDialog, {
-  type PointLoadSelection,
-} from "./components/MemberPointLoadDialog";
+import MemberPointLoadDialog from "./components/MemberPointLoadDialog";
+import MemberDistributedLoadDialog from "./components/MemberDistributedLoadDialog";
+import type { MemberLoadSelection } from "./components/memberLoadInput";
 import { memberAxis } from "./domain/memberOffsets";
 import { historyReducer } from "./domain/history";
 import { hasElasticSupport, hasSupport } from "./domain/supports";
@@ -150,6 +151,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v18") ??
       localStorage.getItem("kstruct.draft.v17") ??
       localStorage.getItem("kstruct.draft.v16") ??
       localStorage.getItem("kstruct.draft.v15") ??
@@ -238,9 +240,15 @@ export default function App() {
     | "selection"
     | null
   >(null);
-  const [pointDraft, setPointDraft] = useState<PointLoadSelection | null>(null);
-  const pointMember =
-    pointDraft && p.members.find((m) => m.id === pointDraft.memberId);
+  const [memberLoadDraft, setMemberLoadDraft] =
+    useState<MemberLoadSelection | null>(null);
+  const MemberLoadDialog =
+    memberLoadDraft?.kind === "distributed"
+      ? MemberDistributedLoadDialog
+      : MemberPointLoadDialog;
+  const choosingMemberLoad = tool === "pointLoad" || tool === "distributedLoad";
+  const loadedMember =
+    memberLoadDraft && p.members.find((m) => m.id === memberLoadDraft.memberId);
   const [catalogSectionId, setCatalogSectionId] = useState("");
   const openSections = (id: string) => {
     setCatalogSectionId(id);
@@ -327,6 +335,35 @@ export default function App() {
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
+  const resultPatterns = useMemo(() => {
+    const combinations = envelope
+      ? p.resultCombinations.filter((c) =>
+          envelope.combinationIds.includes(c.id),
+        )
+      : combination
+        ? [combination]
+        : [];
+    const caseIds = new Set(
+      combinations.flatMap((c) =>
+        c.factors.filter((f) => f.factor !== 0).map((f) => f.caseId),
+      ),
+    );
+    const cases =
+      envelope || combination
+        ? p.analysisCases.filter((c) => caseIds.has(c.id))
+        : [analysisCase];
+    return new Set(
+      cases.flatMap((c) =>
+        c.factors.filter((f) => f.factor !== 0).map((f) => f.patternId),
+      ),
+    );
+  }, [
+    p.analysisCases,
+    p.resultCombinations,
+    analysisCase,
+    combination,
+    envelope,
+  ]);
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -420,7 +457,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v17", serialized);
+      localStorage.setItem("kstruct.draft.v18", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -543,13 +580,18 @@ export default function App() {
   };
   const changeTool = (t: Tool) => {
     if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
-    if (t !== "select" && t !== "pointLoad" && activePanel === "perspective")
+    if (
+      t !== "select" &&
+      t !== "pointLoad" &&
+      t !== "distributedLoad" &&
+      activePanel === "perspective"
+    )
       activatePanel("primary");
     setTool(t);
     setPending(null);
     setDisplay("model");
   };
-  const pickPointLoad = (id: string, point: Point3) => {
+  const pickMemberLoad = (id: string, point: Point3) => {
     const m = p.members.find((m) => m.id === id)!;
     const line = memberAxis(
       m,
@@ -559,7 +601,11 @@ export default function App() {
     const chord = subtract(line.end, line.start);
     const t = dot(subtract(point, line.start), chord) / dot(chord, chord);
     selectObject({ kind: "member", id });
-    setPointDraft({ memberId: id, fraction: Math.max(0, Math.min(1, t)) });
+    setMemberLoadDraft({
+      kind: tool === "distributedLoad" ? "distributed" : "point",
+      memberId: id,
+      fraction: Math.max(0, Math.min(1, t)),
+    });
   };
   const showDisplay = (value: Display | SlabDisplay) => {
     if (slab && isSlabDisplay(value)) {
@@ -584,7 +630,7 @@ export default function App() {
     current.current = project;
     dispatch({ type: "reset", project });
     setLaunchDialog(null);
-    setPointDraft(null);
+    setMemberLoadDraft(null);
     setLaunchSection("");
     setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
@@ -653,7 +699,7 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if (
         loadEditor ||
-        pointDraft ||
+        memberLoadDraft ||
         launchDialog === "materials" ||
         launchDialog === "sections" ||
         launchDialog === "nodes" ||
@@ -1021,6 +1067,19 @@ export default function App() {
                 >
                   <ArrowDownToLine size={21} />
                   <span>Carga concentrada</span>
+                </button>
+                <button
+                  className={`tool-button ${tool === "distributedLoad" ? "active" : ""}`}
+                  aria-pressed={tool === "distributedLoad"}
+                  disabled={!p.members.length}
+                  onClick={() =>
+                    changeTool(
+                      tool === "distributedLoad" ? "select" : "distributedLoad",
+                    )
+                  }
+                >
+                  <ChartNoAxesCombined size={21} />
+                  <span>Carga por trecho</span>
                 </button>
                 <button
                   className="tool-button"
@@ -1698,6 +1757,7 @@ export default function App() {
                       ? slabMap
                       : null
                   }
+                  resultPatterns={resultPatterns}
                   patternId={patternId}
                   onWindow={(objects, additive) =>
                     setSelection((previous) =>
@@ -1708,7 +1768,7 @@ export default function App() {
                       ),
                     )
                   }
-                  onPickLoad={tool === "pointLoad" ? pickPointLoad : undefined}
+                  onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                   onSpan={placeMember}
                   pending={active ? pending : null}
                   onPoint={onPoint}
@@ -1718,7 +1778,7 @@ export default function App() {
             })}
             {perspective && (
               <SpatialView
-                onPickLoad={tool === "pointLoad" ? pickPointLoad : undefined}
+                onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                 layers={perspectiveLayers}
                 setLayers={setPerspectiveLayers}
                 savedCamera={perspectiveCamera}
@@ -1813,7 +1873,7 @@ export default function App() {
         </main>
         {right && (
           <Inspector
-            onPointLoad={setPointDraft}
+            onMemberLoad={setMemberLoadDraft}
             onSections={openSections}
             onMaterials={() => setLaunchDialog("materials")}
             project={p}
@@ -1839,21 +1899,23 @@ export default function App() {
         <span>
           {tool === "pointLoad"
             ? "Clique na barra na posição da força ou do momento"
-            : tool === "slab"
-              ? pending
-                ? "Marque o canto oposto da laje · Esc para cancelar"
-                : "Marque o primeiro canto da laje na planta XY"
-              : pending
-                ? "Marque a segunda extremidade · Esc para cancelar"
-                : tool === "member"
-                  ? memberMode === "span"
-                    ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
-                    : "Marque a primeira extremidade da barra"
-                  : tool === "node"
-                    ? "Clique na malha para inserir um nó"
-                    : selection.length > 1
-                      ? `${selection.length} objetos selecionados`
-                      : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+            : tool === "distributedLoad"
+              ? "Clique na barra para indicar o início da carga por trecho"
+              : tool === "slab"
+                ? pending
+                  ? "Marque o canto oposto da laje · Esc para cancelar"
+                  : "Marque o primeiro canto da laje na planta XY"
+                : pending
+                  ? "Marque a segunda extremidade · Esc para cancelar"
+                  : tool === "member"
+                    ? memberMode === "span"
+                      ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
+                      : "Marque a primeira extremidade da barra"
+                    : tool === "node"
+                      ? "Clique na malha para inserir um nó"
+                      : selection.length > 1
+                        ? `${selection.length} objetos selecionados`
+                        : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           {units.force} · {units.length} · rad <i />{" "}
@@ -1879,16 +1941,16 @@ export default function App() {
           e.target.value = "";
         }}
       />
-      {pointDraft && pointMember && (
-        <MemberPointLoadDialog
-          key={pointDraft.loadId ?? pointMember.id}
+      {memberLoadDraft && loadedMember && (
+        <MemberLoadDialog
+          key={memberLoadDraft.loadId ?? loadedMember.id}
           project={p}
-          member={pointMember}
+          member={loadedMember}
           pattern={p.loadPatterns.find((item) => item.id === patternId)!}
-          selection={pointDraft}
+          selection={memberLoadDraft}
           edit={edit}
           onClose={() => {
-            setPointDraft(null);
+            setMemberLoadDraft(null);
             changeTool("select");
           }}
         />

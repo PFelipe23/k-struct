@@ -1,3 +1,4 @@
+import { globalIntensity } from "./memberDistributedLoads";
 import { actionVector, pointLoadFrame } from "./memberPointLoads";
 import { memberAxis } from "./memberOffsets";
 import {
@@ -194,6 +195,31 @@ function copyAssignments(
           position: { ...load.position },
           components:
             load.system === "local" ? localComponents(global, newAxes) : global,
+        });
+        plan.loads++;
+      }
+    }
+    if (src.distributed?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const load of src.distributed) {
+        const memberId = map.members.get(load.memberId);
+        if (!memberId) continue;
+        const old = plan.source.members.find((m) => m.id === load.memberId)!,
+          member = plan.project.members.find((m) => m.id === memberId)!;
+        const from = pointLoadFrame(old, originalNodes, plan.source.mode),
+          to = pointLoadFrame(member, targetNodes, plan.project.mode);
+        const transformIntensity = (q: Point3) => {
+          const global = vector(globalIntensity(q, load.system, from.axes));
+          return load.system === "local"
+            ? localComponents(global, to.axes)
+            : global;
+        };
+        (dst.distributed ??= []).push({
+          ...load,
+          id: uid(),
+          memberId,
+          qStart: transformIntensity(load.qStart),
+          qEnd: transformIntensity(load.qEnd),
         });
         plan.loads++;
       }

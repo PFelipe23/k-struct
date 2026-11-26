@@ -1,4 +1,8 @@
 import {
+  distributedLoadError,
+  rebaseDistributedLoad,
+} from "./memberDistributedLoads";
+import {
   actionPoint,
   pointLoadFrame,
   positionError,
@@ -63,7 +67,16 @@ export function inspectNodeCoordinateChanges(
         byId.get(member.start)!,
         byId.get(member.end)!,
       ).span;
-      for (const pat of project.loadPatterns)
+      for (const pat of project.loadPatterns) {
+        for (const load of pat.distributed ?? []) {
+          if (load.memberId !== member.id) continue;
+          const invalid = distributedLoadError(load, span, project.mode);
+          if (invalid)
+            issues.push({
+              message: `${member.name} · ${pat.name}: ${invalid}`,
+              nodeIds: moved,
+            });
+        }
         for (const load of pat.points ?? []) {
           if (
             load.memberId === member.id &&
@@ -76,6 +89,7 @@ export function inspectNodeCoordinateChanges(
             break;
           }
         }
+      }
     }
   }
   if (!issues.length && project.meshConnections.length) {
@@ -129,6 +143,11 @@ export function reverseMember(p: Project, id: string) {
     if (pat.points)
       pat.points = pat.points.map((l) =>
         l.memberId === id ? rebasePointLoad(l, from, to, id) : l,
+      );
+  for (const pat of p.loadPatterns)
+    if (pat.distributed)
+      pat.distributed = pat.distributed.map((load) =>
+        load.memberId === id ? rebaseDistributedLoad(load, from, to, id) : load,
       );
   // Mesh connections refer to physical node IDs and derive x/L from i and j.
   // Uniform loads are global, and groups and sections refer to the same ID.
@@ -388,6 +407,22 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
                 dot(subtract(point, frame.end), from.axes[0]) < -tolerance,
             ) ?? targets.at(-1)!;
           return rebasePointLoad(load, from, dest.frame, dest.child.id);
+        });
+    for (const pat of p.loadPatterns)
+      if (pat.distributed)
+        pat.distributed = pat.distributed.flatMap((load) => {
+          if (load.memberId !== m.id) return [load];
+          const pieces = targets.flatMap(({ child, frame }) => {
+            const part = rebaseDistributedLoad(
+              load,
+              from,
+              frame,
+              child.id,
+              true,
+            );
+            return part ? [part] : [];
+          });
+          return pieces.map((part, i) => (i ? { ...part, id: uid() } : part));
         });
     split.set(
       m.id,

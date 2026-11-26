@@ -415,3 +415,26 @@ No ensaio espacial, engaste a extremidade (0, 0, 0) e deixe livre a extremidade 
 OOFEM_BIN=/caminho/absoluto/oofem npm run check
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-point-loads.spec.ts
 ```
+
+## Cargas triangulares, trapezoidais e parciais (KS-30)
+
+Abra a viga de referência de 6 m e zere a carga uniforme. Em **Modelo → Carga por trecho**, clique na barra. Escolha o referencial global, início a 2 m de i e fim a 5 m. Informe qZ nas duas extremidades e analise cada linha abaixo separadamente. As posições relativas equivalentes são 1/3 e 5/6.
+
+| qZ inicial e final (kN/m) | Força vertical resultante (kN) | Posição da resultante a partir de i | Reação em i (kN) | Reação em j (kN) |
+| --- | ---: | --- | ---: | ---: |
+| 0 e −6 | −9 | 4 m | +3 | +6 |
+| −2 e −6 | −12 | 3,75 m | +4,5 | +7,5 |
+| −6 e +6 | 0 | Binário de −9 kN·m em Y global | +1,5 | −1,5 |
+
+Para conferir cada seção no OOFEM, tome `d = min(3, max(0, x − 2))` e `g = (q₁ − q₀)/3`. A carga acumulada até x é `Q = q₀d + gd²/2`. O cortante é `V = Rᵢ + Q` e o momento é `M = Rᵢx + (x − 2)Q − q₀d²/2 − gd³/3`. Os testes com 2, 4 e 12 subdivisões comparam todas as estações às expressões, com tolerâncias absolutas de 0,06 N no cortante e 0,6 N·m no momento. Os esforços nas extremidades dos elementos são impressos pelo OOFEM com cinco algarismos significativos. A comparação da superposição inclui o arredondamento de cada parcela.
+
+A força integrada em um trecho de comprimento ℓ vale `F = ℓ(q₀ + q₁)/2`. O momento em relação ao ponto médio vale `(r₁ − r₀) × ℓ(q₁ − q₀)/12`. A terceira linha verifica esse momento mesmo com força resultante zero. Outro ensaio aplica a inversão de sinal inteiramente no braço rígido. Um balanço de (0,0,0) a (3,0,4) m, com giro de +90°, recebe qz local de −2 a −6 kN/m entre 1 e 4 m e fator 1,5. As reações de referência no engaste são −18 kN em Y, +39,6 kN·m em X e −29,7 kN·m em Z.
+
+Uma viga biengastada de 6 m com carga triangular de 0 a −6 kN/m em todo o vão verifica também a compatibilidade de rotações. As reações verticais são +5,4 e +12,6 kN, e os momentos de engastamento nas seções i e j são −7,2 e −10,8 kN·m.
+
+A suíte compara a distribuição constante de ponta a ponta com o carregamento uniforme legado, inclusive deslocamentos. Também cobre inversão de i/j, divisão, união, cópia, superposição e envelopes. No navegador, o ensaio verifica o lançamento por clique, a troca de sinal nas setas, as estações do diagrama e do CSV, edição, desfazer/refazer e reabertura. A perspectiva XYZ verifica a ação em eixos locais.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm run check
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-distributed-loads.spec.ts
+```

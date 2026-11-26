@@ -9,34 +9,15 @@ import {
   type MemberPointLoad,
 } from "../domain/memberPointLoads";
 import { memberAxis } from "../domain/memberOffsets";
-import { uid, type Member, type Project } from "../domain/model";
+import { uid } from "../domain/model";
 import {
   formatQuantity,
   formatUnitInput,
   formatUnitValue,
   parseUnitInput,
-  parseUnitNumber,
 } from "../units";
+import { relativeNumber, type MemberLoadDialogProps } from "./memberLoadInput";
 import { useUnits } from "./Units";
-
-export type PointLoadSelection = {
-  memberId: string;
-  fraction: number;
-  loadId?: string;
-};
-
-function relativeNumber(text: string) {
-  const simple = parseUnitNumber(text);
-  if (simple !== null) return simple;
-  const match =
-    /^\s*(L|[+-]?\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)\s*$/i.exec(text);
-  if (!match) return null;
-  const a = match[1].toUpperCase() === "L" ? 1 : parseUnitNumber(match[1]),
-    b = parseUnitNumber(match[2]);
-  return a !== null && b !== null && b !== 0 && Number.isFinite(a / b)
-    ? a / b
-    : null;
-}
 
 export default function MemberPointLoadDialog({
   project: p,
@@ -45,14 +26,7 @@ export default function MemberPointLoadDialog({
   selection,
   edit,
   onClose,
-}: {
-  project: Project;
-  member: Member;
-  pattern: Project["loadPatterns"][number];
-  selection: PointLoadSelection;
-  edit: (change: (p: Project) => void) => string | null | void;
-  onClose: () => void;
-}) {
+}: MemberLoadDialogProps) {
   const { units } = useUnits();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
