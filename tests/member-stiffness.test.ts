@@ -41,6 +41,16 @@ describe("modificadores de rigidez", () => {
     expect(() => exportOofem(p, "EL")).toThrow(/rigidez fora do intervalo/);
   });
 
+  it("identifica a barra, o componente e o mecanismo ao abrir um arquivo com fator zero", () => {
+    const p = stiffnessCantilevers();
+    const bar = p.members[1];
+    bar.name = "Pilar P2";
+    bar.stiffness = { gj: 0 };
+    expect(() => parseProject(JSON.stringify(p))).toThrow(
+      /Pilar P2 .*GJ.*mecanismo/,
+    );
+  });
+
   it("preserva os fatores ao copiar e dividir e repõe a condição original ao voltar a 1", () => {
     const p = stiffnessCantilevers();
     const [member] = p.members;

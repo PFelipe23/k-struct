@@ -12,6 +12,7 @@ import {
   grossStiffness,
   memberStiffnessError,
   setStiffnessFactor,
+  stiffnessLabels,
 } from "../domain/memberStiffness";
 import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
@@ -54,7 +55,6 @@ import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
 import { selectionKey } from "../domain/selection";
 
-const stiffnessLabels = { ea: "EA", eiy: "EIy", eiz: "EIz", gj: "GJ" };
 const stiffnessNumber = new Intl.NumberFormat("pt-BR", {
   maximumSignificantDigits: 7,
 });

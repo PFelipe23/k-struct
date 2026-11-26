@@ -3,6 +3,12 @@ import type { sectionProperties } from "./sections";
 
 const stiffnessComponents = ["ea", "eiy", "eiz", "gj"] as const;
 type StiffnessComponent = (typeof stiffnessComponents)[number];
+export const stiffnessLabels = {
+  ea: "EA",
+  eiy: "EIy",
+  eiz: "EIz",
+  gj: "GJ",
+} as const;
 export type StiffnessFactors = Partial<Record<StiffnessComponent, number>>;
 export const beamShearCoefficient = 1e18;
 type Geometry = ReturnType<typeof sectionProperties>;
@@ -11,8 +17,9 @@ export function activeStiffnessComponents(mode: Project["mode"]) {
   return mode === "spatial" ? stiffnessComponents : (["ea", "eiy"] as const);
 }
 
-function stiffnessFactorError(value: number) {
-  if (!Number.isFinite(value)) return "Informe um fator finito.";
+export function stiffnessFactorError(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value))
+    return "Informe um fator finito.";
   if (value < 0) return "Informe um fator positivo.";
   if (value === 0)
     return "Rigidez nula pode gerar um mecanismo. Use um fator maior que zero.";

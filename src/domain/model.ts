@@ -5,7 +5,11 @@ import {
   defaultGeometry,
   sectionProperties,
 } from "./sections";
-import { memberStiffnessError } from "./memberStiffness";
+import {
+  memberStiffnessError,
+  stiffnessFactorError,
+  stiffnessLabels,
+} from "./memberStiffness";
 import { offsetError, setOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
@@ -709,10 +713,32 @@ export function parseProject(source: string): Project {
     if (old.success) value = { ...old.data, schemaVersion: 13 };
   }
   const parsed = projectSchema.safeParse(value);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const factorIssue = parsed.error.issues.find(
+      ({ path }) =>
+        path[0] === "members" && path[2] === "stiffness" && path.length === 4,
+    );
+    if (
+      factorIssue &&
+      value &&
+      typeof value === "object" &&
+      "members" in value &&
+      Array.isArray(value.members)
+    ) {
+      const [, index, , component] = factorIssue.path;
+      const member = value.members[Number(index)];
+      const key = component as keyof typeof stiffnessLabels;
+      const name =
+        typeof member.name === "string"
+          ? member.name
+          : String(Number(index) + 1);
+      const reason = stiffnessFactorError(member.stiffness[key]);
+      throw new Error(`Barra ${name} · ${stiffnessLabels[key]}. ${reason}`);
+    }
     throw new Error(
       "Formato incompatível. Use um projeto KStruct da versão 1 à 13, com valores numéricos finitos e fatores de rigidez positivos.",
     );
+  }
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
   if (source.length * 3 > projectFileLimit) serializeProject(parsed.data);

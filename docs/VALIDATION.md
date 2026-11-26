@@ -318,6 +318,10 @@ O modelo espacial tem dois balanços de 3 m ao longo de X, cada um com a mesma s
 
 Aplique um fator por vez. A tolerância absoluta é de 5 × 10⁻¹² m ou rad para as quatro respostas. As três outras componentes do primeiro balanço, as respostas do segundo e as reações dos engastes conservam os valores de referência. Cada barra tem massa geométrica de 706,5 kg, calculada por ρAL com a área e a massa específica exportadas. Um ensaio XZ com balanço de 6 m e Fz = −600 N compara −2,16 mm para EIy bruto e −4,32 mm para fator 0,5, com tolerância de 5 × 10⁻¹¹ m. A exportação com todos os fatores iguais a 1 coincide com a de um projeto migrado da versão 12.
 
+Um ensaio adicional gira as duas seções em 90° e aplica à primeira barra os fatores 2 em EA, 0,5 em EIy, 1,5 em EIz e 0,25 em GJ. Uma execução usa a carga distribuída de peso próprio de −2.310,255 N/m. A outra mantém as cargas nodais e substitui a carga distribuída por gravidade nativa do OOFEM (`DeadWeight`, −9,81 m/s²), que usa a área e a densidade exportadas. O peso próprio de cada barra é 6.930,765 N. Com a força de ponta, cada engaste recebe Rz = +7.830,765 N e My = −13.096,1475 N·m. As tolerâncias de leitura são 0,05 N e 0,5 N·m. No balanço modificado, UY = +0,270 mm e UZ = −1,866153 mm. Na barra de controle, UY = +0,135 mm e UZ = −2,7992295 mm. As translações e a torção são conferidas com as expressões analíticas nas duas execuções.
+
+Na viga contínua A–B–C, ambos os vãos medem 4 m e apenas AB recebe 12 kN/m para baixo. Pela equação dos três momentos, para `f = EI_AB / EI_BC`, o momento em B é −qL²/[8(1 + f)]. Reduzir EIy de AB de 1 para 0,5 muda o momento em B de −12 para −16 kN·m. As reações verticais em A/B/C passam de +21/+30/−3 kN para +20/+32/−4 kN. Os dois lados do apoio e as três reações são conferidos com tolerância de 0,001 N·m ou N.
+
 Os ensaios usam o OOFEM 3.0 fixado pelo KStruct. A entrada espacial usa elementos `Beam3d` com registros `SimpleCS` e `IsoLE`. Os testes de interface verificam os controles ativos em XZ e XYZ, a rejeição do zero, a invalidação dos resultados, o histórico e o salvamento e reabertura do projeto.
 
 ```sh
