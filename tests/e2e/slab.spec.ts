@@ -1,7 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { formatResult } from "../../src/components/resultFormatting";
-import { parseProject } from "../../src/domain/model";
+import {
+  createProject,
+  parseProject,
+  serializeProject,
+} from "../../src/domain/model";
+import { addPolygonSlab, newSlabRing } from "../../src/domain/editing";
+import { openProjectInBrowser } from "../fixtures/open-project";
+import { slabBenchmarkProject } from "../fixtures/slab-benchmark";
 import { exportOofem, parseOofemOutput } from "../../src/solver/oofem";
 import { runDeck } from "../fixtures/solve-oofem";
 
@@ -427,4 +434,221 @@ test("KS-41 · desenha, edita e reabre uma laje em L com abertura na planta", as
   ).toContainText("Centroide da área líquida");
   await expect(drawing.locator(".slab-map polygon")).toHaveCount(160);
   await expect(page.locator(".slab-equilibrium")).toContainText("-85");
+});
+
+test("KS-42 · configura, desfaz, reabre e compara duas malhas QDKT no mesmo ponto", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  if (executable) await plateBridge(page);
+  const project = slabBenchmarkProject();
+  project.slabs[0].formulation = "qdkt";
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "placa.kstruct.json",
+    serializeProject(project),
+  );
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const editor = page.getByRole("dialog", { name: "Malha da laje" });
+  const openMesh = async () => {
+    await page
+      .locator(".explorer")
+      .getByRole("button", { name: "L1", exact: true })
+      .click();
+    await button("Configurar malha da laje").click();
+  };
+  await openMesh();
+  const count = editor.getByLabel("Contagem da malha");
+  await expect(count).toContainText("48 elementos");
+  await editor.getByLabel("Geração da malha").selectOption("target");
+  const target = editor.getByLabel("Tamanho-alvo global");
+  await target.fill("0.000000001");
+  await expect(editor.getByRole("alert")).toContainText("limite");
+  await expect(button("Aplicar malha")).toBeDisabled();
+  await button("Cancelar").click();
+  await openMesh();
+  await expect(editor.getByLabel("Geração da malha")).toHaveValue("legacy");
+  await editor.getByLabel("Geração da malha").selectOption("target");
+  await target.fill("0.5");
+  await expect(count).toContainText("48 elementos · 63 nós · 0 inválidos");
+  await button("Aplicar malha").click();
+  await button("Desfazer").click();
+  await openMesh();
+  await expect(editor.getByLabel("Geração da malha")).toHaveValue("legacy");
+  await button("Cancelar").click();
+  await button("Refazer").click();
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const saved = await readFile((await (await download).path())!, "utf8");
+  expect(parseProject(saved).slabs[0].sizing).toEqual({
+    target: 0.5,
+    edges: [],
+  });
+  await openProjectInBrowser(page, "placa-refinada.kstruct.json", saved);
+  await openMesh();
+  await expect(target).toHaveValue(/0[,.]5/);
+  await button("Cancelar").click();
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  const solve = async () => {
+    await button("Analisar").click();
+    await page.waitForFunction(
+      () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+    );
+    await page.evaluate(() =>
+      (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+    );
+    await expect(button("Comparar malhas")).toBeEnabled();
+  };
+  await solve();
+  await button("Comparar malhas").click();
+  const compare = page.getByRole("dialog", { name: "Comparação de malhas" });
+  const table = compare.getByRole("table", {
+    name: "Resultados no mesmo ponto",
+  });
+  await compare.getByLabel("X da consulta").fill("2");
+  await compare.getByLabel("Y da consulta").fill("1.5");
+  await expect(table).toContainText("Atual · 48 elementos");
+  await button("Guardar referência desta malha").click();
+  await button("Fechar comparação").click();
+  await openMesh();
+  await target.fill("0.25");
+  await expect(count).toContainText("192 elementos");
+  await button("Aplicar malha").click();
+  await expect(button("Comparar malhas")).toBeDisabled();
+  await solve();
+  await button("Comparar malhas").click();
+  await expect(table).toContainText("Atual · 192 elementos");
+  await expect(table).toContainText("Referência · 48 elementos");
+  const uz = table.getByRole("row").filter({ hasText: "UZ" });
+  await expect(uz.getByRole("cell").nth(1)).toHaveText(
+    formatResult(-1.02991662),
+  );
+  await expect(uz.getByRole("cell").nth(2)).toHaveText(
+    formatResult(-1.0266872),
+  );
+  await expect(table.getByRole("row")).toHaveCount(5);
+  await compare.getByLabel("X da consulta").fill("40");
+  await expect(compare.getByRole("alert")).toContainText("área de material");
+  await expect(button("Guardar referência desta malha")).toBeDisabled();
+  await button("Fechar comparação").click();
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "L1", exact: true })
+    .click();
+  const pressure = page.getByLabel("Pressão pZ");
+  await pressure.fill("-4");
+  await pressure.press("Enter");
+  await solve();
+  await button("Comparar malhas").click();
+  await expect(table).toContainText("Atual · 192 elementos");
+  await expect(
+    table.getByRole("columnheader", { name: /Referência/ }),
+  ).toHaveCount(0);
+});
+
+test("KS-42 · refina a abertura e o apoio e localiza o elemento com alerta na prévia", async ({
+  page,
+}) => {
+  const p = createProject("spatial"),
+    ring = (xy: number[][], supported: boolean) =>
+      newSlabRing(
+        xy.map(([x, y]) => ({ x, y })),
+        supported,
+      );
+  const slab = addPolygonSlab(p, "level1", [
+    ring(
+      [
+        [0, 0],
+        [6, 0],
+        [6, 2],
+        [3, 2],
+        [3, 4],
+        [0, 4],
+      ],
+      true,
+    ),
+    ring(
+      [
+        [1, 0.5],
+        [2, 0.5],
+        [2, 1.5],
+        [1, 1.5],
+      ],
+      false,
+    ),
+  ]);
+  await page.goto("/");
+  await openProjectInBrowser(page, "painel.kstruct.json", serializeProject(p));
+  await page.getByRole("button", { name: "Configurar malha da laje" }).click();
+  const d = page.getByRole("dialog", { name: "Malha da laje" });
+  await d.getByLabel("Geração da malha").selectOption("target");
+  await d.getByLabel("Tamanho-alvo global").fill("1");
+  const count = d.getByLabel("Contagem da malha");
+  await expect(count).toContainText("160 elementos · 94 nós");
+  for (const scope of ["ring:1", "edge:" + slab.polygon.rings[0][1].edgeId]) {
+    await d.getByLabel("Refinar junto a").selectOption(scope);
+    await d.getByLabel("Tamanho local").fill("0.25");
+    await d
+      .getByRole("button", { name: "Adicionar controle à prévia" })
+      .click();
+  }
+  await expect(count).toContainText("484 elementos · 271 nós · 0 inválidos");
+  const select = d.getByLabel("Ocorrências de qualidade");
+  await select.selectOption({ index: 1 });
+  const id = await select.inputValue();
+  await expect(d.locator('polygon[data-picked="true"]')).toHaveAttribute(
+    "data-element",
+    id,
+  );
+  await expect(
+    d.getByText(new RegExp("Elemento " + id + " · X ")),
+  ).toBeVisible();
+  await d.getByRole("button", { name: "Aplicar malha" }).click();
+  const save = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Salvar projeto", exact: true })
+    .click();
+  const saved = parseProject(
+    await readFile((await (await save).path())!, "utf8"),
+  );
+  expect(saved.slabs[0].sizing?.edges.map((e) => e.edgeId).sort()).toEqual(
+    [slab.polygon.rings[0][1], ...slab.polygon.rings[1]]
+      .map((v) => v.edgeId)
+      .sort(),
+  );
+  slab.polygon.rings = [
+    ring(
+      [
+        [0, 0],
+        [1e10, 0],
+        [0, 0.1],
+      ],
+      true,
+    ),
+  ];
+  await openProjectInBrowser(
+    page,
+    "degenerada.kstruct.json",
+    serializeProject(p),
+  );
+  await page.getByRole("button", { name: "Configurar malha da laje" }).click();
+  await expect(count).toContainText(/\b[1-9]\d* inválidos/);
+  await expect(d.getByRole("button", { name: "Aplicar malha" })).toBeDisabled();
+  await d.getByLabel("Ocorrências de qualidade").selectOption({ index: 1 });
+  await expect(d.locator('polygon[data-picked="true"]')).toHaveAttribute(
+    "data-quality",
+    "invalid",
+  );
+  await d.getByRole("button", { name: "Cancelar" }).click();
+  await page.getByRole("button", { name: "Análise", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Entrada OOFEM", exact: true })
+    .click();
+  await expect(page.getByRole("status")).toContainText(
+    /Malha inválida.*elemento/,
+  );
 });

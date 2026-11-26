@@ -20,7 +20,7 @@ test("edita, representa e salva ligações independentes nas pontas i/j", async 
   project.members[0].connectionJ = connectionJ;
 
   await page.addInitScript(
-    (source) => localStorage.setItem("kstruct.draft.v25", source),
+    (source) => localStorage.setItem("kstruct.draft.v26", source),
     serializeProject(project),
   );
   await page.goto("/");

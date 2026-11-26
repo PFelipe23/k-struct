@@ -76,7 +76,7 @@ import {
   type Point3,
   type WorkPlane,
 } from "./domain/geometry";
-import { maxSlabVertices } from "./domain/slabPolygon";
+import { maxSlabVertices, slabRings } from "./domain/slabPolygon";
 import MemberPointLoadDialog from "./components/MemberPointLoadDialog";
 import MemberDistributedLoadDialog from "./components/MemberDistributedLoadDialog";
 import type { MemberLoadSelection } from "./components/memberLoadInput";
@@ -172,6 +172,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v26") ??
       localStorage.getItem("kstruct.draft.v25") ??
       localStorage.getItem("kstruct.draft.v24") ??
       localStorage.getItem("kstruct.draft.v23") ??
@@ -548,7 +549,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v25", serialized);
+      localStorage.setItem("kstruct.draft.v26", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1658,9 +1659,11 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               </b>
               <span>
                 {slab
-                  ? slab.polygon
-                    ? "Placa triangular DKT · contornos e aberturas"
-                    : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
+                  ? slab.sizing
+                    ? `Placa ${slab.formulation.toUpperCase()} · tamanho-alvo ${formatQuantity(slab.sizing.target, "length", units)} ${units.length}`
+                    : slab.polygon
+                      ? "Placa triangular DKT · contornos e aberturas"
+                      : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
                   : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
@@ -2236,6 +2239,21 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
           )}
           {slab ? (
             <SlabResults
+              comparisonKey={JSON.stringify([
+                p.id,
+                slab.id,
+                slab.thickness,
+                slabRings(slab),
+                p.guides.z.find((g) => g.id === slab.levelId),
+                p.materials.find((m) => m.id === slab.materialId),
+                analysisCase,
+                analysisCase.factors.map((f) => {
+                  const pat = p.loadPatterns.find(
+                    (pat) => pat.id === f.patternId,
+                  );
+                  return [pat?.pressure, pat?.selfWeight];
+                }),
+              ])}
               slab={slab}
               caseName={analysisCase.name}
               result={slabResult}

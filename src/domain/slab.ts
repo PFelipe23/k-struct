@@ -1,7 +1,8 @@
 import type { Point3 } from "./geometry";
 import type { Slab } from "./model";
 import { meshPolygon } from "./polygonMesh";
-import type { XY } from "./slabPolygon";
+import { slabRings, type XY } from "./slabPolygon";
+import { checkMeshBudget, rectangularAxis, sizingError } from "./slabSizing";
 
 export type SlabDof = 3 | 4 | 5;
 export interface SlabNode extends Point3 {
@@ -17,11 +18,49 @@ export interface SlabMesh {
   nodes: SlabNode[];
   elements: SlabElement[];
   edges: Record<string, number[]>;
+  grid?: { x: number[]; y: number[] };
 }
 
 export function meshSlab(slab: Slab, z: number): SlabMesh {
-  if (slab.polygon) return meshPolygon(slab.polygon, z);
-  const { divisionsX: nx, divisionsY: ny, supports } = slab;
+  const sizing = slab.sizing;
+  if (sizing) {
+    const error = sizingError(slabRings(slab), sizing);
+    if (error) throw new Error(error);
+  }
+  if (slab.polygon) return meshPolygon(slab.polygon, z, sizing);
+  const { supports } = slab;
+  const uniform = (span: number, n: number) =>
+    Array.from({ length: n + 1 }, (_, i) => (i / n) * span);
+  const sizes = new Map(sizing?.edges.map((e) => [e.edgeId, e.size]));
+  const h = (id: string) => sizes.get(id) ?? Infinity;
+  const grid = sizing
+    ? {
+        x: rectangularAxis(
+          slab.lengthX,
+          sizing.target,
+          [h("yMin"), h("yMax")],
+          h("xMin"),
+          h("xMax"),
+        ),
+        y: rectangularAxis(
+          slab.lengthY,
+          sizing.target,
+          [h("xMin"), h("xMax")],
+          h("yMin"),
+          h("yMax"),
+        ),
+      }
+    : {
+        x: uniform(slab.lengthX, slab.divisionsX),
+        y: uniform(slab.lengthY, slab.divisionsY),
+      };
+  const nx = grid.x.length - 1,
+    ny = grid.y.length - 1;
+  if (sizing)
+    checkMeshBudget(
+      nx * ny * (slab.formulation === "qdkt" ? 1 : 2),
+      (nx + 1) * (ny + 1),
+    );
   const number = (i: number, j: number) => j * (nx + 1) + i + 1;
   const nodes: SlabNode[] = [];
   const elements: SlabElement[] = [];
@@ -41,8 +80,8 @@ export function meshSlab(slab: Slab, z: number): SlabMesh {
       if (fixedY) restraints.push(5);
       nodes.push({
         number: id,
-        x: slab.x + (i / nx) * slab.lengthX,
-        y: slab.y + (j / ny) * slab.lengthY,
+        x: slab.x + grid.x[i],
+        y: slab.y + grid.y[j],
         z,
         restraints,
       });
@@ -69,5 +108,5 @@ export function meshSlab(slab: Slab, z: number): SlabMesh {
       }
     }
   }
-  return { nodes, elements, edges };
+  return { nodes, elements, edges, grid };
 }

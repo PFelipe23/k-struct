@@ -296,16 +296,29 @@ describe("KS-41 · contornos físicos da laje", () => {
     expect(centroid.x).toBeCloseTo(43.5 / 17, 12);
     expect(centroid.y).toBeCloseTo(29 / 17, 12);
     const mesh = meshSlab(slab, 3);
-    let sum = 0;
-    for (const el of mesh.elements) {
-      const points = el.nodes.map((i) => mesh.nodes[i - 1]);
-      const part = cross2(points[0], points[1], points[2]) / 2;
-      expect(part).toBeGreaterThan(0);
-      sum += part;
-      expect(overlapArea(points, 1, 0.5, 2, 1.5)).toBeCloseTo(0, 12);
-      expect(overlapArea(points, 3, 2, 6, 4)).toBeCloseTo(0, 12);
+    const selected = [slab.polygon.rings[0][1], ...slab.polygon.rings[1]];
+    const local = meshSlab(
+      {
+        ...slab,
+        sizing: {
+          target: 1,
+          edges: selected.map((v) => ({ edgeId: v.edgeId, size: 0.25 })),
+        },
+      },
+      3,
+    );
+    for (const candidate of [mesh, local]) {
+      let sum = 0;
+      for (const el of candidate.elements) {
+        const points = el.nodes.map((i) => candidate.nodes[i - 1]);
+        const part = cross2(points[0], points[1], points[2]) / 2;
+        expect(part).toBeGreaterThan(0);
+        sum += part;
+        expect(overlapArea(points, 1, 0.5, 2, 1.5)).toBeCloseTo(0, 12);
+        expect(overlapArea(points, 3, 2, 6, 4)).toBeCloseTo(0, 12);
+      }
+      expect(sum).toBeCloseTo(17, 12);
     }
-    expect(sum).toBeCloseTo(17, 12);
     for (const v of slab.polygon.rings.flat())
       expect(mesh.edges[v.edgeId]).toHaveLength(5);
     const pattern = project.loadPatterns[0];

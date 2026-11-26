@@ -1,5 +1,6 @@
 import { ShapeUtils, Vector2 } from "three";
-import type { PolygonSlab } from "./model";
+import { checkMeshBudget, targetAt } from "./slabSizing";
+import type { PolygonSlab, SlabSizing } from "./model";
 import type { SlabMesh, SlabNode } from "./slab";
 import {
   cross2,
@@ -63,6 +64,7 @@ function conformingTriangles(rings: SlabRing[], vertices: XY[]) {
 export function meshPolygon(
   polygon: PolygonSlab["polygon"],
   z: number,
+  sizing?: SlabSizing,
 ): SlabMesh {
   const { rings, refinements } = polygon;
   const vertices = rings.flat();
@@ -106,7 +108,42 @@ export function meshPolygon(
       "A triangulação não cobre a área líquida ou não preserva uma borda do painel.",
     );
 
-  for (let level = 0; level < refinements; level++) {
+  if (sizing)
+    checkMeshBudget(expected / ((Math.sqrt(3) / 4) * sizing.target ** 2));
+  const localTarget = sizing ? targetAt(rings, sizing) : null;
+  for (let level = 0; localTarget || level < refinements; level++) {
+    const marked = new Set<string>();
+    for (const face of triangles)
+      for (const [i, a] of face.entries()) {
+        const b = face[(i + 1) % 3],
+          key = sideKey(a, b);
+        if (marked.has(key)) continue;
+        const u = nodes[a - 1],
+          v = nodes[b - 1];
+        if (
+          !localTarget ||
+          Math.hypot(v.x - u.x, v.y - u.y) >
+            localTarget({
+              x: u.x + (v.x - u.x) / 2,
+              y: u.y + (v.y - u.y) / 2,
+            }) *
+              (1 + 1e-12)
+        )
+          marked.add(key);
+      }
+    if (!marked.size) break;
+    if (sizing) {
+      // Each marked side adds one child triangle per incident parent.
+      const childCount = triangles.reduce(
+        (sum, face) =>
+          sum +
+          1 +
+          face.filter((a, i) => marked.has(sideKey(a, face[(i + 1) % 3])))
+            .length,
+        0,
+      );
+      checkMeshBudget(childCount, nodes.length + marked.size);
+    }
     const midpoints = new Map<string, number>();
     const midpoint = (a: number, b: number) => {
       const key = sideKey(a, b);
@@ -125,21 +162,65 @@ export function meshPolygon(
       midpoints.set(key, number);
       return number;
     };
-    triangles = triangles.flatMap(([a, b, c]): Triangle[] => {
-      const ab = midpoint(a, b),
-        bc = midpoint(b, c),
-        ca = midpoint(c, a);
-      return [
-        [a, ab, ca],
-        [ab, b, bc],
-        [ca, bc, c],
-        [ab, bc, ca],
-      ];
+    triangles = triangles.flatMap((face): Triangle[] => {
+      const mids = face.map((a, i) => {
+        const b = face[(i + 1) % 3];
+        return marked.has(sideKey(a, b)) ? midpoint(a, b) : 0;
+      });
+      const count = mids.filter(Boolean).length;
+      if (count === 0) return [face];
+      const [a, b, c] = face,
+        [ab, bc, ca] = mids;
+      if (count === 3)
+        return [
+          [a, ab, ca],
+          [ab, b, bc],
+          [ca, bc, c],
+          [ab, bc, ca],
+        ];
+      if (count === 1) {
+        const k = mids.findIndex(Boolean),
+          m = mids[k],
+          u = face[k],
+          v = face[(k + 1) % 3],
+          w = face[(k + 2) % 3];
+        return [
+          [u, m, w],
+          [m, v, w],
+        ];
+      }
+      // Two split sides meet at w. Use the shorter diagonal in the remaining quadrilateral.
+      const k = mids.indexOf(0),
+        u = face[k],
+        v = face[(k + 1) % 3],
+        w = face[(k + 2) % 3],
+        vw = mids[(k + 1) % 3],
+        wu = mids[(k + 2) % 3];
+      const dist = (i: number, j: number) =>
+        Math.hypot(
+          nodes[i - 1].x - nodes[j - 1].x,
+          nodes[i - 1].y - nodes[j - 1].y,
+        );
+      return dist(u, vw) <= dist(v, wu)
+        ? [
+            [w, wu, vw],
+            [u, v, vw],
+            [u, vw, wu],
+          ]
+        : [
+            [w, wu, vw],
+            [u, v, wu],
+            [v, vw, wu],
+          ];
     });
     for (const [id, line] of Object.entries(edges))
-      edges[id] = line.flatMap((a, i) =>
-        i + 1 < line.length ? [a, midpoint(a, line[i + 1])] : [a],
-      );
+      edges[id] = line.flatMap((a, i) => {
+        const m =
+          i + 1 < line.length
+            ? midpoints.get(sideKey(a, line[i + 1]))
+            : undefined;
+        return m === undefined ? [a] : [a, m];
+      });
   }
   let meshArea = 0;
   for (const [ia, ib, ic] of triangles) {
@@ -195,6 +276,30 @@ export function materialSample(mesh: SlabMesh, centroid: XY) {
   let distance = Infinity;
   for (const { nodes: face } of mesh.elements) {
     const [a, b, c] = face.map((i) => mesh.nodes[i - 1]);
+    if (face.length === 4) {
+      // QDKT rectangles list (+,+), (-,+), (-,-), (+,-).
+      const u = (centroid.x - c.x) / (a.x - c.x),
+        v = (centroid.y - c.y) / (a.y - c.y);
+      if (u >= -1e-12 && u <= 1 + 1e-12 && v >= -1e-12 && v <= 1 + 1e-12)
+        return {
+          point: centroid,
+          face,
+          weights: [u * v, (1 - u) * v, (1 - u) * (1 - v), u * (1 - v)],
+          relocated: false,
+        };
+      const point = { x: c.x + (a.x - c.x) / 2, y: c.y + (a.y - c.y) / 2 },
+        gap = Math.hypot(point.x - centroid.x, point.y - centroid.y);
+      if (gap < distance) {
+        nearest = {
+          point,
+          face,
+          weights: [0.25, 0.25, 0.25, 0.25],
+          relocated: true,
+        };
+        distance = gap;
+      }
+      continue;
+    }
     const area = cross2(a, b, c);
     const weights = [
       cross2(b, c, centroid) / area,

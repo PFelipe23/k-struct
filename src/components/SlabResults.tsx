@@ -1,3 +1,4 @@
+import SlabComparison from "./SlabComparison";
 import { CheckCircle2, History, Terminal } from "lucide-react";
 import type { Slab } from "../domain/model";
 import { exportFile } from "../solver/desktop";
@@ -129,6 +130,7 @@ export function SlabLegend({
 
 export default function SlabResults({
   slab,
+  comparisonKey,
   caseName,
   result,
   rawOutput,
@@ -138,6 +140,7 @@ export default function SlabResults({
   onExportError,
 }: {
   slab: Slab;
+  comparisonKey: string;
   caseName: string;
   result: SlabResult | null;
   rawOutput?: string;
@@ -156,6 +159,7 @@ export default function SlabResults({
           <span>Laje {slab.name}</span>
         </div>
         <div className="result-actions">
+          <SlabComparison key={comparisonKey} result={result} />
           <span className="result-case-name" title={caseName}>
             {caseName}
           </span>

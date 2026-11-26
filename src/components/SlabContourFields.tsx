@@ -20,7 +20,10 @@ export default function SlabContourFields({
   update,
 }: {
   slab: PolygonSlab;
-  update: (rings: SlabRing[]) => string | null | void;
+  update: (
+    rings: SlabRing[],
+    split?: { from: string; to: string },
+  ) => string | null | void;
 }) {
   const { units } = useUnits();
   const rings = slab.polygon.rings;
@@ -39,11 +42,14 @@ export default function SlabContourFields({
     setY(formatUnitInput(v.y, "length", units));
     setError("");
   }, [v, units]);
-  const apply = (change: (draft: SlabRing[]) => void) => {
+  const apply = (
+    change: (draft: SlabRing[]) => void,
+    split?: { from: string; to: string },
+  ) => {
     const draft = structuredClone(rings);
     change(draft);
     try {
-      const message = update(normalizeRings(draft));
+      const message = update(normalizeRings(draft), split);
       if (message) throw new Error(message);
       setError("");
       return true;
@@ -140,17 +146,21 @@ export default function SlabContourFields({
       </label>
       <button
         onClick={() => {
+          const newEdge = uid();
           if (
-            apply((draft) => {
-              const a = draft[r][i],
-                b = draft[r][j];
-              draft[r].splice(i + 1, 0, {
-                x: a.x + (b.x - a.x) / 2,
-                y: a.y + (b.y - a.y) / 2,
-                edgeId: uid(),
-                supported: a.supported,
-              });
-            })
+            apply(
+              (draft) => {
+                const a = draft[r][i],
+                  b = draft[r][j];
+                draft[r].splice(i + 1, 0, {
+                  x: a.x + (b.x - a.x) / 2,
+                  y: a.y + (b.y - a.y) / 2,
+                  edgeId: newEdge,
+                  supported: a.supported,
+                });
+              },
+              { from: v.edgeId, to: newEdge },
+            )
           )
             setVertex(i + 1);
         }}

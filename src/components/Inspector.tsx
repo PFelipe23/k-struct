@@ -3,6 +3,7 @@ import {
   sectionExtents,
   setThermalField,
 } from "../domain/thermalLoads";
+import SlabMeshControl from "./SlabMeshControl";
 import SlabContourFields from "./SlabContourFields";
 import MemberOffsetsEditor from "./MemberOffsetsEditor";
 import { memberAxis, setOffsets } from "../domain/memberOffsets";
@@ -239,9 +240,19 @@ function SlabFields({
       {slab.polygon ? (
         <SlabContourFields
           slab={slab}
-          update={(rings) =>
-            updateSlab({ polygon: { ...slab.polygon, rings } })
-          }
+          update={(rings, split) => {
+            const ids = new Set(rings.flat().map((v) => v.edgeId));
+            const edges =
+              slab.sizing?.edges.filter((e) => ids.has(e.edgeId)) ?? [];
+            const inherited =
+              split && edges.find((e) => e.edgeId === split.from);
+            if (inherited && split)
+              edges.push({ edgeId: split.to, size: inherited.size });
+            return updateSlab({
+              polygon: { ...slab.polygon, rings },
+              ...(slab.sizing ? { sizing: { ...slab.sizing, edges } } : {}),
+            });
+          }}
         />
       ) : (
         (
@@ -291,6 +302,7 @@ function SlabFields({
           <label className="stack-field">
             Refinamento DKT
             <select
+              disabled={!!slab.sizing}
               value={slab.polygon.refinements}
               onChange={(e) =>
                 updateSlab({
@@ -362,6 +374,7 @@ function SlabFields({
               key={key}
               label={label}
               value={slab[key]}
+              disabled={!!slab.sizing}
               min={2}
               max={slabDivisionLimit}
               integer
@@ -369,12 +382,18 @@ function SlabFields({
             />
           ))}
           <p className="help">
-            {slab.formulation === "qdkt"
-              ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
-              : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
+            {slab.sizing
+              ? "Malha por tamanho-alvo"
+              : slab.formulation === "qdkt"
+                ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
+                : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
           </p>
         </>
       )}
+      <SlabMeshControl
+        slab={slab}
+        onApply={(sizing) => updateSlab({ sizing })}
+      />
       <h4>
         Pressão uniforme <span>{pattern.name}</span>
       </h4>

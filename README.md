@@ -21,7 +21,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
 - Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
 - Aplicar temperatura por barra e por padrão no inspetor, em **Ação térmica**. Informe a variação média e a diferença entre faces da seção em K. A vista indica a face mais quente. Para o material, use o coeficiente de dilatação linear α em 1/K.
-- Salvar e reabrir `.kstruct.json` no esquema v25, com migração dos projetos v1 a v24 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v26, com migração dos projetos v1 a v25 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -149,6 +149,14 @@ Em **Modelo → Laje poligonal**, marque os vértices na planta XY do pavimento.
 Com o painel lançado, escolha **Abertura na laje**, desenhe o novo anel e feche-o. As bordas externas começam simplesmente apoiadas e as das aberturas começam livres. Para editar, selecione a laje, escolha o contorno e o vértice no inspetor. O vínculo corresponde à borda que vai desse vértice ao próximo. Ao inserir um vértice na borda, ambos os trechos recebem o vínculo anterior. **Desfazer** recupera cada edição, inclusive a malha retangular original quando se abre um furo em um retângulo existente.
 
 A pressão e o peso próprio atuam sobre a área líquida. Os mapas de resultados mostram apenas o material e identificam o ponto da consulta. Quando o centroide cai em um vazio, a tabela informa as coordenadas de um ponto material próximo. [Ensaio do painel em L com abertura](docs/VALIDATION.md#ks-41--painel-poligonal-com-abertura)
+
+### Refinamento e qualidade da malha de laje
+
+Selecione a laje e abra **Configurar malha da laje**. Em **Geração da malha**, escolha as subdivisões existentes ou **Tamanho-alvo**. Informe o tamanho global na unidade de comprimento do projeto. Para concentrar elementos, escolha uma borda, as bordas apoiadas ou todas as bordas de uma abertura, informe o tamanho local e clique em **Adicionar controle à prévia**. No retângulo, o tamanho controla os lados das células em X e Y. As linhas atravessam o painel e cada célula DKT é dividida pela diagonal. No polígono, o tamanho controla os lados dos triângulos e a transição ocorre entre vizinhos.
+
+A prévia mostra os elementos, os nós e as ocorrências de qualidade. Escolha uma ocorrência para localizar o elemento e suas coordenadas. Um alerta permite prosseguir. Um elemento inválido bloqueia a aplicação da malha e a exportação ao OOFEM. O modo por tamanho aceita até 8.192 nós e 8.192 elementos por painel. **Aplicar malha** registra a edição no histórico e no arquivo do projeto.
+
+Após analisar, abra **Comparar malhas**, informe X e Y de um ponto sobre a laje e clique em **Guardar referência desta malha**. Altere a discretização e analise novamente. A tabela mostra UZ, Mx e My no mesmo ponto, a reação vertical total do painel e a diferença em relação à referência. A referência fica na sessão enquanto a geometria, os apoios, o material e o carregamento do caso permanecem os mesmos. [Ensaios de refinamento](docs/VALIDATION.md#ks-42--refinamento-e-qualidade-da-malha)
 
 ### Padrões, casos, combinações e envelopes
 
