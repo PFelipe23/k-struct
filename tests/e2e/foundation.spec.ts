@@ -16,6 +16,8 @@ test("importa, confere a prévia, desfaz, reabre offline e analisa a fundação"
   await page.goto("/");
   const open = (source: string) =>
     openProjectInBrowser(page, "fundacao.kstruct.json", source);
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
   await open(serializeProject(original));
   await button("N1 Apoio elástico").click();
   async function start() {
