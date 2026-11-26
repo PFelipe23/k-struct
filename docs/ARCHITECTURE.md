@@ -100,3 +100,7 @@ Aparar e prolongar verificam a ponta antes de alterar sua posição. Um apoio, c
 - [Comandos Rust no Tauri](https://v2.tauri.app/develop/calling-rust/)
 
 Trabalho bloqueante fica em `spawn_blocking`, preservando a responsividade da janela.
+
+### Diagnósticos de análise
+
+As mensagens verificáveis antes da execução carregam etapa, severidade e referências por ID físico. Quando a análise de apoios insuficientes identifica um componente ligado, o diagnóstico seleciona somente seus nós e barras. Um log genérico de singularidade mantém o texto bruto do OOFEM e recomenda inspeção sem escolher uma peça arbitrária. Contextos de falha no histórico guardam o projeto serializado da execução; a navegação fica desativada se o projeto aberto não corresponder àquela revisão.

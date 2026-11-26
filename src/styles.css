@@ -1169,6 +1169,33 @@ button.primary {
   margin: 0;
   color: var(--muted);
 }
+.analysis-diagnostics {
+  display: grid;
+  gap: 8px;
+  padding: 0 19px 16px;
+}
+.analysis-diagnostics article,
+.history-diagnostic {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  font-size: 10px;
+}
+.analysis-diagnostics p,
+.history-diagnostic p {
+  margin: 6px 0;
+}
+.analysis-diagnostics small,
+.history-diagnostic small {
+  display: block;
+  color: var(--muted);
+  margin-top: 7px;
+}
+.analysis-diagnostics button,
+.history-diagnostic button {
+  margin-top: 5px;
+}
 .log-dot,
 .working {
   width: 5px;

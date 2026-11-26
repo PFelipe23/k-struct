@@ -285,3 +285,9 @@ Execute o teste abaixo com o solver fixado pelo projeto para repetir os três ca
 ```sh
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/pinned-truss.integration.test.ts
 ```
+
+## KS-38 · diagnóstico e inspeção de objetos
+
+`tests/diagnostics.test.ts` cobre um nó isolado conhecido, um componente sem restrições suficientes, uma barra que referencia um nó inexistente e uma singularidade genérica sem destaque arbitrário. O contexto salvo do histórico só permite navegar quando o projeto atual é idêntico ao snapshot da execução. `tests/e2e/diagnostics.spec.ts` cobre o fluxo de análise, seleção do nó e chegada às propriedades.
+
+Com OOFEM 3.0 AMD64 configurado, `npm run check` passou com 217 testes, sem falhas, e `npm run build` passou. O E2E de localizar o nó isolado, navegar para propriedades, corrigir e reanalisar passou em Chromium usando a saída real capturada do OOFEM. A repetição com o comando Playwright do projeto não iniciou porque a porta 1420 já estava ocupada.
