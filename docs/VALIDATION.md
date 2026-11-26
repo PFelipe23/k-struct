@@ -527,3 +527,31 @@ Para cada intensidade q, as referências são R = qL/2 e M = qL²/8. Com Q1 e Q2
 Para reproduzir a comparação numérica, configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md) e execute `npm test -- tests/combination-families.test.ts`. O teste resolve os três casos no OOFEM 3.0 e compara o ELU de principal Q1 com um quarto caso independente submetido diretamente com os fatores 1,2, 1,5 e 0,75. A flecha central esperada é −6,075 mm. As reações analíticas e o momento central desse ensaio usam tolerância absoluta de 0,02 N ou N·m, e os deslocamentos, de 5 × 10⁻⁹ m. Na comparação entre esforços ao longo da barra, a impressão nativa `%.4e` limita cada valor a cinco algarismos significativos. A tolerância soma os meios incrementos de arredondamento do caso direto e das parcelas ponderadas, mais 10⁻⁷ N ou N·m para resíduos próximos de zero.
 
 Execute `npm run test:e2e -- results.spec.ts --grep 'gera ELU/ELS'` para reproduzir a edição e dispensa de linhas, desfazer/refazer, salvar, reabrir e regenerar. Com o executável configurado, a fila resolve G, Q1 e Q2 uma vez cada e a interface mostra as duas reações de 21,6 kN. O teste de domínio verifica também a preservação do envelope manual e os IDs das combinações regeneradas.
+
+## KS-36 — Envelopes nodais
+
+Em **Reações de apoio** e **Deslocamentos nodais**, cada extremo é procurado por componente no referencial solicitado. A origem é a combinação linear da qual provêm todas as componentes daquela linha. A primeira combinação na ordem do envelope vence o empate exato. A regra de extremos por componente é descrita no [CSI Analysis Reference Manual, Load Combinations, Types of Combos](https://docs.csiamerica.com/manuals/sap2000/CSiRefer.pdf).
+
+No ensaio controlado, as duas combinações têm o mesmo nome e IDs distintos. Os dois apoios também têm o mesmo nome, e o segundo caso os entrega em ordem inversa.
+
+| Combinação | Fx (kN) | Fy (kN) | Fz (kN) | Mx (kN·m) | My (kN·m) | Mz (kN·m) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | 10 | 2 | 30 | −3 | 7 | −2 |
+| B | −4 | 20 | 12 | 5 | −6 | −2 |
+
+No primeiro apoio, o máximo de Fx recupera a linha A inteira e o máximo de Fy recupera B. Com o eixo local x na direção (0,6, 0,8, 0), as projeções de Fx são +7,6 kN e +13,6 kN. O máximo local recupera B, com força (13,6, 15,2, 12) kN e momento (−1,8, −7,6, −2) kN·m. O momento Mz empata em −2 kN·m. A inversão da ordem do envelope troca a origem desse empate.
+
+**Viga XZ.** A viga biapoiada de 6 m recebe −10 kN/m. Para os fatores +1 e −2, cada apoio tem reação Fz máxima de +30 kN e mínima de −60 kN, por equilíbrio. No nó inicial, Ry varia de −9 a +4,5 mrad e, no nó final, de −4,5 a +9 mrad. A rotação de extremidade tem módulo |q|L³/(24EI). O teste numérico admite 0,02 N nas reações verticais e 10⁻¹⁰ rad nas rotações.
+
+**Pórtico XYZ.** O modelo de nove nós e três engastes do benchmark espacial recebe o padrão distribuído G e o padrão nodal W. O solver resolve G e W e, em duas execuções independentes, A = 1,2 G + 0,8 W e B = 0,7 G − 1,1 W. O teste confronta ambos os extremos de cada uma das seis componentes com esses casos diretos e verifica o vetor inteiro da origem identificada. Em N7, B governa o máximo de Fy global (+4,236867 kN), enquanto A governa o máximo de Fy local (+3,468888 kN). No CSV global de Fx máximo, N8 recebe B (+2,261141 kN) e N9 recebe A (+2,360680 kN).
+
+Na comparação das saídas impressas, S representa a norma do trio de componentes do caso direto mais a soma das normas dos trios de G e W ponderadas pelos módulos dos fatores. Calcula-se S separadamente para forças, momentos, translações e rotações. A tolerância das reações é 10⁻⁷ + 5,1 × 10⁻⁵ S, em N ou N·m. Para deslocamentos e rotações é 10⁻¹² + 5,1 × 10⁻⁹ S, em m ou rad. O termo proporcional cobre o arredondamento da impressão nativa, inclusive após a projeção.
+
+Configure o executável OOFEM 3.0 em `OOFEM_BIN` e execute os dois ensaios.
+
+```sh
+npm test -- tests/nodal-envelopes.test.ts
+npm run test:e2e -- results.spec.ts --grep 'envelope nodal'
+```
+
+No navegador, o ensaio percorre a fila, consulta nó e apoio, alterna o referencial e compara o CSV antes e depois das trocas kN → N, kN·m → N·m e mm → m. As rotações continuam em mrad. Uma edição da carga retira a tabela e o CSV até a nova análise. [Configuração do OOFEM](OOFEM.md)
