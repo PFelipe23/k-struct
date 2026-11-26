@@ -20,7 +20,7 @@ test("edita, representa e salva ligações independentes nas pontas i/j", async 
   project.members[0].connectionJ = connectionJ;
 
   await page.addInitScript(
-    (source) => localStorage.setItem("kstruct.draft.v10", source),
+    (source) => localStorage.setItem("kstruct.draft.v25", source),
     serializeProject(project),
   );
   await page.goto("/");
@@ -33,9 +33,7 @@ test("edita, representa e salva ligações independentes nas pontas i/j", async 
   const jRotation = page.getByRole("combobox", { name: "Ligação j · Ry" });
   await expect(iRotation).toHaveValue("free");
   await expect(jRotation).toHaveValue("elastic");
-  await expect(
-    page.getByRole("spinbutton", { name: /Rigidez Ry/ }),
-  ).toHaveValue("2400");
+  await expect(page.getByLabel("Rigidez j · Ry")).toHaveValue("2.4");
   for (const end of ["i", "j"] as const) {
     await expect(
       page.locator(
@@ -50,10 +48,9 @@ test("edita, representa e salva ligações independentes nas pontas i/j", async 
   }
 
   await iRotation.selectOption("elastic");
-  await page
-    .getByRole("spinbutton", { name: /Rigidez Ry/ })
-    .first()
-    .fill("4200");
+  const field = page.getByLabel("Rigidez i · Ry");
+  await field.fill("4,2");
+  await field.press("Enter");
   const saving = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Salvar projeto", exact: true })

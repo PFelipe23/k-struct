@@ -651,9 +651,12 @@ const polygonSlab = slabSchema
         .max(maxSlabRings),
     }),
   });
-export const projectSchema = projectV23.extend({
+const projectV24 = projectV23.extend({
   schemaVersion: z.literal(24),
   slabs: z.array(z.union([rectangleSlab, polygonSlab])).max(1),
+});
+export const projectSchema = projectV24.extend({
+  schemaVersion: z.literal(25),
 });
 export function defaultSelfWeight() {
   return {
@@ -740,7 +743,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 24,
+    schemaVersion: 25,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1152,6 +1155,15 @@ export function parseProject(source: string): Project {
     const old = projectV23.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 24 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 24
+  ) {
+    const old = projectV24.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 25 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1195,7 +1207,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 24, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 25, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)

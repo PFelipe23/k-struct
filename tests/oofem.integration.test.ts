@@ -152,7 +152,7 @@ describe.skipIf(!executable)(
       ).toBeCloseTo(22500, 1);
     });
 
-    it("omite rotações inativas nos nós de lançamento com as duas pontas articuladas", () => {
+    it("separa as rotações da viga e dos nós com as duas extremidades articuladas", () => {
       const p = beamExample();
       const connection: EndConnection = defaultEndConnection();
       connection.ry = { kind: "free" };
@@ -160,8 +160,7 @@ describe.skipIf(!executable)(
       p.members[0].connectionJ = structuredClone(connection);
 
       const input = exportOofem(p, "EL");
-      expect(input.deck).toContain("Node 1 coords 3 0 0 0 dofidmask 2 1 3");
-      expect(input.deck).toContain("Node 2 coords 3 6 0 0 dofidmask 2 1 3");
+      expect(input.nodes.filter((n) => n.connection)).toHaveLength(2);
 
       const result = solve(p);
       const left = result.members.V1.find(({ t }) => t === 0)!;
@@ -178,7 +177,7 @@ describe.skipIf(!executable)(
       ).toBeCloseTo(30_000, 0);
     });
 
-    it("mantém a rotação sem rigidez quando ela recebe uma carga nodal", () => {
+    it("identifica o nó, a barra e a rotação sem rigidez que recebe o momento efetivo", () => {
       const p = beamExample();
       const connection: EndConnection = defaultEndConnection();
       connection.ry = { kind: "free" };
@@ -194,15 +193,96 @@ describe.skipIf(!executable)(
         mz: 0,
       });
 
-      const input = exportOofem(p, "EL");
-      expect(input.deck).toContain(
-        "Node 1 coords 3 0 0 0 dofidmask 3 1 3 5\n",
-      );
-      expect(input.deck).not.toMatch(
-        /BoundaryCondition \d+ loadTimeFunction 1 dofs 1 5 values 1 0 set 4\n/,
-      );
-      expect(input.deck).toContain("NodalLoad 3 loadTimeFunction 1");
-      expect(input.deck).toContain("Components 3 0 0 100");
+      expect(() => exportOofem(p, "EL")).toThrow(/nó N1 \[A\].*V1.*RY/);
+    });
+
+    it("considera somente o momento efetivo do caso, inclusive fatores nulos e cancelamentos", () => {
+      const p = beamExample();
+      for (const key of ["connectionI", "connectionJ"] as const) {
+        const c: EndConnection = defaultEndConnection();
+        c.ry = { kind: "free" };
+        p.members[0][key] = c;
+      }
+      const q = structuredClone(p.loadPatterns[0]);
+      q.id = "Q";
+      q.uniform = [];
+      q.nodal = [{ ...nodalLoad("A"), my: 100 }];
+      p.loadPatterns.push(q);
+      const other = structuredClone(q);
+      other.id = "R";
+      p.loadPatterns.push(other);
+      for (const extra of [
+        [],
+        [{ patternId: "Q", factor: 0 }],
+        [
+          { patternId: "R", factor: -1 },
+          { patternId: "Q", factor: 1 },
+        ],
+      ]) {
+        p.analysisCases[0].factors = [{ patternId: "G", factor: 1 }, ...extra];
+        const result = solve(p);
+        expect(result.reactions.map((r) => r.fz)).toEqual([30000, 30000]);
+        expect(result.members.V1.find((s) => s.t === 0.5)!.my).toBeCloseTo(
+          45000,
+          0,
+        );
+      }
+      // The node can transmit the moment to a ground spring even if the member is hinged.
+      p.analysisCases[0].factors = [
+        { patternId: "G", factor: 1 },
+        { patternId: "Q", factor: 1 },
+      ];
+      p.nodes[0].springs = { ry: 20000 };
+      const result = solve(p);
+      expect(result.displacements.A.ry).toBeCloseTo(0.005, 8);
+      expect(Math.abs(result.members.V1[0].my)).toBeLessThan(1);
+    });
+
+    it("viga biapoiada XYZ com RY local livre nas duas pontas, inclusive no referencial girado", () => {
+      for (const angle of [0, Math.atan2(3, 4)]) {
+        const p = beamExample();
+        p.mode = "spatial";
+        const c = Math.cos(angle),
+          s = Math.sin(angle);
+        Object.assign(p.nodes[1], { x: 6 * c, y: 6 * s });
+        for (const n of p.nodes) {
+          n.supportFrame = {
+            kind: "spatial",
+            x: { x: c, y: s, z: 0 },
+            y: { x: -s, y: c, z: 0 },
+          };
+        }
+        Object.assign(p.nodes[0].restraints, { uy: true, rx: true, rz: true });
+        p.nodes[1].restraints.uy = true;
+        const connection: EndConnection = defaultEndConnection();
+        connection.ry = { kind: "free" };
+        p.members[0].connectionI = connection;
+        p.members[0].connectionJ = structuredClone(connection);
+        const r = solve(p),
+          stations = r.members.V1;
+        expect(r.reactions.map((v) => v.fz)).toEqual([30000, 30000]);
+        for (const pt of [stations[0], stations.at(-1)!])
+          expect(Math.abs(pt.my)).toBeLessThan(1);
+        expect(Math.abs(stations.find((v) => v.t === 0.5)!.my)).toBeCloseTo(
+          45000,
+          0,
+        );
+        expect(
+          Math.hypot(r.displacements.A.rx, r.displacements.A.ry),
+        ).toBeLessThan(1e-9);
+        expect(
+          Math.abs(-s * stations[0].rx + c * stations[0].ry),
+        ).toBeGreaterThan(0.001);
+      }
+    });
+
+    it("identifica a barra com as duas translações longitudinais liberadas", () => {
+      const p = beamExample(),
+        connection: EndConnection = defaultEndConnection();
+      connection.ux = { kind: "free" };
+      p.members[0].connectionI = connection;
+      p.members[0].connectionJ = structuredClone(connection);
+      expect(() => exportOofem(p, "EL")).toThrow(/Mecanismo na barra.*V1/);
     });
 
     it("valida kθ = 3EI/L em duas malhas e com a barra invertida", () => {

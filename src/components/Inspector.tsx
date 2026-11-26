@@ -830,8 +830,7 @@ export default function Inspector({
             </p>
             <h4>Ligações nas extremidades</h4>
             <p className="help">
-              Componentes nos eixos locais. Rigidez translacional em N/m e
-              rotacional em N·m/rad. O padrão é rígido.
+              Escolha o vínculo de cada componente nos eixos locais da barra.
             </p>
             {(
               [
@@ -870,26 +869,21 @@ export default function Inspector({
                       </select>
                     </label>
                     {component && (
-                      <label className="stack-field">
-                        Rigidez {label} (
-                        {dof.startsWith("r") ? "N·m/rad" : "N/m"})
-                        <input
-                          type="number"
-                          min="0.000000001"
-                          step="any"
-                          value={component.stiffness}
-                          onChange={(event) => {
-                            const stiffness = Number(event.target.value);
-                            if (Number.isFinite(stiffness) && stiffness >= 0)
-                              updateMemberConnection(
-                                end,
-                                dof,
-                                "elastic",
-                                stiffness,
-                              );
-                          }}
-                        />
-                      </label>
+                      <NumberField
+                        label={`Rigidez ${end} · ${label}`}
+                        quantity={
+                          dof.startsWith("r")
+                            ? "rotationStiffness"
+                            : "translationStiffness"
+                        }
+                        value={component.stiffness}
+                        validate={(v) =>
+                          v > 0 ? undefined : "Informe uma rigidez positiva."
+                        }
+                        onChange={(value) =>
+                          updateMemberConnection(end, dof, "elastic", value)
+                        }
+                      />
                     )}
                   </div>
                 );

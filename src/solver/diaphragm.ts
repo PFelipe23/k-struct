@@ -11,7 +11,7 @@ import type { Project } from "../domain/model";
 import type { MeshNode } from "./oofem";
 
 type Term = [node: number, dof: number, weight: number];
-function equation(terms: Term[]) {
+export function constraintEquation(terms: Term[]) {
   // Express the compatibility residual in µm or µrad in the mixed force/displacement
   // system. Scaling both sides of this exact equality preserves the reactions.
   const nonzero = terms
@@ -92,7 +92,7 @@ export function floorConstraints(
         terms.push([ref.number, k + 1, -1]);
         if (k === 0) terms.push([ref.number, 6, joint.y - ref.y]);
         if (k === 1) terms.push([ref.number, 6, ref.x - joint.x]);
-        addBoundary("LinearConstraintBC", equation(terms));
+        addBoundary("LinearConstraintBC", constraintEquation(terms));
         multipliers = true;
       }
     }

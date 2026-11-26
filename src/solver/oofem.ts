@@ -1,3 +1,4 @@
+import { connectionFreedom, checkMemberFreedom } from "./connectionFreedom";
 import { patternWind } from "../domain/wind";
 import {
   add,
@@ -60,7 +61,12 @@ export interface MeshNode extends Point3 {
   master?: number;
   diaphragm?: number;
   pointLoadStation?: boolean;
-  connection?: { masterMask: number[]; dofTypes: number[]; lcs: number[] };
+  connection?: {
+    masterMask: number[];
+    dofTypes: number[];
+    basis: ReturnType<typeof supportBasis>;
+    transmitted: boolean[];
+  };
 }
 export interface MeshElement {
   number: number;
@@ -69,7 +75,6 @@ export interface MeshElement {
   end: number;
   t0: number;
   t1: number;
-  dofsToCondense?: number[];
 }
 export type ElementIntensity = Pick<MeshElement, "t0" | "t1"> & {
   qStart: Point3;
@@ -221,27 +226,11 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const endNode = (end: "i" | "j", nodeId: string) => {
       const base = stationNode(end === "i" ? 0 : 1, nodeId);
       const connection =
-        (end === "i" ? m.connectionI : m.connectionJ) ??
-        defaultEndConnection();
+        (end === "i" ? m.connectionI : m.connectionJ) ?? defaultEndConnection();
       if (activeDofs.every((dof) => connection[dof].kind === "rigid"))
         return base;
-      if (
-        !spatial &&
-        connection.ry.kind === "free" &&
-        activeDofs
-          .filter((dof) => dof !== "ry")
-          .every((dof) => connection[dof].kind === "rigid")
-      )
-        return base;
       const number = nodes.length + 1;
-      const lcs = [
-        localAxes[0].x,
-        localAxes[0].y,
-        localAxes[0].z,
-        localAxes[1].x,
-        localAxes[1].y,
-        localAxes[1].z,
-      ];
+      explicitDofs.add(base);
       nodes.push({
         ...nodes[base - 1],
         number,
@@ -254,7 +243,8 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
           dofTypes: activeDofs.map((dof) =>
             connection[dof].kind === "rigid" ? 2 : 0,
           ),
-          lcs,
+          basis: { x: localAxes[0], y: localAxes[1], z: localAxes[2] },
+          transmitted: activeDofs.map((dof) => connection[dof].kind !== "free"),
         },
       });
       const section = p.sections.findIndex(({ id }) => id === m.sectionId) + 1;
@@ -276,11 +266,15 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const ids: number[] = [];
     let start = endNode("i", m.start);
     const stations = layout.get(m.id)!;
+    checkMemberFreedom(
+      m,
+      spatial,
+      stations.some((s) => s.t > 0 && s.t < 1 && !!s.nodeId),
+    );
     for (const l of stations[0].pointLoads ?? []) pointTargets.set(l, start);
     for (let i = 1; i < stations.length; i++) {
       const { t, nodeId } = stations[i];
-      const end =
-        t === 1 ? endNode("j", m.end) : stationNode(t, nodeId);
+      const end = t === 1 ? endNode("j", m.end) : stationNode(t, nodeId);
       for (const l of stations[i].pointLoads ?? []) pointTargets.set(l, end);
       if (t < 1 && stations[i].pointLoads?.length)
         nodes[end - 1].pointLoadStation = true;
@@ -296,17 +290,6 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         end,
         t0: stations[i - 1].t,
         t1: t,
-        ...(!spatial
-          ? {
-              dofsToCondense: [
-                ...(i === 1 && m.connectionI?.ry.kind === "free" ? [3] : []),
-                ...(i === stations.length - 1 &&
-                m.connectionJ?.ry.kind === "free"
-                  ? [6]
-                  : []),
-              ],
-            }
-          : {}),
       });
       start = end;
     }
@@ -363,10 +346,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const joint = nodes[node.master - 1];
     if (joint.master) node.master = joint.master;
   }
+  const effectiveLoads = new Map<number, number[]>();
   function addNodalLoad(number: number, values: number[]) {
     if (!values.some(Boolean)) return;
+    const previous = effectiveLoads.get(number);
+    effectiveLoads.set(
+      number,
+      previous ? previous.map((v, i) => v + values[i]) : [...values],
+    );
     bcs.push(
-      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
+      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") || nodes[number - 1].connection ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
     );
   }
   for (const [memberId, field] of temperatures) {
@@ -586,7 +575,8 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const rotation = key.startsWith("r");
       const mode = spatial ? (rotation ? 5 : 4) : rotation ? 3 : 2;
       const axis = basis[key[1] as keyof Point3];
-      const number = elements.length + springs.length + groundSprings.length + 1;
+      const number =
+        elements.length + springs.length + groundSprings.length + 1;
       // Spring projects both endpoints onto an explicit global direction.
       // NodalSpring assembles in global axes even when the node has an lcs.
       groundSprings.push(
@@ -609,104 +599,22 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     nodes.length + Number(hasGroundSprings),
     elements.length + springs.length,
   );
-  const activeNodeDofs = new Map(
-    nodes.map((node) => [node.number, new Set<number>()]),
+  const freeConstraints = connectionFreedom(
+    p,
+    nodes,
+    elements,
+    effectiveLoads,
+    set,
+    bcs,
   );
-  const condensedNodeDofs = new Map<number, Set<number>>();
-  const condense = (number: number, id: number) => {
-    const condensed = condensedNodeDofs.get(number) ?? new Set<number>();
-    condensed.add(id);
-    condensedNodeDofs.set(number, condensed);
-  };
-  const activate = (number: number, indices: number[]) => {
-    const active = activeNodeDofs.get(number);
-    for (const index of indices) active?.add(index);
-  };
-  const allDofIds = dofs.map(([, id]) => id);
-  for (const element of elements) {
-    const condensedStart = new Set(
-      (element.dofsToCondense ?? [])
-        .filter((index) => index <= 3)
-        .map((index) => dofs[index - 1]?.[1]),
-    );
-    const condensedEnd = new Set(
-      (element.dofsToCondense ?? [])
-        .filter((index) => index > 3)
-        .map((index) => dofs[index - 4]?.[1]),
-    );
-    for (const index of element.dofsToCondense ?? []) {
-      const number = index <= 3 ? element.start : element.end;
-      const id = dofs[index <= 3 ? index - 1 : index - 4]?.[1];
-      if (id) condense(number, id);
-    }
-    activate(
-      element.start,
-      allDofIds.filter((id) => !condensedStart.has(id)),
-    );
-    activate(element.end, allDofIds.filter((id) => !condensedEnd.has(id)));
-  }
-  for (const node of nodes) {
-    if (!node.master) continue;
-    const mask = node.connection?.masterMask;
-    if (mask) {
-      activate(
-        node.master,
-        allDofIds.filter((_, index) => mask[index] === 1),
-      );
-    } else {
-      const joint = node.objectId && publicNodes.get(node.objectId);
-      activate(
-        node.master,
-        allDofIds.filter((_, index) => !joint || !joint.restraints[dofs[index][0]]),
-      );
-    }
-  }
-  for (const spring of connectionSprings) {
-    const ids = spring.mode === (spatial ? 5 : 3)
-      ? (spatial ? [4, 5, 6] : [5])
-      : spatial ? [1, 2, 3] : [1, 3];
-    activate(spring.nodeA, ids);
-    activate(spring.nodeB, ids);
-  }
-  for (const n of p.nodes) {
-    const number = nodeNumber(n.id);
-    for (const [key, id] of dofs) {
-      if (n.restraints[key] || hasSpring(n, key)) activate(number, [id]);
-    }
-    if (n.foundation || n.supportFrame) activate(number, allDofIds);
-  }
-  for (const pattern of p.loadPatterns) {
-    for (const load of pattern.nodal) {
-      const values = spatial
-        ? [load.fx, load.fy, load.fz, load.mx, load.my, load.mz]
-        : [load.fx, load.fz, load.my];
-      activate(
-        nodeNumber(load.nodeId),
-        allDofIds.filter((_, index) => values[index] !== 0),
-      );
-    }
-  }
-  for (const number of explicitDofs) activate(number, allDofIds);
-  for (const node of nodes) {
-    if (node.diaphragm) activate(node.number, allDofIds);
-  }
-  for (const [number, condensed] of condensedNodeDofs) {
-    const inactive = [...condensed].filter(
-      (id) => !activeNodeDofs.get(number)?.has(id),
-    );
-    if (!inactive.length) continue;
-    const values = inactive.map(() => 0);
-    bcs.push(
-      `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${inactive.length} ${inactive.join(" ")} values ${values.length} ${values.join(" ")} set ${set(`nodes 1 ${number}`)}`,
-    );
-  }
   const deck = [
     "analysis.out",
     `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
     // Additional prescribed directions introduce Lagrange multipliers. GMRES
     // can solve that indefinite system even with a zero diagonal pivot.
     "StaticStructural nsteps 1 deltat 1" +
-      (floors.multipliers ||
+      (freeConstraints ||
+      floors.multipliers ||
       [...supportRows.values()].some((rows) => rows.length)
         ? " lstype 1 smtype 2 stype 1 lstol 1e-12 lsiter 2000"
         : ""),
@@ -716,26 +624,24 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     ...nodes.map((n) => {
       const floor = floors.records.get(n.number);
       if (floor) return floor;
-      const basis = n.objectId && frames.get(n.objectId);
+      const basis =
+        n.connection?.basis ?? (n.objectId && frames.get(n.objectId));
       const lcs = basis
         ? ` lcs 6 ${basis.x.x} ${basis.x.y} ${basis.x.z} ${basis.y.x} ${basis.y.y} ${basis.y.z}`
         : "";
       const coords = `coords 3 ${n.x} ${n.y} ${n.z}`;
       if (n.connection)
-        return `RigidArmNode ${n.number} ${coords} master ${n.master} dofidmask ${dofList} masterMask ${dofs.length} ${n.connection.masterMask.join(" ")} doftype ${dofs.length} ${n.connection.dofTypes.join(" ")} lcs 6 ${n.connection.lcs.join(" ")}`;
+        return `RigidArmNode ${n.number} ${coords} master ${n.master} dofidmask ${dofList} masterMask ${dofs.length} ${n.connection.masterMask.join(" ")} doftype ${dofs.length} ${n.connection.dofTypes.join(" ")}${lcs}`;
       if (n.master) {
         const joint = n.objectId && publicNodes.get(n.objectId);
         const mask = (value: number) =>
           `${dofs.length} ${dofs.map(([key]) => (joint && joint.restraints[key] ? 0 : value)).join(" ")}`;
         return `RigidArmNode ${n.number} ${coords}${lcs} master ${n.master} dofidmask ${dofList} mastermask ${mask(1)} doftype ${mask(2)}`;
       }
-      const active = activeNodeDofs.get(n.number)!;
       const dofidmask =
-        active.size && (active.size < dofs.length || n.objectId)
-          ? ` dofidmask ${active.size} ${dofs.filter(([, id]) => active.has(id)).map(([, id]) => id).join(" ")}`
-          : explicitDofs.has(n.number) || n.diaphragm
-            ? ` dofidmask ${dofList}`
-            : "";
+        explicitDofs.has(n.number) || n.diaphragm
+          ? ` dofidmask ${dofList}`
+          : "";
       return `Node ${n.number} ${coords}${lcs}${dofidmask}`;
     }),
     ...(hasGroundSprings
@@ -743,8 +649,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       : []),
     ...foundations.auxiliary,
     ...elements.map((e) => {
-      if (!spatial)
-        return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}${e.dofsToCondense?.length ? ` dofstocondense ${e.dofsToCondense.length} ${e.dofsToCondense.join(" ")}` : ""}`;
+      if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
       const z = axes.get(e.memberId)![2];
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
@@ -780,8 +685,21 @@ export function parseOofemOutput(
     throw new Error(
       "Saída incompleta ou incompatível. Esperado um único passo estático concluído.",
     );
-  if (/\b(?:nan|inf(?:inity)?)\b/i.test(rawOutput))
-    throw new Error("Resultado não finito. Análise rejeitada.");
+  if (/\b(?:nan|inf(?:inity)?)\b/i.test(rawOutput)) {
+    const ids = input.project.members
+      .filter((m) =>
+        [m.connectionI, m.connectionJ].some(
+          (c) => c && Object.values(c).some((v) => v.kind !== "rigid"),
+        ),
+      )
+      .map((m) => m.id);
+    throw new Error(
+      "Resultado não finito. Análise rejeitada." +
+        (ids.length
+          ? ` Verifique mecanismos nas barras com liberações: ${ids.join(", ")}.`
+          : ""),
+    );
+  }
   const nodeOutput = new Map<number, Map<number, number>>();
   for (const match of rawOutput.matchAll(
     /^(?:RigidArm|GeneralSlave|Slave)?Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm|GeneralSlave|Slave)?Node|\n\s*Element output)/gm,
@@ -835,7 +753,8 @@ export function parseOofemOutput(
   const d = new Map<number, Displacement>();
   for (const [number, values] of nodeOutput) {
     if (!dofs.every(([, k]) => values.has(k))) continue;
-    const basis = frames.get(number);
+    const basis =
+      input.nodes[number - 1]?.connection?.basis ?? frames.get(number);
     let u = {
       x: values.get(1)!,
       y: spatial ? values.get(2)! : 0,
@@ -893,25 +812,25 @@ export function parseOofemOutput(
     const connection = input.nodes[n.number - 1].connection;
     let incompatible: boolean;
     if (connection) {
-      const [x0, x1, x2, y0, y1, y2] = connection.lcs;
-      const x = { x: x0, y: x1, z: x2 };
-      const y = { x: y0, y: y1, z: y2 };
-      const z = cross(x, y);
+      const { x, y, z } = connection.basis;
       const axes = spatial ? [x, y, z, x, y, z] : [x, z, y];
       const projection = (value: Point3, axis: Point3) =>
         value.x * axis.x + value.y * axis.y + value.z * axis.z;
       incompatible = connection.masterMask.some((rigid, index) => {
         if (!rigid) return false;
         const axis = axes[index];
-        const expectedValue = index < (spatial ? 3 : 2)
-          ? projection(expected, axis)
-          : projection(theta, axis);
-        const actualValue = index < (spatial ? 3 : 2)
-          ? projection(actual, axis)
-          : projection(rotation, axis);
+        const expectedValue =
+          index < (spatial ? 3 : 2)
+            ? projection(expected, axis)
+            : projection(theta, axis);
+        const actualValue =
+          index < (spatial ? 3 : 2)
+            ? projection(actual, axis)
+            : projection(rotation, axis);
         return (
           Math.abs(expectedValue - actualValue) >
-          1e-12 + printTolerance * (Math.abs(expectedValue) + Math.abs(actualValue))
+          1e-12 +
+            printTolerance * (Math.abs(expectedValue) + Math.abs(actualValue))
         );
       });
     } else {
