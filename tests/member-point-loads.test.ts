@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import { beamStations, sectionLocations } from "../src/domain/beamMesh";
 import { connectMeshJoint, reverseMember } from "../src/domain/editing";
@@ -26,9 +27,15 @@ describe("KS-29 · ações concentradas em barras", () => {
   it("migra v16 sem alterar os dados e valida o domínio e o plano", () => {
     const p = pointLoadBeam();
     delete p.loadPatterns[0].points;
-    expect(parseProject(JSON.stringify({ ...p, schemaVersion: 16 }))).toEqual(
-      p,
-    );
+    expect(
+      parseProject(
+        JSON.stringify({
+          ...p,
+          schemaVersion: 16,
+          loadPatterns: legacyPatterns(p),
+        }),
+      ),
+    ).toEqual(p);
     const q = pointLoadBeam(),
       l = q.loadPatterns[0].points![0];
     expect(parseProject(serializeProject(q))).toEqual(q);

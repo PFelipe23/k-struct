@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   parseProject,
@@ -14,10 +15,10 @@ describe("KS-27 · vínculos do pavimento", () => {
     p.selectionGroups = [
       { id: "g", name: "Piso", objects: [{ kind: "node", id: "C" }] },
     ];
-    const old = { ...p, schemaVersion: 14 };
+    const old = { ...p, schemaVersion: 14, loadPatterns: legacyPatterns(p) };
     delete old.diaphragms;
     const migrated = parseProject(JSON.stringify(old));
-    expect(migrated.schemaVersion).toBe(19);
+    expect(migrated.schemaVersion).toBe(20);
     expect(migrated.nodes).toEqual(p.nodes);
     expect(migrated.selectionGroups).toEqual(p.selectionGroups);
     expect(migrated.diaphragms).toBeUndefined();

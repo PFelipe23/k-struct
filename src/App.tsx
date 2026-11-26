@@ -161,6 +161,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v20") ??
       localStorage.getItem("kstruct.draft.v19") ??
       localStorage.getItem("kstruct.draft.v18") ??
       localStorage.getItem("kstruct.draft.v17") ??
@@ -474,7 +475,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v19", serialized);
+      localStorage.setItem("kstruct.draft.v20", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1393,9 +1394,14 @@ export default function App() {
                   : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
-                {slab
-                  ? "Peso próprio aplicado manualmente como pressão"
-                  : "Peso próprio aplicado manualmente como carga distribuída"}
+                {analysisCase.factors.some(
+                  (f) =>
+                    f.factor !== 0 &&
+                    p.loadPatterns.find((pat) => pat.id === f.patternId)
+                      ?.selfWeight.enabled,
+                )
+                  ? "Peso próprio ativo no caso"
+                  : "Peso próprio automático desativado no caso"}
               </span>
             </div>
           </>

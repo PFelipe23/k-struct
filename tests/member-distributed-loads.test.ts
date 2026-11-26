@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   beamExample,
@@ -25,7 +26,13 @@ describe("KS-30 · cargas distribuídas em trechos", () => {
   it("preserva projetos v17 e rejeita limites e componentes inválidos", () => {
     const legacy = beamExample();
     expect(
-      parseProject(JSON.stringify({ ...legacy, schemaVersion: 17 })),
+      parseProject(
+        JSON.stringify({
+          ...legacy,
+          schemaVersion: 17,
+          loadPatterns: legacyPatterns(legacy),
+        }),
+      ),
     ).toEqual(legacy);
     const p = distributedBeam(),
       load = p.loadPatterns[0].distributed![0];

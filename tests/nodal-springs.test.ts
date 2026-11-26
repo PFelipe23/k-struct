@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   addPoint,
@@ -25,7 +26,13 @@ describe("molas nodais", () => {
     p.members[0].stiffness = { eiy: 0.5 };
     p.members[0].offsets = structuredClone(centeredOffsets);
     p.members[0].offsets.i.rigidLength = 0.5;
-    const migrated = parseProject(JSON.stringify({ ...p, schemaVersion: 13 }));
+    const migrated = parseProject(
+      JSON.stringify({
+        ...p,
+        schemaVersion: 13,
+        loadPatterns: legacyPatterns(p),
+      }),
+    );
     expect(migrated).toEqual(p);
     expect(exportOofem(migrated, "EL").deck).toBe(exportOofem(p, "EL").deck);
     setSpring(p.nodes[1], "uz", 1e7);

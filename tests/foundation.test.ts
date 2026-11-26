@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -92,7 +93,13 @@ describe("KS-26 · fundações acopladas", () => {
   it("preserva modelos v15, reabre a matriz em SI e detecta a liberdade RX", () => {
     const existing = diaphragmBenchmark();
     expect(
-      parseProject(JSON.stringify({ ...existing, schemaVersion: 15 })),
+      parseProject(
+        JSON.stringify({
+          ...existing,
+          schemaVersion: 15,
+          loadPatterns: legacyPatterns(existing),
+        }),
+      ),
     ).toEqual(existing);
     const p = foundationBenchmark();
     p.nodes[0].foundation = sample("B16-rotulada");

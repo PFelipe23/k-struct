@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import { coordinates, origin } from "../src/domain/geometry";
 import {
@@ -20,9 +21,15 @@ import { objectsInWindow } from "../src/domain/selection";
 describe("Excentricidades e trechos rígidos", () => {
   it("migra v11, conserva IDs e reproduz a entrada original com oito campos nulos", () => {
     const p = beamExample();
-    expect(parseProject(JSON.stringify({ ...p, schemaVersion: 11 }))).toEqual(
-      p,
-    );
+    expect(
+      parseProject(
+        JSON.stringify({
+          ...p,
+          schemaVersion: 11,
+          loadPatterns: legacyPatterns(p),
+        }),
+      ),
+    ).toEqual(p);
     const original = exportOofem(p, "EL").deck;
     p.members[0].offsets = structuredClone(centeredOffsets);
     expect(exportOofem(p, "EL").deck).toBe(original);

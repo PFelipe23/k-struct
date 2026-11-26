@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   parseProject,
@@ -24,7 +25,15 @@ function solve(p: Project) {
 it("migra v18 sem mudar os IDs e rejeita prescrições duplicadas, livres, elásticas ou fora do plano", () => {
   const p = settlementBeam();
   delete p.loadPatterns[0].prescribed;
-  expect(parseProject(JSON.stringify({ ...p, schemaVersion: 18 }))).toEqual(p);
+  expect(
+    parseProject(
+      JSON.stringify({
+        ...p,
+        schemaVersion: 18,
+        loadPatterns: legacyPatterns(p),
+      }),
+    ),
+  ).toEqual(p);
   const motions = [{ nodeId: "B", dof: "uz" as const, value: -0.004 }];
   p.loadPatterns[0].prescribed = motions;
   expect(parseProject(serializeProject(p))).toEqual(p);
