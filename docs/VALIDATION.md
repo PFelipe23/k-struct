@@ -356,3 +356,23 @@ O cenário de interface edita a mola em kN/cm, consulta os resultados globais e 
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/nodal-springs.test.ts tests/nodal-springs.integration.test.ts
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- nodal-springs.spec.ts
 ```
+
+## KS-27 — Diafragmas de pavimento
+
+O ensaio `diaphragmBenchmark` usa um piso na cota 3 m, com nós S, C, E e N sobre X = 0 e coordenadas Y de −2, 0, +1 e +2 m. As molas em X nos nós S e N têm 6.000 kN/m cada. A translação Y é restringida no centro. A distância entre os apoios é 4 m. O movimento comum no plano não deforma as barras entre os participantes.
+
+| Força aplicada | Reação X em N | Reação X em S | UX no centro | Rotação θz | UX em N / S |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| +12 kN em X no centro | −6 kN | −6 kN | +1 mm | 0 | +1 / +1 mm |
+| +12 kN em X a Y = +1 m | −9 kN | −3 kN | +1 mm | −0,25 mrad | +1,5 / +0,5 mm |
+
+Os valores seguem de `ΣFx = 0`, `ΣMz = 0` e da relação força–deslocamento das duas molas. Com a origem no centro, a carga excêntrica produz −12 kN·m e a rigidez à torção do piso sobre as molas vale 48.000 kN·m/rad. O teste compara as reações com tolerância absoluta de 0,001 N e os deslocamentos e rotações com 10⁻¹⁰ m ou rad. A rotação do modelo em 90° verifica a mesma resposta em Y. A troca da referência para (+0,75 m, −0,375 m), inclusive sob força e binário simultâneos, conserva os resultados físicos.
+
+No ensaio fora do plano, a linha S–N trabalha como viga biapoiada com vão de 4 m, E = 200 GPa, seção de 0,15 × 0,20 m e uma força de −1 kN no centro. A flecha é −0,066667 mm. Um momento em torno de Y testa também a torção da barra. UZ, RX e RY dos quatro nós são comparados com a mesma viga resolvida com o diafragma removido. Outros ensaios usam apoios inclinados, componentes ligados só pelo piso, dois pavimentos independentes e uma ligação com trecho rígido. O caso mínimo usa diretamente as duas molas e estabiliza os graus fora do plano de cada nó.
+
+A suíte de interface abre o projeto espacial, cria e edita o vínculo em centímetros, resolve o caso excêntrico, lê a reação de −9 kN, desfaz e refaz a edição e reabre o arquivo salvo. Para reproduzir com o executável fixado, execute os comandos na raiz do repositório.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/diaphragm.test.ts tests/diaphragm.integration.test.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- diaphragm.spec.ts
+```

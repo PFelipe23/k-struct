@@ -1,6 +1,6 @@
 import { distance, interiorParameter, tolerance } from "./geometry";
 import { memberAxis } from "./memberOffsets";
-import type { Project } from "./model";
+import type { Project, StructuralNode } from "./model";
 
 export type BeamStation = { t: number; nodeId?: string };
 export type SectionLocation = { t: number; side?: "left" | "right" };
@@ -115,4 +115,45 @@ export function nearestSection(stations: SectionLocation[], t: number) {
       best = i;
   }
   return best;
+}
+
+// A connected rigid zone has one independent motion. Retain a supported node
+// as its reference to keep ordinary loads and reactions on their editable nodes.
+export function rigidGroups(
+  links: { masterId: string; nodeId: string }[],
+  nodes: StructuralNode[],
+) {
+  const adjacency = new Map<string, Set<string>>();
+  for (const { masterId, nodeId } of links) {
+    for (const [a, b] of [
+      [masterId, nodeId],
+      [nodeId, masterId],
+    ]) {
+      const group = adjacency.get(a) ?? new Set<string>();
+      group.add(b);
+      adjacency.set(a, group);
+    }
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const visited = new Set<string>();
+  const masterOf = new Map<string, string>();
+  for (const id of adjacency.keys()) {
+    if (visited.has(id)) continue;
+    const group = [id];
+    visited.add(id);
+    for (const current of group)
+      for (const next of adjacency.get(current)!) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          group.push(next);
+        }
+      }
+    const restraints = (key: string) =>
+      Object.values(byId.get(key)!.restraints).filter(Boolean).length;
+    const master = group.reduce((best, key) =>
+      restraints(key) > restraints(best) ? key : best,
+    );
+    for (const key of group) if (key !== master) masterOf.set(key, master);
+  }
+  return masterOf;
 }

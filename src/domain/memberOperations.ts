@@ -141,6 +141,11 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     throw new Error(
       `${n.name} tem uma conexão da malha. Remova a conexão antes de alterar a extremidade.`,
     );
+  const floor = p.diaphragms?.find((f) => f.nodeIds.includes(n.id));
+  if (floor)
+    throw new Error(
+      `${n.name} participa do diafragma ${floor.name}. Edite o vínculo antes de alterar a extremidade.`,
+    );
   if (hasSupport(n))
     throw new Error(
       `${n.name} tem apoio. A operação alteraria a posição ou eliminaria o vínculo.`,
