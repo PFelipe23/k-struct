@@ -17,7 +17,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
-- Salvar e reabrir `.kstruct.json` no esquema v14, com migração dos projetos v1 a v13 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v15, com migração dos projetos v1 a v14 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -100,6 +100,12 @@ Em **Novo projeto**, escolha **Viga contínua** para informar os vãos em X ou *
 Selecione nós e barras com Ctrl ou recupere um grupo em **Seleção e grupos**. Em **Propriedades → Atribuição em lote**, escolha a seção, os graus a restringir ou liberar e as componentes de carga a somar, substituir ou remover no padrão ativo. A prévia identifica os objetos afetados. Quando há apoios inclinados, abra **Referenciais dos nós selecionados** para conferir a direção de cada vínculo. As cargas nodais e distribuídas usam eixos globais.
 
 Por exemplo, em duas barras com qZ de −2 e −3 kN/m, **Somar** −1 kN/m produz −3 e −4 kN/m. **Aplicar lote** registra toda a operação em uma edição. **Desfazer** recupera a seção, os vínculos e as cargas anteriores de cada objeto.
+
+### Diafragma rígido de pavimento
+
+No projeto espacial, escolha **Planta XY** e o **Pavimento ativo**. Abra **Modelo → Diafragmas**, dê um nome ao piso e marque os nós que ele vincula. A seleção de nós feita na vista também pode iniciar a lista. As coordenadas X e Y identificam a referência do movimento no pavimento. Use **Usar centro dos nós** para recalculá-la ou informe outra posição. Ao aplicar, a planta mostra os vínculos tracejados e um losango na referência.
+
+O piso compartilha as translações no plano e a rotação em torno de Z. Cada nó conserva suas liberdades de deslocamento vertical e de rotação em torno de X e Y. Consulte **Deslocamentos** e **Reações** pelos nomes dos nós físicos. Ao editar ou excluir participantes, a referência salva conserva suas coordenadas. A exclusão que deixa menos de dois participantes também remove o diafragma. **Desfazer** recupera a edição inteira. [Ensaio com carga excêntrica](docs/VALIDATION.md#ks-27--diafragmas-de-pavimento)
 
 ### Apoios inclinados e molas nodais
 

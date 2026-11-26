@@ -162,6 +162,12 @@ export default function WorkPlaneView({
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
+  const floors = plane.kind === "XY"
+    ? (project.diaphragms ?? []).filter((floor) =>
+        project.guides.z.some((level) =>
+          level.id === floor.levelId && level.position === plane.offset),
+      )
+    : [];
   const slab =
     plane.kind === "XY"
       ? project.slabs.find((item) =>
@@ -201,6 +207,7 @@ export default function WorkPlaneView({
   const fit = () => {
     const points = [
       ...project.nodes,
+      ...floors.map((floor) => ({ ...floor.reference, z: plane.offset })),
       ...bars.flatMap((m) => {
         if (!m.offsets) return [];
         const line = memberAxis(m, nodeMap.get(m.start)!, nodeMap.get(m.end)!);
@@ -1090,6 +1097,20 @@ export default function WorkPlaneView({
             );
           }}
         />
+        {floors.map((floor) => {
+          const x = sx(floor.reference.x), y = sy(floor.reference.y);
+          return (
+            <g key={floor.id} className="diaphragm-links" role="img"
+              aria-label={`Diafragma ${floor.name}`} pointerEvents="none">
+              {floor.nodeIds.map((id) => {
+                const node = nodeMap.get(id)!;
+                return <line key={id} x1={x} y1={y} x2={sx(node.x)} y2={sy(node.y)} />;
+              })}
+              <path d={`M ${x} ${y - 9} l 9 9 -9 9 -9 -9 Z`} />
+              {labels && <text x={x + 11} y={y + 16}>{floor.name} · ref.</text>}
+            </g>
+          );
+        })}
         {nodes.map((n) => {
           const active = selected.has(`node:${n.id}`);
           const x = sx(n[axisU]),

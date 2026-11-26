@@ -19,8 +19,13 @@ import {
   type Project,
 } from "../domain/model";
 import { memberAxis } from "../domain/memberOffsets";
-import { rigidGroups, rigidJointEquations } from "./rigidOffsets";
-import { beamMeshLayout, type SectionLocation } from "../domain/beamMesh";
+import { floorConstraints } from "./diaphragm";
+import { rigidJointEquations } from "./rigidOffsets";
+import {
+  beamMeshLayout,
+  rigidGroups,
+  type SectionLocation,
+} from "../domain/beamMesh";
 import {
   hasSpring,
   hasSupport,
@@ -34,6 +39,7 @@ export interface MeshNode extends Point3 {
   number: number;
   objectId?: string;
   master?: number;
+  diaphragm?: number;
 }
 export interface MeshElement {
   number: number;
@@ -283,6 +289,14 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       );
     }
   }
+  const floors = floorConstraints(
+    p,
+    nodes,
+    modelNodes,
+    rigidMasters,
+    (type, fields) => bcs.push(`${type} ${bcs.length + 1} ${fields}`),
+    (n) => set(`nodes 1 ${n}`),
+  );
   const springs: string[] = [];
   const ground = nodes.length + 1;
   for (const n of p.nodes) {
@@ -312,13 +326,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     // Additional prescribed directions introduce Lagrange multipliers. GMRES
     // can solve that indefinite system even with a zero diagonal pivot.
     "StaticStructural nsteps 1 deltat 1" +
-      ([...supportRows.values()].some((rows) => rows.length)
+      (floors.multipliers ||
+      [...supportRows.values()].some((rows) => rows.length)
         ? " lstype 1 smtype 2 stype 1 lstol 1e-12 lsiter 2000"
         : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
     `ndofman ${nodes.length + Number(springs.length > 0)} nelem ${elements.length + springs.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
+      const floor = floors.records.get(n.number);
+      if (floor) return floor;
       const basis = n.objectId && frames.get(n.objectId);
       const lcs = basis
         ? ` lcs 6 ${basis.x.x} ${basis.x.y} ${basis.x.z} ${basis.y.x} ${basis.y.y} ${basis.y.z}`
@@ -330,7 +347,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
           `${dofs.length} ${dofs.map(([key]) => (joint && joint.restraints[key] ? 0 : value)).join(" ")}`;
         return `RigidArmNode ${n.number} ${coords}${lcs} master ${n.master} dofidmask ${dofList} mastermask ${mask(1)} doftype ${mask(2)}`;
       }
-      return `Node ${n.number} ${coords}${lcs}${explicitDofs.has(n.number) ? ` dofidmask ${dofList}` : ""}`;
+      return `Node ${n.number} ${coords}${lcs}${explicitDofs.has(n.number) || n.diaphragm ? ` dofidmask ${dofList}` : ""}`;
     }),
     ...(springs.length
       ? [`Node ${ground} coords 3 0 0 0 dofidmask ${dofList}`]
@@ -446,6 +463,27 @@ export function parseOofemOutput(
   for (const n of input.nodes)
     if (!d.has(n.number))
       throw new Error(`Deslocamentos ausentes no nó de análise ${n.number}.`);
+  for (const n of input.nodes) {
+    if (!n.diaphragm) continue;
+    const ref = input.nodes[n.diaphragm - 1],
+      motion = d.get(ref.number)!,
+      u = d.get(n.number)!;
+    const dx = n.x - ref.x,
+      dy = n.y - ref.y;
+    for (const [actual, originValue, increment] of [
+      [u.ux, motion.ux, -motion.rz * dy],
+      [u.uy, motion.uy, motion.rz * dx],
+      [u.rz, motion.rz, 0],
+    ]) {
+      if (
+        Math.abs(actual - originValue - increment) >
+        1e-12 + 2e-8 * (Math.abs(originValue) + Math.abs(increment))
+      )
+        throw new Error(
+          `Deslocamento incompatível com a cinemática do diafragma no nó ${n.objectId}.`,
+        );
+    }
+  }
   // Independent supports on the same rigid zone add constraint equations.
   // Check compatibility against the printed global motions before publishing.
   for (const n of input.nodes) {

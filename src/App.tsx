@@ -88,6 +88,7 @@ import DuplicateDialog from "./components/DuplicateDialog";
 import SectionCatalog from "./components/SectionCatalog";
 import { dimensions, shapeNames } from "./domain/sections";
 import MaterialLibrary from "./components/MaterialLibrary";
+import DiaphragmDialog from "./components/DiaphragmDialog";
 import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
@@ -142,6 +143,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v15") ??
       localStorage.getItem("kstruct.draft.v14") ??
       localStorage.getItem("kstruct.draft.v13") ??
       localStorage.getItem("kstruct.draft.v12") ??
@@ -216,6 +218,7 @@ export default function App() {
   const [launchDialog, setLaunchDialog] = useState<
     | "guides"
     | "replicate"
+    | "diaphragms"
     | "mesh"
     | "materials"
     | "sections"
@@ -405,7 +408,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v14", serialized);
+      localStorage.setItem("kstruct.draft.v15", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1002,6 +1005,17 @@ export default function App() {
                   <Scissors size={20} />
                   <span>Editar barras</span>
                 </button>
+                {spatial && (
+                  <button
+                    className="tool-button"
+                    disabled={plane.kind !== "XY"}
+                    onClick={() => setLaunchDialog("diaphragms")}
+                    title="Editar os vínculos do pavimento na planta XY"
+                  >
+                    <Layers3 size={20} />
+                    <span>Diafragmas</span>
+                  </button>
+                )}
                 <button
                   className="tool-button"
                   disabled={!p.members.length}
@@ -1877,6 +1891,15 @@ export default function App() {
             setMessage("Definições de carga aplicadas.");
             return null;
           }}
+        />
+      )}
+      {launchDialog === "diaphragms" && (
+        <DiaphragmDialog
+          project={p}
+          levelId={activeGuide.id}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "selection" && (

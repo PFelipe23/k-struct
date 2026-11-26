@@ -1,3 +1,4 @@
+import { remapDiaphragmNodes } from "./diaphragms";
 import { centeredOffsets } from "./memberOffsets";
 import { sameStiffness } from "./memberStiffness";
 import { distance, tolerance } from "./geometry";
@@ -388,6 +389,7 @@ export function planRepair(
           `Grupo ${named(group)} · ${obj.id} → ${ids[0] ?? "removido"}`,
         );
     }
+  remapDiaphragmNodes(p, nodeRefs);
   remapGroups(p, "node", nodeRefs);
   remapGroups(p, "member", memberRefs);
   const changes = changedNode.size + changedMember.size + removed.size;

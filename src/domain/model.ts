@@ -11,6 +11,11 @@ import {
   stiffnessLabels,
 } from "./memberStiffness";
 import { offsetError, setOffsets } from "./memberOffsets";
+import {
+  diaphragmErrors,
+  remapDiaphragmNodes,
+  diaphragmStability,
+} from "./diaphragms";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import { hasSpring, supportBasis, supportDofs, supportsDof } from "./supports";
@@ -347,7 +352,7 @@ const projectV13 = projectV12.extend({
     .max(1000),
 });
 const spring = finite.nonnegative().optional();
-export const projectSchema = projectV13.extend({
+const projectV14 = projectV13.extend({
   schemaVersion: z.literal(14),
   nodes: z
     .array(
@@ -366,6 +371,22 @@ export const projectSchema = projectV13.extend({
     )
     .max(1000),
 });
+export const projectSchema = projectV14.extend({
+  schemaVersion: z.literal(15),
+  diaphragms: z
+    .array(
+      z.strictObject({
+        id,
+        name: text,
+        levelId: id,
+        reference: z.strictObject({ x: finite, y: finite }),
+        nodeIds: z.array(id).min(2).max(1000),
+      }),
+    )
+    .max(500)
+    .optional(),
+});
+export type Diaphragm = NonNullable<Project["diaphragms"]>[number];
 export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
 export const defaultElasticProperties = {
@@ -431,7 +452,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 14,
+    schemaVersion: 15,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -742,6 +763,15 @@ export function parseProject(source: string): Project {
     const old = projectV13.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 14 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 14
+  ) {
+    const old = projectV14.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 15 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -785,7 +815,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 14, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 15, com valores numéricos finitos.",
     );
   }
   const errors = referenceErrors(parsed.data);
@@ -815,6 +845,7 @@ export function referenceErrors(p: Project): string[] {
     p.resultCombinations,
     p.resultEnvelopes,
     p.selectionGroups,
+    p.diaphragms ?? [],
     ...Object.values(p.guides),
   ]) {
     if (new Set(list.map((v) => v.id)).size !== list.length)
@@ -984,6 +1015,8 @@ export function referenceErrors(p: Project): string[] {
         `Inclua cada combinação uma única vez no envelope ${envelope.name}.`,
       );
   }
+  if (!errors.length && p.diaphragms?.length)
+    errors.push(...diaphragmErrors(p));
   return errors;
 }
 
@@ -1041,7 +1074,7 @@ export function analysisErrors(p: Project): string[] {
     return errors;
   }
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
-  if (!p.members.length)
+  if (!p.members.length && !p.diaphragms?.length)
     errors.push("Lance pelo menos uma barra para analisar.");
   if (p.mode === "planar") {
     if (p.nodes.some((n) => Math.abs(n.y) > 1e-8))
@@ -1084,8 +1117,9 @@ export function analysisErrors(p: Project): string[] {
     if (pairs.has(key)) errors.push(`${m.name}: barra duplicada.`);
     pairs.add(key);
   }
+  const floorNodes = new Set(p.diaphragms?.flatMap((f) => f.nodeIds));
   for (const n of p.nodes) {
-    if (edges.get(n.id)!.size) continue;
+    if (edges.get(n.id)!.size || floorNodes.has(n.id)) continue;
     const host = p.members.find(
       (m) =>
         interiorParameter(n, byId.get(m.start)!, byId.get(m.end)!) !== null,
@@ -1104,6 +1138,7 @@ export function analysisErrors(p: Project): string[] {
     errors.push(
       "Há nós coincidentes com IDs distintos. Conecte as barras ao mesmo nó.",
     );
+  const bodies: StructuralNode[][] = [];
   const visited = new Set<string>();
   for (const seed of p.nodes) {
     if (visited.has(seed.id)) continue;
@@ -1115,6 +1150,10 @@ export function analysisErrors(p: Project): string[] {
       visited.add(id);
       component.push(byId.get(id)!);
       stack.push(...edges.get(id)!);
+    }
+    if (component.some((n) => floorNodes.has(n.id))) {
+      bodies.push(component);
+      continue;
     }
     const span = Math.max(
       tolerance,
@@ -1140,6 +1179,7 @@ export function analysisErrors(p: Project): string[] {
         `Estrutura ligada a ${seed.name}: apoios insuficientes para impedir movimento de corpo rígido.`,
       );
   }
+  if (bodies.length) errors.push(...diaphragmStability(p, bodies));
   return [...new Set(errors)];
 }
 
@@ -1199,6 +1239,7 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   p.meshConnections = p.meshConnections.filter(
     (l) => !nodes.has(l.nodeId) && !bars.has(l.memberId),
   );
+  remapDiaphragmNodes(p, new Map([...nodes].map((id) => [id, []])));
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
   const removed = { node: nodes, member: bars, slab: slabs };
