@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v21, migração v1 a v20, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v22, migração v1 a v21, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v21 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, diafragmas, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v22 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, diafragmas, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. A captura é medida em pixels de tela na seguinte ordem de prioridade: nós do plano ativo (12 px), ponto médio e pé da perpendicular sobre barras inteiramente contidas no plano ativo (12 px, vencendo a menor distância em tela), guias de eixos e pavimentos no modo espacial (10 px por eixo) e, por fim, a malha de 0,50 m. O modo Orto e sua inversão temporária por `Shift` são preservados na captura de barra. A entrada por coordenadas relativas (`ΔU`/`ΔV` no plano ativo, preservando a cota normal) aplica exatamente o par informado, aceitando vírgula e ponto. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -168,7 +168,16 @@ As mensagens verificáveis antes da execução carregam etapa, severidade e refe
 
 O formato v20 guarda a habilitação, direção global, gravidade e multiplicador de `selfWeight`. A migração de v19 inicia o peso próprio desativado e preserva as ações existentes. As barras usam a massa específica, a área bruta e o comprimento do eixo de inserção, inclusive com modificadores de rigidez ou braços rígidos. A montagem de cargas uniformes e a verificação do equilíbrio recebem as mesmas intensidades. O painel horizontal usa massa específica × espessura × aceleração vertical. Fatores nulos retiram toda a contribuição do padrão.
 
-
 ## Ações de vento
 
 Desde o formato v21, cada padrão pode guardar faixas de vento com ID próprio, nós inferior e superior, largura em metros, intervalo relativo à altura, azimute em graus, pressão de referência em Pa e coeficiente com sinal. Um arquivo v20 abre com as mesmas cargas e sem faixas geradas. As parcelas nodais são derivadas dessa definição e da geometria atual, tanto nas vistas quanto na montagem do caso e na conferência do equilíbrio. Uma edição de faixa preserva as cargas manuais e os outros geradores do padrão.
+
+## Ação térmica em barras
+
+No formato v22, cada padrão pode guardar um campo `thermal` por barra física. `uniform` é a variação média em K. `deltaZ` e `deltaY` são as diferenças T(face positiva) − T(face negativa) entre as fibras extremas da seção. O plano XZ admite apenas a diferença em z local. A migração de v21 preserva as faixas de vento, os IDs e os demais valores e inicia os projetos sem temperatura aplicada.
+
+O campo é constante ao longo do comprimento deformável e varia linearmente na seção homogênea. A altura em z e a largura em y usam as dimensões externas, inclusive o diâmetro externo de tubos. A rotação da seção orienta os gradientes. A inversão i/j e as operações de cópia e espelhamento transformam os componentes para conservar a face física correspondente. A divisão leva o campo a cada trecho. A união exige que os campos coincidam no mesmo referencial. Os braços rígidos conservam a cinemática de corpo rígido.
+
+No adaptador, os fatores dos padrões ponderam as três temperaturas antes de emitir um `StructTemperatureLoad` sobre o conjunto dos elementos da barra. `SimpleCS` recebe as dimensões físicas, inclusive quando os modificadores mudam a rigidez. Para `Beam2d` as componentes são `uniform deltaZ`. Para `Beam3d` são `uniform deltaZ -deltaY`, segundo a convenção de curvatura do solver. `IsoLE` fornece α. Um campo resultante nulo ou α igual a zero dispensa o registro de temperatura. Os deslocamentos, reações e esforços provêm do OOFEM.
+
+[Registro de temperatura no OOFEM 3.0](https://github.com/oofem/oofem/blob/v3.0/src/sm/Loads/structtemperatureload.C) · [Uso das dimensões e sinais em SimpleCS](https://github.com/oofem/oofem/blob/v3.0/src/sm/CrossSections/simplecrosssection.C)

@@ -1,3 +1,9 @@
+import {
+  emptyThermal,
+  rebaseThermal,
+  sameThermal,
+  setThermalField,
+} from "./thermalLoads";
 import { rebaseDistributedLoad } from "./memberDistributedLoads";
 import { pointLoadFrame, rebasePointLoad } from "./memberPointLoads";
 import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
@@ -316,6 +322,27 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   survivor.start = stations[0].id;
   survivor.end = stations.at(-1)!.id;
   const target = pointLoadFrame(survivor, nodes, p.mode);
+  const section = p.sections.find((s) => s.id === survivor.sectionId)!;
+  for (const pat of p.loadPatterns) {
+    if (!pat.thermal?.some((f) => selected.has(f.memberId))) continue;
+    const fields = bars.map((m) => {
+      const field =
+        pat.thermal!.find((f) => f.memberId === m.id) ?? emptyThermal(m.id);
+      return rebaseThermal(
+        field,
+        previousFrames.get(m.id)!.axes,
+        target.axes,
+        survivor.id,
+        section,
+      );
+    });
+    if (!fields.every((f) => sameThermal(f, fields[0])))
+      throw new Error(
+        `${pat.name}: a união exige a mesma variação de temperatura em todos os trechos.`,
+      );
+    pat.thermal = pat.thermal.filter((f) => !selected.has(f.memberId));
+    setThermalField(pat, fields[0]);
+  }
   for (const pat of p.loadPatterns)
     if (pat.points)
       pat.points = pat.points.map((load) => {

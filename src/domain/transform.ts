@@ -1,3 +1,4 @@
+import { rebaseThermal, setThermalField } from "./thermalLoads";
 import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
 import { globalIntensity } from "./memberDistributedLoads";
 import { actionVector, pointLoadFrame } from "./memberPointLoads";
@@ -197,6 +198,36 @@ function copyAssignments(
       if (existing) for (const k of components) existing[k] += next[k];
       else dst.nodal.push(next);
       plan.loads++;
+    }
+    if (src.thermal?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const field of src.thermal) {
+        const memberId = map.members.get(field.memberId);
+        if (!memberId) continue;
+        const old = plan.source.members.find((m) => m.id === field.memberId)!;
+        const copy = plan.project.members.find((m) => m.id === memberId)!;
+        const section = plan.source.sections.find(
+          (s) => s.id === old.sectionId,
+        )!;
+        const dest = plan.project.sections.find(
+          (s) => s.id === copy.sectionId,
+        )!;
+        const from = pointLoadFrame(old, originalNodes, plan.source.mode);
+        const to = pointLoadFrame(copy, targetNodes, plan.project.mode);
+        setThermalField(
+          dst,
+          rebaseThermal(
+            field,
+            from.axes,
+            to.axes,
+            memberId,
+            section,
+            dest,
+            vector,
+          ),
+        );
+        plan.loads++;
+      }
     }
     if (src.points?.length) {
       const originalNodes = indexedNodes(plan.source);

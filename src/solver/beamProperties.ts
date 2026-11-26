@@ -4,6 +4,7 @@ import {
   beamShearCoefficient,
   equivalentBeamProperties,
 } from "../domain/memberStiffness";
+import { sectionExtents } from "../domain/thermalLoads";
 import { sectionProperties } from "../domain/sections";
 import { elasticMaterialRecord } from "./elasticMaterial";
 
@@ -11,17 +12,22 @@ type BeamSection = ReturnType<typeof sectionProperties> & {
   shear: number;
   material: number;
   elements: number[];
+  extents?: ReturnType<typeof sectionExtents>;
 };
 
 export function beamPropertyRecords(
   project: Project,
   memberElements: ReadonlyMap<string, number[]>,
   addSet: (value: string) => number,
+  heatedSections: ReadonlySet<string>,
 ) {
   const materials = [...project.materials];
   const materialNumbers = new Map(materials.map(({ id }, i) => [id, i + 1]));
   const sections: BeamSection[] = project.sections.map((section) => ({
     ...sectionProperties(section),
+    extents: heatedSections.has(section.id)
+      ? sectionExtents(section)
+      : undefined,
     shear: beamShearCoefficient,
     material: materialNumbers.get(section.materialId)!,
     elements: [],
@@ -55,7 +61,12 @@ export function beamPropertyRecords(
             modifiedMaterials.set(materialKey, materialNumber);
           }
         }
-        modified = { ...properties, material: materialNumber, elements: [] };
+        modified = {
+          ...properties,
+          extents: base.extents,
+          material: materialNumber,
+          elements: [],
+        };
         sections.push(modified);
         modifiedSections.set(key, modified);
       }
@@ -64,13 +75,18 @@ export function beamPropertyRecords(
     section.elements.push(...memberElements.get(member.id)!);
   }
   return {
-    sections: sections.map(({ A, Iy, Iz, J, material, shear, elements }, i) => {
-      const spatial = project.mode === "spatial" ? ` Iz ${Iz} Ik ${J}` : "";
-      const set = addSet(`elements ${elements.length} ${elements.join(" ")}`);
-      const shearField =
-        shear === beamShearCoefficient ? "1.e18" : String(shear);
-      return `SimpleCS ${i + 1} area ${A} Iy ${Iy}${spatial} beamShearCoeff ${shearField} material ${material} set ${set}`;
-    }),
+    sections: sections.map(
+      ({ A, Iy, Iz, J, material, shear, elements, extents }, i) => {
+        const spatial = project.mode === "spatial" ? ` Iz ${Iz} Ik ${J}` : "";
+        const dimensions = extents
+          ? ` thick ${extents.height}${project.mode === "spatial" ? ` width ${extents.width}` : ""}`
+          : "";
+        const set = addSet(`elements ${elements.length} ${elements.join(" ")}`);
+        const shearField =
+          shear === beamShearCoefficient ? "1.e18" : String(shear);
+        return `SimpleCS ${i + 1} area ${A} Iy ${Iy}${spatial} beamShearCoeff ${shearField}${dimensions} material ${material} set ${set}`;
+      },
+    ),
     materials: materials.map((material, i) =>
       elasticMaterialRecord(material, i + 1),
     ),

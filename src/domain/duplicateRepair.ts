@@ -1,3 +1,4 @@
+import { rebaseThermal, sameThermal, setThermalField } from "./thermalLoads";
 import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
 import { rebaseDistributedLoad } from "./memberDistributedLoads";
 import {
@@ -406,6 +407,47 @@ export function planRepair(
         notes.push(`${pat.name}: ${label} na união de ${dst.name}.`);
         return result;
       }
+      if (pat.thermal?.some((f) => ids.includes(f.memberId))) {
+        const target = pointLoadFrame(
+          survivingMembers.get(keep)!,
+          nodeDraft,
+          p.mode,
+        );
+        const destSection = p.sections.find((s) => s.id === dst.sectionId)!;
+        const fields = pat.thermal
+          .filter((f) => ids.includes(f.memberId))
+          .map((f) => {
+            const m = members.get(f.memberId)!;
+            const from = pointLoadFrame(m, nodes, p.mode);
+            const section = p.sections.find((s) => s.id === m.sectionId)!;
+            return {
+              source: m,
+              field: rebaseThermal(
+                f,
+                from.axes,
+                target.axes,
+                keep,
+                section,
+                destSection,
+              ),
+            };
+          });
+        let selected = fields[0];
+        if (!fields.every((row) => sameThermal(row.field, selected.field))) {
+          const choice = ask(
+            ["thermal", pat.id, ...ids],
+            `Ação térmica de ${pat.name} em ${dst.name}`,
+            fields.map((row) => sourceOption(row.source)),
+          );
+          selected =
+            fields.find((row) => choice === "use:" + row.source.id) ?? selected;
+        }
+        pat.thermal = pat.thermal.filter((f) => !ids.includes(f.memberId));
+        setThermalField(pat, selected.field);
+        notes.push(
+          `${pat.name}: conservar a ação térmica de ${named(selected.source)}.`,
+        );
+      }
       if (pat.points)
         pat.points = mergeActions(
           pat.points,
@@ -432,6 +474,10 @@ export function planRepair(
             `${named(pat)} · excluir carga de ${named(m)} · ${formatLoad(l)}`,
           );
         pat.uniform = pat.uniform.filter((l) => l.memberId !== id);
+        if (pat.thermal?.some((f) => f.memberId === id)) {
+          notes.push(`${pat.name}: excluir a ação térmica de ${named(m)}.`);
+          pat.thermal = pat.thermal.filter((f) => f.memberId !== id);
+        }
         if (pat.distributed?.some((l) => l.memberId === id)) {
           notes.push(
             `${pat.name}: excluir as cargas por trecho de ${named(m)}.`,

@@ -1,3 +1,4 @@
+import { thermalLabel } from "../domain/thermalLoads";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { memberAxis } from "../domain/memberOffsets";
 import { distributedLoadLabel } from "./DistributedLoadGlyph";
@@ -146,6 +147,10 @@ function objectDetails(p: Project, focus: Focus, units: UnitPreferences) {
       );
     }
     for (const pat of p.loadPatterns) {
+      if (focus.kind === "member") {
+        const f = pat.thermal?.find((row) => row.memberId === id);
+        if (f) details.push(`${id} · ${named(pat)} · ${thermalLabel(f)}`);
+      }
       if (focus.kind === "member" && pat.distributed?.length) {
         const m = p.members.find((m) => m.id === id)!,
           span = memberAxis(
