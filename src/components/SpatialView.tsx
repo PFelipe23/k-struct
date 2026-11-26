@@ -1,4 +1,5 @@
 import { patternWind } from "../domain/wind";
+import { thermalLabel } from "../domain/thermalLoads";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -26,6 +27,7 @@ import {
   coordinates,
   distance,
   interpolate,
+  scale,
   tolerance,
   type Point3,
 } from "../domain/geometry";
@@ -663,6 +665,33 @@ export default function SpatialView({
       );
       if (layers.loads) {
         const axes = beamAxes(axis.start, axis.end, m.roll, project.mode);
+        const temperature = pattern?.thermal?.find((f) => f.memberId === m.id);
+        if (temperature && thermalLabel(temperature)) {
+          const at = scenePoint(interpolate(axis.faceI, axis.faceJ, 0.62));
+          const size = Math.min(Math.max(axis.span * 0.12, 0.18), 1.1);
+          const labelAt = at.clone();
+          for (const [i, delta] of [
+            temperature.deltaY,
+            temperature.deltaZ,
+          ].entries()) {
+            if (!delta) continue;
+            const vector = scale(axes[i + 1], Math.sign(delta));
+            const dir = scenePoint(vector);
+            drawPointAction(
+              s.model,
+              s.materials.load,
+              at.clone().addScaledVector(dir, size),
+              vector,
+              axis.span,
+              "force",
+            );
+            labelAt.addScaledVector(dir, size);
+          }
+          const label = annotate(s.model, labelAt, [
+            thermalLabel(temperature),
+          ])!;
+          label.element.dataset.thermalMember = m.id;
+        }
         for (const load of pattern?.distributed ?? []) {
           if (load.memberId !== m.id) continue;
           const samples = distributedArrows(load, axis, axes),

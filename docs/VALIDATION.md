@@ -486,3 +486,19 @@ A pressão líquida é o produto da pressão de referência pelo coeficiente. Um
 A prévia da faixa inteira mostra 12 m² e linha de ação horizontal à cota de 1,5 m. Para repartir a fachada, edite a faixa original para 0–50% e adicione outra de 50–100%. No ensaio de combinação, o fator −0,5 para o vento em +X e 1,5 para um caso independente com −1 kN em Z no topo produzem reações de +6 kN em X, +1,5 kN em Z e +9 kN·m em Y.
 
 Com o OOFEM 3.0 configurado conforme [OOFEM.md](OOFEM.md), execute `npm test -- tests/wind.test.ts`. O ensaio XZ admite diferença absoluta inferior a 0,05 N ou 0,05 N·m nas reações. O ensaio espacial aplica sucção a 30° na metade superior de um pilar com base em (8, −2, 10) m. A reação MY calculada de 11.691,343 N·m aparece como 11.691 N·m nos cinco algarismos significativos do OOFEM, com tolerância absoluta de 0,5 N·m. Execute `npm run test:e2e -- wind.spec.ts` para conferir a prévia, o cancelamento, a atualização sem duplicação, o histórico e a reabertura do arquivo.
+
+## KS-32 — temperatura em barras
+
+Abra uma viga biapoiada de 5 m em X, com rotações livres, deslocamento axial livre à direita, E = 200 GPa, α = 12 × 10⁻⁶/K e seção retangular de 5 × 200 mm (área de 1.000 mm²). Retire as cargas mecânicas. Para a versão espacial, impeça UY nas duas pontas e RX na ponta esquerda. No inspetor da barra, abra **Ação térmica** e escolha o padrão usado no caso. Os valores abaixo são relativos ao estado inicial sem variação de temperatura.
+
+| Ensaio                                                         | Referência e resultado do OOFEM 3.0                                                                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Variação uniforme +20 K, ponta livre em X                      | uX(B) = α ΔT L = +1,2 mm. Normal nula.                                                                                        |
+| Mesmo aquecimento, UX impedido nas duas pontas                 | N = −EAαΔT = −48 kN em toda a barra. Reações horizontais opostas de 48 kN.                                                    |
+| Diferença T(+z) − T(−z) = +10 K em 0,20 m, variação média zero | κy = (RYj − RYi)/L = +0,0006 m⁻¹. Para a barra no sentido +X, w″ = −κy. A flecha central é +1,875 mm em Z e o momento é nulo. |
+| Diferença de −10 K nas mesmas faces                            | Flecha central −1,875 mm.                                                                                                     |
+| Espacial, diferença +0,25 K sobre a largura de 0,005 m         | Flecha central +1,875 mm em Y. Girar a seção +90° em torno de X, com +10 K sobre a altura, leva a flecha a −Y.                |
+
+O ensaio compara 2 e 8 elementos e a inversão de i/j. Para os deslocamentos em metros e a curvatura em m⁻¹, o erro absoluto deve ficar abaixo de 5 × 10⁻¹¹. Para a normal impedida admite-se 0,01 N. Para normal ou momento esperados nulos, exige-se menos de 10⁻⁵ N ou N·m. Um segundo padrão com fator −0,5 sobre o mesmo campo produz metade do alongamento e da flecha. Também são exercitados o campo nulo, α nulo e a alteração de EIy. Com braços rígidos de 0,5 m nas duas extremidades, o comprimento deformável cai para 4 m e o alongamento livre para 0,96 mm. A migração conserva as faixas de vento dos projetos v21. No ensaio de coluna de 3 m com ambas as ações, obtêm-se +0,72 mm de alongamento, −12 kN de reação horizontal e −18 kN·m de momento na base.
+
+Configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md). Execute `npm test -- tests/thermal-loads.test.ts` e `npm run test:e2e -- thermal-loads.spec.ts`. A regressão usa o executável real e confere os resultados importados. O teste de interface aplica e desfaz a temperatura, salva e reabre o projeto e consulta o deslocamento.

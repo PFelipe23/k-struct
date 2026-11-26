@@ -1,3 +1,8 @@
+import {
+  emptyThermal,
+  sectionExtents,
+  setThermalField,
+} from "../domain/thermalLoads";
 import MemberOffsetsEditor from "./MemberOffsetsEditor";
 import { memberAxis, setOffsets } from "../domain/memberOffsets";
 import SectionPreview from "./SectionPreview";
@@ -403,6 +408,11 @@ export default function Inspector({
   const gross = geometry && grossStiffness(geometry, material);
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
+  const temperature =
+    member &&
+    (pattern.thermal?.find((f) => f.memberId === member.id) ??
+      emptyThermal(member.id));
+  const extents = sectionExtents(section);
   const ul = sumUniform(pattern, member?.id ?? "");
   const start = member && p.nodes.find((n) => n.id === member.start)!;
   const end = member && p.nodes.find((n) => n.id === member.end)!;
@@ -881,6 +891,77 @@ export default function Inspector({
             >
               Adicionar carga por trecho
             </button>
+            {temperature && (
+              <details className="nodal-springs">
+                <summary>Ação térmica</summary>
+                <label className="stack-field">
+                  Padrão da ação térmica
+                  <select
+                    value={patternId}
+                    onChange={(e) => onPatternChange(e.target.value)}
+                  >
+                    {p.loadPatterns.map((pat) => (
+                      <option key={pat.id} value={pat.id}>
+                        {pat.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="help">
+                  {material.name} · α ={" "}
+                  {material.alpha.toLocaleString("pt-BR", {
+                    maximumSignificantDigits: 8,
+                  })}{" "}
+                  1/K.
+                  {material.alpha === 0 &&
+                    " Com α igual a zero, não há deformação térmica."}
+                </p>
+                <p className="help">
+                  A variação uniforme aquece (+) ou resfria (−) toda a seção. A
+                  diferença entre faces é a temperatura da face positiva menos a
+                  da face negativa do eixo local. Uma variação de 1 K equivale a
+                  1 °C.
+                </p>
+                {(
+                  [
+                    "uniform",
+                    "deltaZ",
+                    ...(spatial ? ["deltaY" as const] : []),
+                  ] as const
+                ).map((k) => (
+                  <NumberField
+                    key={`${member.id}-${patternId}-${k}`}
+                    label={
+                      k === "uniform"
+                        ? "ΔT uniforme"
+                        : `ΔT entre faces ${k === "deltaZ" ? "z" : "y"}`
+                    }
+                    unit="K"
+                    value={temperature[k]}
+                    onChange={(value) =>
+                      edit((draft) => {
+                        const target = draft.loadPatterns.find(
+                          (pat) => pat.id === patternId,
+                        )!;
+                        const field =
+                          target.thermal?.find(
+                            (f) => f.memberId === member.id,
+                          ) ?? emptyThermal(member.id);
+                        setThermalField(target, { ...field, [k]: value });
+                      })
+                    }
+                  />
+                ))}
+                <p className="help">
+                  Distância entre faces z:{" "}
+                  {formatQuantity(extents.height, "section", units)}{" "}
+                  {units.section}
+                  {spatial &&
+                    ` · entre faces y: ${formatQuantity(extents.width, "section", units)} ${units.section}`}
+                  .
+                </p>
+              </details>
+            )}
             <h4>
               Carga distribuída uniforme <span>{pattern.name}</span>
             </h4>
