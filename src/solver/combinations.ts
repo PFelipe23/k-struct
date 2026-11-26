@@ -4,6 +4,7 @@ import {
   type BeamStation,
 } from "../domain/beamMesh";
 import type { Project, ResultCombination } from "../domain/model";
+import { hasSupport } from "../domain/supports";
 import type { AnalysisResult, Station, StructuralResult } from "./oofem";
 
 const displacementComponents = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
@@ -153,14 +154,12 @@ export function combineLinearResults(
       ),
     ]),
   );
-  const reactions = project.nodes
-    .filter((node) => Object.values(node.restraints).some(Boolean))
-    .map(({ id }) => ({
-      nodeId: id,
-      ...sumComponents(reactionComponents, reactionCases, (term) =>
-        term.reactions.get(id),
-      ),
-    }));
+  const reactions = project.nodes.filter(hasSupport).map(({ id }) => ({
+    nodeId: id,
+    ...sumComponents(reactionComponents, reactionCases, (term) =>
+      term.reactions.get(id),
+    ),
+  }));
   const layout = beamStations(project);
   const members = Object.fromEntries(
     project.members.map(({ id }) => [

@@ -1412,8 +1412,8 @@ button.primary {
 .section-axes { fill: none; stroke: var(--text); stroke-width: 1; }
 .section-axis-label { fill: var(--text); font: 11px sans-serif; }
 .section-properties .help { grid-column: 1 / -1; margin: 4px 0; }
-.member-stiffness { margin: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
-.member-stiffness summary { font-size: 11px; color: var(--text); cursor: pointer; }
+.member-stiffness, .nodal-springs { margin: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
+.member-stiffness summary, .nodal-springs summary { font-size: 11px; color: var(--text); cursor: pointer; }
 .member-stiffness table { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; }
 .member-stiffness th, .member-stiffness td { border-top: 1px solid var(--line); padding: 5px 2px; text-align: right; }
 .member-stiffness th:first-child { text-align: left; }

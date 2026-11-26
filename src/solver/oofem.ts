@@ -21,7 +21,12 @@ import {
 import { memberAxis } from "../domain/memberOffsets";
 import { rigidGroups, rigidJointEquations } from "./rigidOffsets";
 import { beamMeshLayout, type SectionLocation } from "../domain/beamMesh";
-import { supportBasis, supportToGlobal } from "../domain/supports";
+import {
+  hasSpring,
+  hasSupport,
+  supportBasis,
+  supportToGlobal,
+} from "../domain/supports";
 import { beamPropertyRecords } from "./beamProperties";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
@@ -278,6 +283,29 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       );
     }
   }
+  const springs: string[] = [];
+  const ground = nodes.length + 1;
+  for (const n of p.nodes) {
+    const basis = frames.get(n.id) ?? supportBasis();
+    for (const [key] of dofs) {
+      if (!hasSpring(n, key)) continue;
+      const rotation = key.startsWith("r");
+      const mode = spatial ? (rotation ? 5 : 4) : rotation ? 3 : 2;
+      const axis = basis[key[1] as keyof Point3];
+      const number = elements.length + springs.length + 1;
+      // Spring projects both endpoints onto an explicit global direction.
+      // NodalSpring assembles in global axes even when the node has an lcs.
+      springs.push(
+        `Spring ${number} nodes 2 ${ground} ${nodeNumber(n.id)} crossSect 1 mode ${mode} k ${n.springs![key]} orientation 3 ${axis.x} ${axis.y} ${axis.z}`,
+      );
+    }
+  }
+  if (springs.length) {
+    const zeros = dofs.map(() => 0).join(" ");
+    bcs.push(
+      `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} values ${dofs.length} ${zeros} set ${set(`nodes 1 ${ground}`)}`,
+    );
+  }
   const deck = [
     "analysis.out",
     `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
@@ -289,7 +317,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${nodes.length} nelem ${elements.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${nodes.length + Number(springs.length > 0)} nelem ${elements.length + springs.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
       const basis = n.objectId && frames.get(n.objectId);
       const lcs = basis
@@ -304,11 +332,15 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       }
       return `Node ${n.number} ${coords}${lcs}${explicitDofs.has(n.number) ? ` dofidmask ${dofList}` : ""}`;
     }),
+    ...(springs.length
+      ? [`Node ${ground} coords 3 0 0 0 dofidmask ${dofList}`]
+      : []),
     ...elements.map((e) => {
       if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
       const z = axes.get(e.memberId)![2];
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
+    ...springs,
     ...properties.sections,
     ...properties.materials,
     ...bcs,
@@ -486,20 +518,31 @@ export function parseOofemOutput(
   const reactions: Reaction[] = [];
   const printedLocalReactions: Reaction[] = [];
   for (const n of input.project.nodes) {
-    if (!Object.values(n.restraints).some(Boolean)) continue;
+    if (!hasSupport(n)) continue;
     const num = modelNumbers.get(n.id)!;
-    const result = nodalLoad(n.id);
+    const result = nodalLoad(n.id),
+      prescribed = nodalLoad(n.id);
+    const localDisplacements = nodeOutput.get(num)!;
     for (const [key, dof, axis] of dofs) {
       if (n.restraints[key]) {
         const value = reactionMap.get(`${num}:${dof}`);
         if (value === undefined)
           throw new Error(`Reação ausente em ${n.name}, ${key}.`);
-        result[axis] = value;
+        prescribed[axis] = result[axis] = value;
+      } else if (hasSpring(n, key)) {
+        // Use the printed nodal component in the support frame to recover the
+        // action of the spring on the structure at the physical node.
+        const value = -n.springs![key]! * localDisplacements.get(dof)!;
+        if (!Number.isFinite(value))
+          throw new Error(
+            `Reação de mola fora do intervalo numérico em ${n.name}, ${key}.`,
+          );
+        result[axis] = value === 0 ? 0 : value;
       }
     }
     const basis = frames.get(num);
     if (basis) {
-      printedLocalReactions.push(result);
+      printedLocalReactions.push(prescribed);
       const force = supportToGlobal(
         { x: result.fx, y: result.fy, z: result.fz },
         basis,

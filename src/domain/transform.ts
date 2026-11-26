@@ -20,7 +20,7 @@ import {
   type Transform,
   type VectorMap,
 } from "./transformGeometry";
-import { sameSupportAxes } from "./supports";
+import { combineSupport, hasSupport, sameSupportAxes } from "./supports";
 
 export type CopyOptions = {
   supports: boolean;
@@ -69,7 +69,6 @@ function selectedGeometry(source: Project, selection: SelectedObject[]) {
   return { nodes, members, nodeIds, selectedNodeIds };
 }
 const indexedNodes = (p: Project) => new Map(p.nodes.map((n) => [n.id, n]));
-const dofs = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
 const components = ["fx", "fy", "fz", "mx", "my", "mz"] as const;
 const hasLoad = (load: NodalLoad) => components.some((k) => load[k] !== 0);
 
@@ -95,18 +94,15 @@ function copyAssignments(
 ) {
   for (const node of nodes) {
     const dest = targetNodes.get(map.nodes.get(node.id)!)!;
-    if (options.supports && dofs.some((k) => node.restraints[k])) {
-      const occupied = dofs.some((k) => dest.restraints[k]);
+    if (options.supports && hasSupport(node)) {
+      const occupied = hasSupport(dest);
       if (occupied)
         plan.conflicts.push(
           `Cópia ${i} · ${node.name} → ${dest.name} · apoio existente`,
         );
       if (!occupied || options.conflicts === "combine") {
-        const { restraints, frame } = mapSupport(
-          node,
-          vector,
-          plan.project.mode,
-        );
+        const support = mapSupport(node, vector, plan.project.mode);
+        const { frame } = support;
         if (occupied && !sameSupportAxes(dest.supportFrame, frame))
           throw new Error(
             `Apoios de ${dest.name} usam referenciais diferentes. Escolha conservar o apoio existente.`,
@@ -115,7 +111,7 @@ function copyAssignments(
           if (frame) dest.supportFrame = frame;
           else delete dest.supportFrame;
         }
-        for (const k of dofs) dest.restraints[k] ||= restraints[k];
+        combineSupport(dest, support);
         plan.restraints++;
       }
     }

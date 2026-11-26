@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
-import { supportBasis, supportToLocal } from "../domain/supports";
+import {
+  hasElasticSupport,
+  supportBasis,
+  supportsDof,
+  supportToLocal,
+} from "../domain/supports";
 import type {
   AnalysisResult,
   Displacement,
@@ -57,7 +62,7 @@ export function buildResultTable(
 ) {
   const spatial = project.mode === "spatial";
   const modelMembers = new Map(project.members.map((m) => [m.id, m]));
-  const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
+  const nodes = new Map(project.nodes.map((node) => [node.id, node]));
   const includeMemberIds =
     tab === "forces" && hasAmbiguousMemberNames(project.members);
   const memberNames = new Map(
@@ -72,7 +77,6 @@ export function buildResultTable(
     const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
       ? ["fx", "fy", "fz", "mx", "my", "mz"]
       : ["fx", "fz", "my"];
-    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
     const hasLocal = (result?.reactions ?? []).some(
       ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
     );
@@ -88,7 +92,7 @@ export function buildResultTable(
       headers.push(...componentHeaders("local"), "Referencial do apoio");
     rows = (result?.reactions ?? []).map((r) => {
       const row: (string | number)[] = [
-        nodeNames.get(r.nodeId) ?? r.nodeId,
+        nodes.get(r.nodeId)?.name ?? r.nodeId,
         ...keys.map((key) => fromSI(r[key], quantity(key), units)),
       ];
       if (hasLocal) {
@@ -100,7 +104,7 @@ export function buildResultTable(
         row.push(
           ...keys.map((key) => {
             const axis = key[1] as "x" | "y" | "z";
-            return node.restraints[`${key[0] === "f" ? "u" : "r"}${axis}`]
+            return supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
               ? fromSI(local[key], quantity(key), units)
               : 0;
           }),
@@ -110,6 +114,9 @@ export function buildResultTable(
       return row;
     });
   } else if (tab === "displacements") {
+    const hasLocal = project.nodes.some(
+      (node) => node.supportFrame && hasElasticSupport(node),
+    );
     const values = (d: Displacement) => [
       ...[d.ux, ...(spatial ? [d.uy] : []), d.uz].map((value) =>
         fromSI(value, "displacement", units),
@@ -117,20 +124,38 @@ export function buildResultTable(
       ...(spatial ? [d.rx, d.ry, d.rz] : [d.ry]).map((value) => value * 1000),
     ];
     const displacement = unitLabel("displacement", units);
-    headers = [
-      "Nó / estação",
+    const components = (suffix = "") => [
       ...["UX", ...(spatial ? ["UY"] : []), "UZ"].map(
-        (label) => `${label} (${displacement})`,
+        (label) => `${label}${suffix} (${displacement})`,
       ),
       ...(spatial ? ["RX", "RY", "RZ"] : ["RY"]).map(
-        (label) => `${label} (mrad)`,
+        (label) => `${label}${suffix} (mrad)`,
       ),
     ];
+    const localColumns = hasLocal
+      ? [...components(" local"), "Referencial do apoio"]
+      : [];
+    headers = [
+      "Nó / estação",
+      ...components(hasLocal ? " global" : ""),
+      ...localColumns,
+    ];
     rows = [
-      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => [
-        nodeNames.get(id) ?? id,
-        ...values(d),
-      ]),
+      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => {
+        const node = nodes.get(id);
+        const row: (string | number)[] = [node?.name ?? id, ...values(d)];
+        if (hasLocal) {
+          const frame = node?.supportFrame;
+          const basis = supportBasis(frame);
+          const u = supportToLocal({ x: d.ux, y: d.uy, z: d.uz }, basis);
+          const r = supportToLocal({ x: d.rx, y: d.ry, z: d.rz }, basis);
+          row.push(
+            ...values({ ux: u.x, uy: u.y, uz: u.z, rx: r.x, ry: r.y, rz: r.z }),
+            frame ? "Local" : "Global",
+          );
+        }
+        return row;
+      }),
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
         stations
           .filter(
@@ -141,6 +166,7 @@ export function buildResultTable(
           .map((s) => [
             `${memberNames.get(id) ?? id} · ${s.t === 0 ? "face i" : s.t === 1 ? "face j" : `x/L ${s.t}`}`,
             ...values(s),
+            ...localColumns.map(() => ""),
           ]),
       ),
     ];
@@ -378,7 +404,9 @@ export default function Results({
                   ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
                   : tab === "reactions"
                     ? "Reações referidas aos nós de apoio."
-                    : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
+                    : headers.includes("Referencial do apoio")
+                      ? "Deslocamentos nos nós de lançamento e nas estações do trecho deformável. As colunas identificam o referencial."
+                      : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
               </caption>
             )}
             <thead>
@@ -397,8 +425,7 @@ export default function Results({
                         ? formatResult(
                             v,
                             tab === "displacements" &&
-                              j > 0 &&
-                              j <= (project.mode === "spatial" ? 3 : 2)
+                              headers[j].startsWith("U")
                               ? resultFractionDigits("displacement", units)
                               : 5,
                           )

@@ -166,7 +166,7 @@ for (const mode of ["planar", "spatial"] as const) {
       pressure: [],
     });
     await page.addInitScript(
-      (source) => localStorage.setItem("kstruct.draft.v13", source),
+      (source) => localStorage.setItem("kstruct.draft.v14", source),
       serializeProject(p),
     );
     await page.goto("/");
@@ -174,7 +174,7 @@ for (const mode of ["planar", "spatial"] as const) {
       page.getByRole("button", { name, exact: true });
     const draft = (): Promise<Project> =>
       page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kstruct.draft.v13")!),
+        JSON.parse(localStorage.getItem("kstruct.draft.v14")!),
       );
     await button("Seleção e grupos").click();
     const dialog = page.getByRole("dialog", { name: "Seleção e grupos" });
@@ -234,7 +234,7 @@ test("cargas globais em lote equilibram o rolete no modelo de referência", asyn
 }) => {
   const p = inclinedBeam();
   await page.addInitScript(
-    (source) => localStorage.setItem("kstruct.draft.v13", source),
+    (source) => localStorage.setItem("kstruct.draft.v14", source),
     serializeProject(p),
   );
   await page.goto("/");
@@ -263,7 +263,7 @@ test("cargas globais em lote equilibram o rolete no modelo de referência", asyn
   await expect
     .poll(() =>
       page.evaluate(() =>
-        JSON.parse(localStorage.getItem("kstruct.draft.v13")!),
+        JSON.parse(localStorage.getItem("kstruct.draft.v14")!),
       ),
     )
     .toEqual(manual);
@@ -295,7 +295,7 @@ test("o lote exibe e aplica forças, momentos e cargas nas unidades selecionadas
 }) => {
   const p = inclinedBeam();
   await page.addInitScript((source) => {
-    localStorage.setItem("kstruct.draft.v13", source);
+    localStorage.setItem("kstruct.draft.v14", source);
     localStorage.setItem(
       "kstruct.units",
       JSON.stringify({ force: "N", moment: "N·m", distributedLoad: "N/m" }),
@@ -324,7 +324,7 @@ test("o lote exibe e aplica forças, momentos e cargas nas unidades selecionadas
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const pattern = JSON.parse(localStorage.getItem("kstruct.draft.v13")!)
+        const pattern = JSON.parse(localStorage.getItem("kstruct.draft.v14")!)
           .loadPatterns[0];
         return [
           pattern.uniform[0].qz,

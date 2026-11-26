@@ -7,6 +7,11 @@ export type UnitQuantity =
   | "distributedLoad"
   | "modulus";
 
+export type MeasuredQuantity =
+  | UnitQuantity
+  | "translationStiffness"
+  | "rotationStiffness";
+
 export interface UnitPreferences {
   length: "m" | "cm" | "mm";
   section: "m" | "cm" | "mm";
@@ -96,7 +101,21 @@ export const QUANTITY_LABELS: Record<UnitQuantity, string> = {
   modulus: "Módulo de elasticidade",
 };
 
-function selectedUnit(quantity: UnitQuantity, units: UnitPreferences) {
+function selectedUnit(
+  quantity: MeasuredQuantity,
+  units: UnitPreferences,
+): UnitDefinition {
+  if (quantity === "translationStiffness") {
+    const force = selectedUnit("force", units);
+    const length = selectedUnit("length", units);
+    const label = `${force.label}/${length.label}`;
+    return { value: label, label, si: force.si / length.si };
+  }
+  if (quantity === "rotationStiffness") {
+    const moment = selectedUnit("moment", units);
+    const label = `${moment.label}/rad`;
+    return { ...moment, value: label, label };
+  }
   const unit = definitions[quantity].find(
     (option) => option.value === units[quantity],
   );
@@ -105,7 +124,7 @@ function selectedUnit(quantity: UnitQuantity, units: UnitPreferences) {
 }
 
 export function unitLabel(
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
 ): string {
   return selectedUnit(quantity, units).label;
@@ -113,7 +132,7 @@ export function unitLabel(
 
 export function fromSI(
   valueSI: number,
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
 ): number {
   const factor = selectedUnit(quantity, units).si;
@@ -122,7 +141,7 @@ export function fromSI(
 
 export function toSI(
   valueDisplay: number,
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
 ): number {
   const factor = selectedUnit(quantity, units).si;
@@ -141,7 +160,7 @@ export function parseUnitNumber(text: string): number | null {
 /** Uma entrada sem alteração conserva o SI original, inclusive seus últimos bits. */
 export function parseUnitInput(
   text: string,
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
   originalSI?: number,
 ): number | null {
@@ -160,7 +179,7 @@ export function parseUnitInput(
 /** O texto editável mantém a precisão do Number; o arredondamento é só visual. */
 export function formatUnitInput(
   valueSI: number,
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
 ): string {
   return String(fromSI(valueSI, quantity, units));
@@ -179,7 +198,7 @@ export function formatUnitValue(value: number): string {
 /** Retorna somente o número. O rótulo da unidade vem de unitLabel. */
 export function formatQuantity(
   valueSI: number,
-  quantity: UnitQuantity,
+  quantity: MeasuredQuantity,
   units: UnitPreferences = DEFAULT_UNITS,
 ): string {
   return formatUnitValue(fromSI(valueSI, quantity, units));

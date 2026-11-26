@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v13, migração v1 a v12, geometria, validação e histórico     | `src/domain`                 |
+| Domínio           | Formato v14, migração v1 a v13, geometria, validação e histórico     | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v13 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v14 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. A captura é medida em pixels de tela na seguinte ordem de prioridade: nós do plano ativo (12 px), ponto médio e pé da perpendicular sobre barras inteiramente contidas no plano ativo (12 px, vencendo a menor distância em tela), guias de eixos e pavimentos no modo espacial (10 px por eixo) e, por fim, a malha de 0,50 m. O modo Orto e sua inversão temporária por `Shift` são preservados na captura de barra. A entrada por coordenadas relativas (`ΔU`/`ΔV` no plano ativo, preservando a cota normal) aplica exatamente o par informado, aceitando vírgula e ponto. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -70,6 +70,12 @@ O v11 inclui `supportFrame` opcional em cada nó. A migração do v10 preserva o
 O adaptador envia x′ e y′ como `lcs 6` no registro `Node`. Os vínculos usam os graus locais, e `NodalLoad` usa `cstype 0` em nós orientados para que o OOFEM projete as componentes globais. O parser recompõe as translações, rotações, forças e momentos globais antes de verificar equilíbrio e montar deformadas e combinações. A tabela e o CSV obtêm as componentes locais projetando as reações globais no mesmo referencial. O pré-processador examina movimento de corpo rígido por componente. Uma restrição de translação na direção unitária a, aplicada a um nó de posição relativa r, gera a linha (a, r × a), e uma restrição de rotação gera (0, a). No plano, usam-se apenas UX, UZ e RY.
 
 Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interface exibe pZ em kN/m², UZ na unidade de deslocamento selecionada (mm por padrão) e os momentos Mx e My na unidade de momento selecionada por metro de largura (kN·m/m por padrão). Os eixos locais do painel coincidem com X e Y globais. Mx positivo representa tração na face inferior na direção X, e My positivo representa tração na face inferior na direção Y. Os mapas usam a média por elemento. A consulta central usa os deslocamentos nodais e os momentos recuperados nos vértices.
+
+### Molas nodais de pórtico
+
+O v14 acrescenta `node.springs`, um mapa opcional de rigidezes escalares na base `supportFrame`. A migração de v13 mantém os IDs e vínculos rígidos. Em cada direção, uma flag em `restraints` indica vínculo rígido, k positivo indica mola linear, e ausência das duas indica grau livre. As unidades internas são N/m e N·m/rad. As linhas do teste de movimento de corpo rígido representam tanto vínculos prescritos quanto direções de mola com k positivo.
+
+O OOFEM 3.0 usa `Spring` com direção explícita e um nó de solo auxiliar fixo. Os modos 2 e 3 representam translação em XZ e rotação em Y. Os modos 4 e 5 representam translação e rotação ao longo de qualquer eixo no espaço. As reações elásticas são −k·u a partir do deslocamento impresso na base do nó e entram no equilíbrio em eixos globais. As reações prescritas vêm da tabela do OOFEM para as direções rígidas. O nó de solo é interno à entrada do solver. [Implementação de Spring no OOFEM 3.0](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/springelement.C)
 
 ## Consistência
 

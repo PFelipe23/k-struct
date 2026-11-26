@@ -65,6 +65,7 @@ import {
   type WorkPlane,
 } from "./domain/geometry";
 import { historyReducer } from "./domain/history";
+import { hasElasticSupport, hasSupport } from "./domain/supports";
 import { applyTabularImport } from "./domain/tabularImport";
 import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
 import { UnitsDialog, useUnits } from "./components/Units";
@@ -141,6 +142,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v14") ??
       localStorage.getItem("kstruct.draft.v13") ??
       localStorage.getItem("kstruct.draft.v12") ??
       localStorage.getItem("kstruct.draft.v11") ??
@@ -403,7 +405,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v13", serialized);
+      localStorage.setItem("kstruct.draft.v14", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1375,7 +1377,11 @@ export default function App() {
                     <CircleDot size={12} />
                     {n.name}
                     <small>
-                      {Object.values(n.restraints).some(Boolean) ? "Apoio" : ""}
+                      {hasElasticSupport(n)
+                        ? "Apoio elástico"
+                        : hasSupport(n)
+                          ? "Apoio"
+                          : ""}
                     </small>
                   </button>
                 ))}

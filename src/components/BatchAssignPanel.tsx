@@ -243,7 +243,9 @@ export default function BatchAssignPanel({
                 ? "Misto"
                 : state === "restricted"
                   ? "Restringido"
-                  : "Livre";
+                  : state === "elastic"
+                    ? "Elástico"
+                    : "Livre";
             return (
               <label className="batch-row" key={dof}>
                 <span>

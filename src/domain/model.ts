@@ -13,7 +13,7 @@ import {
 import { offsetError, setOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
-import { supportBasis } from "./supports";
+import { hasSpring, supportBasis, supportDofs, supportsDof } from "./supports";
 import {
   coordinates,
   cross,
@@ -298,11 +298,12 @@ const supportFrameSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+const supportNodeSchema = nodeSchema.extend({
+  supportFrame: supportFrameSchema.optional(),
+});
 const projectV11 = projectV10.extend({
   schemaVersion: z.literal(11),
-  nodes: z
-    .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
-    .max(1000),
+  nodes: z.array(supportNodeSchema).max(1000),
 });
 const offsetEnd = z.strictObject({
   eccentricity: directionSchema,
@@ -323,7 +324,7 @@ const projectV12 = projectV11.extend({
     .max(1000),
 });
 const stiffnessFactor = finite.positive().optional();
-export const projectSchema = projectV12.extend({
+const projectV13 = projectV12.extend({
   schemaVersion: z.literal(13),
   members: z
     .array(
@@ -342,6 +343,26 @@ export const projectSchema = projectV12.extend({
           if (member.offsets) setOffsets(member, member.offsets);
           return member;
         }),
+    )
+    .max(1000),
+});
+const spring = finite.nonnegative().optional();
+export const projectSchema = projectV13.extend({
+  schemaVersion: z.literal(14),
+  nodes: z
+    .array(
+      supportNodeSchema.extend({
+        springs: z
+          .strictObject({
+            ux: spring,
+            uy: spring,
+            uz: spring,
+            rx: spring,
+            ry: spring,
+            rz: spring,
+          })
+          .optional(),
+      }),
     )
     .max(1000),
 });
@@ -410,7 +431,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 13,
+    schemaVersion: 14,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -712,6 +733,15 @@ export function parseProject(source: string): Project {
     const old = projectV12.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 13 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 13
+  ) {
+    const old = projectV13.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 14 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -735,8 +765,27 @@ export function parseProject(source: string): Project {
       const reason = stiffnessFactorError(member.stiffness[key]);
       throw new Error(`Barra ${name} · ${stiffnessLabels[key]}. ${reason}`);
     }
+    const springIssue = parsed.error.issues.find(
+      ({ path }) =>
+        path[0] === "nodes" && path[2] === "springs" && path.length === 4,
+    );
+    if (
+      springIssue &&
+      value &&
+      typeof value === "object" &&
+      "nodes" in value &&
+      Array.isArray(value.nodes)
+    ) {
+      const [, index, , dof] = springIssue.path;
+      const node = value.nodes[Number(index)];
+      const name =
+        typeof node?.name === "string" ? node.name : String(Number(index) + 1);
+      throw new Error(
+        `Nó ${name} · ${String(dof).toUpperCase()}. Informe uma rigidez de mola finita e não negativa.`,
+      );
+    }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 13, com valores numéricos finitos e fatores de rigidez positivos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 14, com valores numéricos finitos.",
     );
   }
   const errors = referenceErrors(parsed.data);
@@ -801,6 +850,17 @@ export function referenceErrors(p: Project): string[] {
   }
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   for (const n of p.nodes) {
+    for (const dof of supportDofs) {
+      if (!hasSpring(n, dof)) continue;
+      if (n.restraints[dof])
+        errors.push(
+          `${n.name} (${n.id}): ${dof.toUpperCase()} tem mola e restrição rígida simultâneas.`,
+        );
+      if (p.mode === "planar" && (dof === "uy" || dof === "rx" || dof === "rz"))
+        errors.push(
+          `${n.name} (${n.id}): mola ${dof.toUpperCase()} fora do plano XZ.`,
+        );
+    }
     if (!n.supportFrame) continue;
     if (n.supportFrame.kind !== p.mode) {
       errors.push(
@@ -1069,9 +1129,9 @@ export function analysisErrors(p: Project): string[] {
       for (const k of coordinates) {
         const axis = basis[k];
         // a·(u + ω × r) = a·u + (r × a)·ω.
-        if (n.restraints[`u${k}`])
+        if (supportsDof(n, `u${k}`))
           constraints.push(row(axis, cross(pos, axis)));
-        if (n.restraints[`r${k}`]) constraints.push(row(origin, axis));
+        if (supportsDof(n, `r${k}`)) constraints.push(row(origin, axis));
       }
     }
     const dofs = p.mode === "planar" ? 3 : 6;
