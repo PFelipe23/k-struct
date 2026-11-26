@@ -1,7 +1,19 @@
 import MemberOffsetsEditor from "./MemberOffsetsEditor";
 import { memberAxis, setOffsets } from "../domain/memberOffsets";
 import SectionPreview from "./SectionPreview";
-import { dimensions, geometryErrors, shapeNames } from "../domain/sections";
+import {
+  dimensions,
+  geometryErrors,
+  sectionProperties,
+  shapeNames,
+} from "../domain/sections";
+import {
+  activeStiffnessComponents,
+  grossStiffness,
+  memberStiffnessError,
+  setStiffnessFactor,
+  stiffnessLabels,
+} from "../domain/memberStiffness";
 import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -35,12 +47,17 @@ import {
   formatUnitInput,
   parseUnitInput,
   unitLabel,
+  fromSI,
   type UnitQuantity,
 } from "../units";
 import { useUnits } from "./Units";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
 import { selectionKey } from "../domain/selection";
+
+const stiffnessNumber = new Intl.NumberFormat("pt-BR", {
+  maximumSignificantDigits: 7,
+});
 
 export function NumberField({
   label,
@@ -367,6 +384,8 @@ export default function Inspector({
     (s) => s.id === (member?.sectionId ?? p.sections[0].id),
   )!;
   const material = p.materials.find((m) => m.id === section.materialId)!;
+  const geometry = member && sectionProperties(section);
+  const gross = geometry && grossStiffness(geometry, material);
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
   const ul = sumUniform(pattern, member?.id ?? "");
@@ -749,6 +768,71 @@ export default function Inspector({
                 />
               ))}
               <SectionPreview geometry={section} roll={member?.roll} />
+              {member && geometry && gross && (
+                <details className="member-stiffness">
+                  <summary>Modificadores de rigidez</summary>
+                  <p className="help">
+                    {spatial
+                      ? "EA axial em x, EIy e EIz em flexão nos eixos locais y e z, GJ em torção em x."
+                      : "EA axial em x local e EIy em flexão em torno de y local."}{" "}
+                    Use fatores adimensionais maiores que zero.
+                  </p>
+                  {activeStiffnessComponents(p.mode).map((key) => (
+                    <NumberField
+                      key={key}
+                      label={`Fator ${stiffnessLabels[key]}`}
+                      value={member.stiffness?.[key] ?? 1}
+                      validate={(value) =>
+                        memberStiffnessError(p.mode, geometry, material, {
+                          ...member.stiffness,
+                          [key]: value,
+                        })
+                      }
+                      onChange={(value) =>
+                        edit((draft) =>
+                          setStiffnessFactor(
+                            draft.members.find(({ id }) => id === member.id)!,
+                            key,
+                            value,
+                          ),
+                        )
+                      }
+                    />
+                  ))}
+                  <table aria-label="Rigidez bruta e efetiva da barra">
+                    <thead>
+                      <tr>
+                        <th scope="col">Rigidez</th>
+                        <th scope="col">Bruta</th>
+                        <th scope="col">Efetiva</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeStiffnessComponents(p.mode).map((key) => {
+                        const unit =
+                          key === "ea" ? units.force : `${units.force}·m²`;
+                        const value = (rigidity: number) =>
+                          stiffnessNumber.format(
+                            fromSI(rigidity, "force", units),
+                          );
+                        return (
+                          <tr key={key}>
+                            <th scope="row">
+                              {stiffnessLabels[key]} <small>{unit}</small>
+                            </th>
+                            <td>{value(gross[key])}</td>
+                            <td>
+                              {value(
+                                gross[key] * (member.stiffness?.[key] ?? 1),
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </details>
+              )}
               <button onClick={() => onSections(section.id)}>
                 Catálogo de seções
               </button>

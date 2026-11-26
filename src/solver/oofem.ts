@@ -1,4 +1,3 @@
-import { sectionProperties } from "../domain/sections";
 import {
   add,
   coordinates,
@@ -23,7 +22,7 @@ import { memberAxis } from "../domain/memberOffsets";
 import { rigidGroups, rigidJointEquations } from "./rigidOffsets";
 import { beamMeshLayout, type SectionLocation } from "../domain/beamMesh";
 import { supportBasis, supportToGlobal } from "../domain/supports";
-import { elasticMaterialRecord } from "./elasticMaterial";
+import { beamPropertyRecords } from "./beamProperties";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
 export interface MeshNode extends Point3 {
@@ -132,9 +131,6 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   );
   const nodeNumber = (id: string) => modelNodes.get(id)!.number;
   const axes = new Map<string, ReturnType<typeof beamAxes>>();
-  const sectionElements = new Map(
-    p.sections.map((s) => [s.id, [] as number[]]),
-  );
   const memberElements = new Map<string, number[]>();
   const { stations: layout, rigidLinks } = beamMeshLayout(p);
   const lines = new Map<string, ReturnType<typeof memberAxis>>();
@@ -185,7 +181,6 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       });
       start = end;
     }
-    sectionElements.get(m.sectionId)!.push(...ids);
     memberElements.set(m.id, ids);
   }
   const sets: string[] = [],
@@ -194,12 +189,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     sets.push(`Set ${sets.length + 1} ${value}`);
     return sets.length;
   };
-  const cs = p.sections.map((s, i) => {
-    const ids = sectionElements.get(s.id)!;
-    const { A, Iy, Iz, J } = sectionProperties(s);
-    const spatialProperties = spatial ? ` Iz ${Iz} Ik ${J}` : "";
-    return `SimpleCS ${i + 1} area ${A} Iy ${Iy}${spatialProperties} beamShearCoeff 1.e18 material ${p.materials.findIndex((m) => m.id === s.materialId) + 1} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`;
-  });
+  const properties = beamPropertyRecords(p, memberElements, set);
   for (const n of p.nodes) {
     const fixed = dofs.filter(([key]) => n.restraints[key]).map(([, d]) => d);
     if (fixed.length)
@@ -299,7 +289,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${nodes.length} nelem ${elements.length} ncrosssect ${cs.length} nmat ${p.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${nodes.length} nelem ${elements.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
       const basis = n.objectId && frames.get(n.objectId);
       const lcs = basis
@@ -319,8 +309,8 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       const z = axes.get(e.memberId)![2];
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
-    ...cs,
-    ...p.materials.map((material, i) => elasticMaterialRecord(material, i + 1)),
+    ...properties.sections,
+    ...properties.materials,
     ...bcs,
     "ConstantFunction 1 f(t) 1",
     ...sets,

@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v12, migração v1 a v11, geometria, validação e histórico     | `src/domain`                 |
+| Domínio           | Formato v13, migração v1 a v12, geometria, validação e histórico     | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v12 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v13 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. A captura é medida em pixels de tela na seguinte ordem de prioridade: nós do plano ativo (12 px), ponto médio e pé da perpendicular sobre barras inteiramente contidas no plano ativo (12 px, vencendo a menor distância em tela), guias de eixos e pavimentos no modo espacial (10 px por eixo) e, por fim, a malha de 0,50 m. O modo Orto e sua inversão temporária por `Shift` são preservados na captura de barra. A entrada por coordenadas relativas (`ΔU`/`ΔV` no plano ativo, preservando a cota normal) aplica exatamente o par informado, aceitando vírgula e ponto. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -42,6 +42,8 @@ O cadastro aceita valores finitos com E > 0 em Pa, 0 ≤ ν < 0,5, ρ > 0 em kg/
 ## Unidades e sinais
 
 O esquema v10 discrimina as seções por `shape` e persiste somente os dados de identificação, material e dimensões da forma em metros. Projetos e rascunhos v1 a v9 passam pela migração que identifica os retângulos como `rectangle` e preserva ID, largura, altura e material. As barras continuam vinculadas por `sectionId`. A prévia do catálogo, o inspetor e o adaptador OOFEM usam `sectionProperties` de `src/domain/sections.ts`. O adaptador escreve A e Iy em `Beam2d` e acrescenta Iz e J (`Ik`) em `Beam3d`. A mudança de forma ou de atribuição passa pelo histórico e invalida os resultados da revisão.
+
+O v13 guarda os fatores em `member.stiffness`. As barras de v12 migram sem fatores atribuídos. Cada componente ausente vale 1. O adaptador estático mantém A, densidade, ν e α. Para um fator axial a, usa E′ = aE em um material equivalente do deck e multiplica Iy, Iz e J pelos respectivos fatores divididos por a. O coeficiente de cisalhamento também é dividido por a para manter a rigidez de cisalhamento. Isso preserva a área, o volume e a massa geométrica. O catálogo e as cargas são lidos do projeto original. As inércias equivalentes do deck pertencem à representação estática. Uma análise dinâmica deverá usar as inércias geométricas na massa rotacional.
 
 Persistência e entrada do solver em N, m, kg, s e rad. As preferências locais de apresentação selecionam comprimentos (m/cm/mm), dimensões de seção (m/cm/mm), deslocamentos (m/cm/mm), forças (N/kN), momentos (N·m/kN·m), cargas distribuídas (N/m ou kN/m) e E (MPa/GPa). Os padrões continuam m, cm, mm, kN, kN·m, kN/m e GPa, respectivamente. Rotações nas tabelas permanecem em mrad, orientação da seção em graus e pressão da laje em kN/m², sempre identificadas.
 
