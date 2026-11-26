@@ -306,7 +306,12 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       );
     const joints = [m.start, ...interior, m.end];
     const children = joints.slice(0, -1).map((start, i) => {
-      const child = { ...m, start, end: joints[i + 1] };
+      const child = {
+        ...m,
+        start,
+        end: joints[i + 1],
+        ...(m.stiffness ? { stiffness: { ...m.stiffness } } : {}),
+      };
       splitOffsets(
         m,
         nodes.get(m.start)!,

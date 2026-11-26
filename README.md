@@ -17,7 +17,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
-- Salvar e reabrir `.kstruct.json` no esquema v12, com migração dos projetos v1 a v11 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v13, com migração dos projetos v1 a v12 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -118,6 +118,8 @@ Para testar outro módulo, selecione o material, clique em **Duplicar material**
 No explorador do **Modelo**, expanda **Seções** e clique no nome de um perfil. O botão **Catálogo de seções** também abre o catálogo pelo inspetor de uma barra. Em **Nova seção**, escolha a forma e o material, dê um nome e informe as dimensões na unidade de seção selecionada (cm por padrão). O tubo usa diâmetro externo e espessura de parede. O perfil I usa altura total, largura das mesas e espessuras de mesa e alma.
 
 Para aplicar o perfil, selecione a barra e altere **Seção da barra**. Para lançamentos novos, use **Seção ativa**. O inspetor mostra o contorno, os eixos locais, a área e as propriedades Iy, Iz e J na unidade de seção elevada à segunda e à quarta potência, respectivamente. Editar uma seção compartilhada atualiza todas as barras que a referenciam. Analise novamente o modelo para obter os resultados da nova revisão.
+
+Para ajustar uma única barra, abra **Modificadores de rigidez** no inspetor. Informe fatores adimensionais para EA e EIy em XZ, ou EA, EIy, EIz e GJ em XYZ. A tabela mostra a rigidez bruta e a efetiva lado a lado. Use 1 para a rigidez de catálogo. Os fatores precisam ser positivos, pois zerar uma rigidez pode introduzir um mecanismo. Copiar ou dividir a barra conserva os fatores. [Ensaios de rigidez](docs/VALIDATION.md#ks-24--modificadores-de-rigidez)
 
 ### Laje retangular isolada
 

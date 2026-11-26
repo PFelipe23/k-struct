@@ -291,6 +291,7 @@ export function planTransform(
         sectionId: m.sectionId,
         roll,
         ...(offsets ? { offsets } : {}),
+        ...(m.stiffness ? { stiffness: { ...m.stiffness } } : {}),
       });
       map.members.set(m.id, bar.id);
       plan.selected.push({ kind: "member", id: bar.id });

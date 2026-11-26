@@ -1,4 +1,5 @@
 import { centeredOffsets } from "./memberOffsets";
+import { sameStiffness } from "./memberStiffness";
 import { distance, tolerance } from "./geometry";
 import {
   endpoints,
@@ -257,6 +258,13 @@ export function planRepair(
       );
     }
     const ends = dst.offsets ?? centeredOffsets;
+    if (ids.some((id) => !sameStiffness(members.get(id)!, dst, source.mode))) {
+      ask(
+        ["stiffness", ...ids],
+        `Conservar os modificadores de rigidez de ${named(dst)}`,
+        acknowledge,
+      );
+    }
     if (
       ids.some((id) => {
         const source = members.get(id)!.offsets ?? centeredOffsets;

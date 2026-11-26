@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
+import {
+  geometrySchemas,
+  geometryErrors,
+  defaultGeometry,
+  sectionProperties,
+} from "./sections";
+import { memberStiffnessError } from "./memberStiffness";
 import { offsetError, setOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
@@ -298,13 +304,35 @@ const offsetEnd = z.strictObject({
   eccentricity: directionSchema,
   rigidLength: finite.nonnegative(),
 });
-export const projectSchema = projectV11.extend({
+const offsetMemberSchema = memberSchema.extend({
+  offsets: z.strictObject({ i: offsetEnd, j: offsetEnd }).optional(),
+});
+const projectV12 = projectV11.extend({
   schemaVersion: z.literal(12),
   members: z
     .array(
-      memberSchema
+      offsetMemberSchema.transform((member) => {
+        if (member.offsets) setOffsets(member, member.offsets);
+        return member;
+      }),
+    )
+    .max(1000),
+});
+const stiffnessFactor = finite.positive().optional();
+export const projectSchema = projectV12.extend({
+  schemaVersion: z.literal(13),
+  members: z
+    .array(
+      offsetMemberSchema
         .extend({
-          offsets: z.strictObject({ i: offsetEnd, j: offsetEnd }).optional(),
+          stiffness: z
+            .strictObject({
+              ea: stiffnessFactor,
+              eiy: stiffnessFactor,
+              eiz: stiffnessFactor,
+              gj: stiffnessFactor,
+            })
+            .optional(),
         })
         .transform((member) => {
           if (member.offsets) setOffsets(member, member.offsets);
@@ -378,7 +406,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 12,
+    schemaVersion: 13,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -671,10 +699,19 @@ export function parseProject(source: string): Project {
     const old = projectV11.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 12 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 12
+  ) {
+    const old = projectV12.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 13 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 12, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 13, com valores numéricos finitos e fatores de rigidez positivos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -751,6 +788,10 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${n.name}: ${(error as Error).message}`);
     }
   }
+  const sections = new Map(p.sections.map((s) => [s.id, s]));
+  const materials = new Map(
+    p.materials.map((material) => [material.id, material]),
+  );
   for (const m of p.members) {
     if (!nodes.has(m.start) || !nodes.has(m.end))
       errors.push(`${m.name}: nó de extremidade inexistente.`);
@@ -760,8 +801,20 @@ export function referenceErrors(p: Project): string[] {
       const error = offsetError(m, a, b, p.mode);
       if (error) errors.push(error);
     }
-    if (!p.sections.some((s) => s.id === m.sectionId))
-      errors.push(`${m.name}: seção inexistente.`);
+    const section = sections.get(m.sectionId);
+    if (!section) errors.push(`${m.name}: seção inexistente.`);
+    else if (m.stiffness) {
+      const material = materials.get(section.materialId);
+      if (material) {
+        const error = memberStiffnessError(
+          p.mode,
+          sectionProperties(section),
+          material,
+          m.stiffness,
+        );
+        if (error) errors.push(`${m.name} (${m.id}): ${error}`);
+      }
+    }
   }
   try {
     connectionStations(p);

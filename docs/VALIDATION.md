@@ -304,3 +304,23 @@ O ensaio de torção compara o nó excêntrico com uma força e um binário apli
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/member-offsets.test.ts tests/member-offsets.integration.test.ts
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-offsets.spec.ts
 ```
+
+## KS-24 · modificadores de rigidez
+
+O modelo espacial tem dois balanços de 3 m ao longo de X, cada um com a mesma seção retangular de 0,15 × 0,20 m. O aço tem E = 200 GPa, ν = 0,30 e massa específica de 7.850 kg/m³. Em cada ponta livre atuam Fx = 1.200 N, Fy = 300 N, Fz = −900 N e Mx = 15 N·m. Os valores abaixo usam A = 0,03 m², Iy = 0,0001 m⁴, Iz = 0,00005625 m⁴ e J = 0,000121808661794 m⁴.
+
+| Fator aplicado ao primeiro balanço | Referência | Fator 1 | Fator 0,5 |
+| --- | --- | --- | --- |
+| EA | UX = Fx·L/(EA) | +0,0006 mm | +0,0012 mm |
+| EIy | UZ = Fz·L³/(3EIy) | −0,405 mm | −0,810 mm |
+| EIz | UY = Fy·L³/(3EIz) | +0,240 mm | +0,480 mm |
+| GJ | RX = Mx·L/(GJ) | +0,00480261413 mrad | +0,00960522826 mrad |
+
+Aplique um fator por vez. A tolerância absoluta é de 5 × 10⁻¹² m ou rad para as quatro respostas. As três outras componentes do primeiro balanço, as respostas do segundo e as reações dos engastes conservam os valores de referência. Cada barra tem massa geométrica de 706,5 kg, calculada por ρAL com a área e a massa específica exportadas. Um ensaio XZ com balanço de 6 m e Fz = −600 N compara −2,16 mm para EIy bruto e −4,32 mm para fator 0,5, com tolerância de 5 × 10⁻¹¹ m. A exportação com todos os fatores iguais a 1 coincide com a de um projeto migrado da versão 12.
+
+Os ensaios usam o OOFEM 3.0 fixado pelo KStruct. A entrada espacial usa elementos `Beam3d` com registros `SimpleCS` e `IsoLE`. Os testes de interface verificam os controles ativos em XZ e XYZ, a rejeição do zero, a invalidação dos resultados, o histórico e o salvamento e reabertura do projeto.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/member-stiffness.test.ts tests/member-stiffness.integration.test.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-stiffness.spec.ts
+```

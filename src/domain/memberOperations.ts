@@ -1,4 +1,5 @@
 import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
+import { sameStiffness } from "./memberStiffness";
 import {
   add,
   beamAxes,
@@ -232,6 +233,10 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
     intervals.add(Math.min(i, j));
     if (m.sectionId !== survivor.sectionId)
       throw new Error("As barras precisam ter a mesma seção.");
+    if (!sameStiffness(m, survivor, p.mode))
+      throw new Error(
+        "As barras precisam ter os mesmos modificadores de rigidez.",
+      );
     const segment = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
     const [, , localZ] = beamAxes(segment.start, segment.end, m.roll);
     if (length(cross(z, localZ)) > 1e-8)
