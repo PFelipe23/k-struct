@@ -68,7 +68,12 @@ export interface MeshElement {
   t0: number;
   t1: number;
 }
+export type ElementIntensity = Pick<MeshElement, "t0" | "t1"> & {
+  qStart: Point3;
+  qEnd: Point3;
+};
 export interface AnalysisInput {
+  memberIntensities?: Record<string, ElementIntensity[]>;
   deck: string;
   nodes: MeshNode[];
   elements: MeshElement[];
@@ -109,6 +114,7 @@ export interface StructuralResult {
   members: Record<string, Station[]>;
 }
 export interface AnalysisResult extends StructuralResult {
+  memberIntensities?: AnalysisInput["memberIntensities"];
   caseId: string;
   solver: string;
   completedAt: string;
@@ -286,6 +292,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     );
   }
   const densities = new Map<string, LinearDensity[]>();
+  const uniform = new Map<string, Point3>();
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
     if (!factor.factor) continue;
@@ -425,12 +432,29 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         { x: l.qx, y: l.qy, z: l.qz },
         axes.get(l.memberId)!,
       );
-      const values = spatial ? [x, y, z, 0, 0, 0] : [x, z, 0];
+      const [qx, qy, qz] = scaleLoad([x, y, z]);
+      uniform.set(
+        m.id,
+        add(uniform.get(m.id) ?? origin, { x: qx, y: qy, z: qz }),
+      );
+      const values = spatial ? [qx, qy, qz, 0, 0, 0] : [qx, qz, 0];
       bcs.push(
-        `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${scaleLoad(values).join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
+        `ConstantEdgeLoad ${bcs.length + 1} loadTimeFunction 1${spatial ? ` dofs ${dofList}` : ""} Components ${values.length} ${values.join(" ")} loadType 3 csType 1 set ${set(`elementedges ${ids.length} ${ids.join(" ")}`)}`,
       );
     }
   }
+  // Retain the same factored local edge loads used by the native deck for section queries.
+  const memberIntensities: Record<string, ElementIntensity[]> =
+    Object.fromEntries(
+      [...memberElements].map(([id, numbers]) => [
+        id,
+        numbers.map((number) => {
+          const { t0, t1 } = elements[number - 1];
+          const q = uniform.get(id) ?? origin;
+          return { t0, t1, qStart: q, qEnd: q };
+        }),
+      ]),
+    );
   for (const [id, profiles] of densities) {
     const line = lines.get(id)!,
       faceI = membersById.get(id)!.offsets?.i.rigidLength ?? 0;
@@ -442,6 +466,9 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       stations,
       profiles,
     )) {
+      const density = memberIntensities[id][index];
+      density.qStart = add(density.qStart, qStart);
+      density.qEnd = add(density.qEnd, qEnd);
       const values = [...edgeComponents(qStart), ...edgeComponents(qEnd)];
       bcs.push(
         `LinearEdgeLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")} loadType 3 csType 1 set ${set(`elementedges 2 ${ids[index]} 1`)}`,
@@ -533,7 +560,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     ...sets,
     "",
   ].join("\n");
-  return { deck, nodes, elements, project: p, caseId };
+  return { deck, nodes, elements, project: p, caseId, memberIntensities };
 }
 
 function numberList(line: string) {
@@ -807,6 +834,7 @@ export function parseOofemOutput(
     ),
     reactions,
     members,
+    memberIntensities: input.memberIntensities,
   };
 }
 

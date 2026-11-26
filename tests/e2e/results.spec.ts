@@ -9,6 +9,8 @@ import {
 import { runDeck } from "../fixtures/solve-oofem";
 import { openProjectInBrowser } from "../fixtures/open-project";
 import { familyBeam } from "../fixtures/combination-families";
+import { pointLoadBeam } from "../fixtures/member-point-loads";
+import { diagramEnvelope } from "../fixtures/diagram-envelope";
 import { twoSpanBeam } from "../fixtures/two-span-beam";
 import {
   planarNodalEnvelope,
@@ -902,9 +904,12 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
     .locator(".envelope-max-line polyline")
     .evaluate((element) => {
       const line = element as SVGPolylineElement;
-      const { x, y } = line.points
-        .getItem(4)
-        .matrixTransform(line.getScreenCTM()!);
+      const points = Array.from(line.points);
+      const midX = (points[0].x + points.at(-1)!.x) / 2;
+      const middle = points.reduce((a, b) =>
+        Math.abs(a.x - midX) < Math.abs(b.x - midX) ? a : b,
+      );
+      const { x, y } = middle.matrixTransform(line.getScreenCTM()!);
       return { x, y };
     });
   await page.mouse.click(middle.x, middle.y);
@@ -1563,4 +1568,156 @@ test("envelope nodal XYZ exporta as seis componentes simultâneas e a origem de 
       JSON.parse(sessionStorage.getItem("e2e-case-starts") ?? "[]"),
     ),
   ).toHaveLength(2);
+});
+
+test("consulta o diagrama em x e x/L, escolhe a face e sincroniza cursor, tabela e unidades", async ({
+  page,
+}) => {
+  const executable = process.env.OOFEM_BIN;
+  test.skip(
+    !executable,
+    "Configure OOFEM_BIN para o ensaio com carga concentrada.",
+  );
+  await page.exposeFunction("solveQueueDeck", (deck: string) =>
+    runDeck(deck, executable!),
+  );
+  await bridge(page, { realSolver: true });
+  await page.goto("/");
+  const p = pointLoadBeam();
+  p.mesh.segmentsPerMember = 3;
+  await openProjectInBrowser(page, "forca.kstruct.json", serializeProject(p));
+  await page.getByRole("button", { name: "Analisar", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await page
+    .getByRole("button", { name: "Consultar seção", exact: true })
+    .click();
+  const table = page.getByRole("table", {
+    name: "Esforços na seção consultada",
+  });
+  const position = page.getByLabel("Posição consultada");
+  const enter = async (label: string, value: string) => {
+    const input = page.getByRole("textbox", { name: label, exact: true });
+    await input.fill(value);
+    await input.press("Enter");
+  };
+  await page.getByLabel("Componente do diagrama").selectOption("v");
+  await enter("Distância x (m)", "2");
+  await expect(table.locator(".governing-force").last()).toHaveText("8");
+  await expect(
+    table.getByRole("cell", { name: "16", exact: true }),
+  ).toBeVisible();
+  await expect(position).toContainText("Amostra do OOFEM");
+  const marker = page.locator("circle.section-cursor").first();
+  await expect(marker).toBeVisible();
+  const ordinate = await marker.getAttribute("cy");
+  await page.getByLabel("Face da descontinuidade").selectOption("right");
+  await expect(marker).not.toHaveAttribute("cy", ordinate!);
+  await expect(table.locator(".governing-force").last()).toHaveText("-4");
+  await page.getByRole("button", { name: "Exibição", exact: true }).click();
+  await page.getByRole("button", { name: "Unidades", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Unidades", exact: true });
+  await dialog
+    .getByRole("combobox", { name: "Comprimentos", exact: true })
+    .selectOption("cm");
+  await dialog.getByRole("button", { name: "Aplicar unidades" }).click();
+  await expect(page.getByLabel("Distância x (cm)")).toHaveValue("200");
+  await enter("Distância x (cm)", "200");
+  await expect(table.locator(".governing-force").last()).toHaveText("-4");
+  await page.getByLabel("Coordenada da consulta").selectOption("ratio");
+  await enter("Posição x/L", "1/3");
+  await expect(position).toContainText("x = 200 cm");
+  await expect(page.getByLabel("Face da descontinuidade")).toHaveValue("right");
+  await enter("Posição x/L", "1,2");
+  await expect(page.getByRole("alert")).toContainText("entre 0 e 1");
+  await expect(table.locator(".governing-force").last()).toHaveText("-4");
+  await enter("Posição x/L", "0,5");
+  await expect(position).toContainText("Interpolação linear no trecho");
+  await expect(page.getByLabel("Estação x/L")).toHaveValue("");
+  await expect(
+    table.getByRole("cell", { name: "12", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Mensagens", exact: true }).click();
+  const axis = page.locator('line[data-member-id="V1"]').first();
+  const point = await axis.evaluate((e) => {
+    const line = e as SVGLineElement,
+      svg = line.ownerSVGElement!;
+    const p = svg.createSVGPoint();
+    p.x = (line.x1.baseVal.value + line.x2.baseVal.value) / 2;
+    p.y = (line.y1.baseVal.value + line.y2.baseVal.value) / 2;
+    const loc = p.matrixTransform(line.getScreenCTM()!);
+    return { x: loc.x, y: loc.y };
+  });
+  await page.mouse.click(point.x, point.y);
+  await expect(table).toBeVisible();
+  await expect(page.getByLabel("Barra da consulta")).toHaveValue("V1");
+  await expect(page.getByLabel("Distância x (cm)")).toHaveValue(
+    /^30[0-1]|^299/,
+  );
+});
+
+test("o extremo calculado do envelope recupera a combinação que governa entre estações", async ({
+  page,
+}) => {
+  const executable = process.env.OOFEM_BIN;
+  test.skip(!executable, "Configure OOFEM_BIN para o ensaio de envelope.");
+  await page.exposeFunction("solveQueueDeck", (deck: string) =>
+    runDeck(deck, executable!),
+  );
+  await bridge(page, { realSolver: true });
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "envelope.kstruct.json",
+    serializeProject(diagramEnvelope()),
+  );
+  const picker = page.getByLabel("Caso, combinação ou envelope");
+  await picker.selectOption("envelope:E");
+  await page
+    .getByRole("button", { name: "Analisar casos necessários" })
+    .click();
+  const region = page.getByRole("region", { name: "Resultados do envelope" });
+  const table = region.getByRole("table", {
+    name: "Esforços simultâneos do envelope",
+  });
+  await region.getByRole("button", { name: "Ir ao máximo" }).click();
+  const max = table.getByRole("row", { name: /Máximo/ }),
+    min = table.getByRole("row", { name: /Mínimo/ });
+  await expect(region.getByLabel("Posição consultada")).toContainText(
+    "Máximo · Lei do esforço · x = 3 m",
+  );
+  await expect(max).toContainText("[C-EL]");
+  await expect(max.locator(".governing-force")).toHaveText("45");
+  await expect(min).toContainText("[C-CP]");
+  await expect(min.locator(".governing-force")).toHaveText("42");
+  await region
+    .getByLabel("Domínio da busca de extremos")
+    .selectOption("samples");
+  await region.getByRole("button", { name: "Ir ao máximo" }).click();
+  await expect(region.getByLabel("Posição consultada")).toContainText(
+    "estações amostradas",
+  );
+  await expect(max).toContainText("[C-CP]");
+  await expect(max.locator(".governing-force")).toHaveText("42");
+  await picker.selectOption("combination:C-EL");
+  await page
+    .getByRole("button", { name: "Consultar seção", exact: true })
+    .click();
+  await page.getByLabel("Domínio da busca de extremos").selectOption("samples");
+  await page.getByRole("button", { name: "Ir ao máximo" }).click();
+  await expect(
+    page
+      .getByRole("table", { name: "Esforços na seção consultada" })
+      .locator(".governing-force")
+      .last(),
+  ).toHaveText("40");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  await page.getByLabel("qZ global", { exact: true }).fill("-20");
+  await page.getByLabel("qZ global", { exact: true }).press("Enter");
+  await expect(
+    page.getByRole("table", { name: "Esforços na seção consultada" }),
+  ).toHaveCount(0);
+  await expect(page.locator(".section-cursor")).toHaveCount(0);
 });
