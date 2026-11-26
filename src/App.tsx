@@ -78,6 +78,12 @@ import type { MemberLoadSelection } from "./components/memberLoadInput";
 import { memberAxis } from "./domain/memberOffsets";
 import { historyReducer } from "./domain/history";
 import { hasElasticSupport, hasSupport } from "./domain/supports";
+import { saveDiagnosticContext } from "./solver/diagnosticHistory";
+import {
+  diagnoseModel,
+  diagnoseSolverFailure,
+  type AnalysisDiagnostic,
+} from "./domain/diagnostics";
 import { applyTabularImport } from "./domain/tabularImport";
 import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
 import { UnitsDialog, useUnits } from "./components/Units";
@@ -278,6 +284,12 @@ export default function App() {
   const activeRunId = useRef<string | null>(null);
   const running = activeRun !== null;
   const [lastLog, setLastLog] = useState<RunLog | null>(null);
+  const [analysisDiagnostics, setAnalysisDiagnostics] = useState<
+    AnalysisDiagnostic[]
+  >([]);
+  const [diagnosticRevision, setDiagnosticRevision] = useState<number | null>(
+    null,
+  );
   const [showRunHistory, setShowRunHistory] = useState(false);
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque duas extremidades no plano de trabalho.",
@@ -846,12 +858,23 @@ export default function App() {
     if (activeRunId.current) return;
     const snapshot = current.current;
     const revision = modelRevision.current;
+    const modelIssues = diagnoseModel(snapshot);
+    setAnalysisDiagnostics(modelIssues);
+    setDiagnosticRevision(revision);
+    if (modelIssues.length) {
+      setDisplay("model");
+      setMessage(
+        `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.\n${modelIssues[0].message}`,
+      );
+      return;
+    }
     const requestedCase =
       snapshot.analysisCases.find((item) => item.id === caseId) ??
       snapshot.analysisCases[0];
     const id = uid();
     activeRunId.current = id;
     setActiveRun({ id, ready: false, cancelling: false });
+    let executionLogReceived = false;
     setCaseResults((results) => {
       const updated = new Map(results);
       updated.delete(requestedCase.id);
@@ -872,10 +895,24 @@ export default function App() {
         },
       );
       setLastLog(execution.log);
+      executionLogReceived = true;
+      const failedRunDiagnostics =
+        execution.log.summary.status !== "completed" ||
+        execution.output === null
+          ? diagnoseSolverFailure(
+              execution.log.summary.message,
+              execution.log.stdout,
+              execution.log.stderr,
+              input,
+            )
+          : [];
+      if (failedRunDiagnostics.length)
+        saveDiagnosticContext(id, snapshot, failedRunDiagnostics);
       const historyNotice = execution.historyError
         ? `\n${execution.historyError}`
         : "";
       if (modelRevision.current !== revision) {
+        setAnalysisDiagnostics(failedRunDiagnostics);
         setMessage(
           `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
         );
@@ -885,10 +922,12 @@ export default function App() {
         execution.log.summary.status !== "completed" ||
         execution.output === null
       ) {
+        setAnalysisDiagnostics(failedRunDiagnostics);
         setMessage(`${execution.log.summary.message}${historyNotice}`);
         return;
       }
       const completed = parseOofemOutput(execution.output, input);
+      setAnalysisDiagnostics([]);
       setCaseResults((results) =>
         new Map(results).set(completed.caseId, completed),
       );
@@ -897,11 +936,56 @@ export default function App() {
         `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. ${completed.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${historyNotice}`,
       );
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      const failure = e instanceof Error ? e.message : String(e);
+      const diagnostics = diagnoseSolverFailure(failure, "", "");
+      setAnalysisDiagnostics(diagnostics);
+      if (executionLogReceived)
+        saveDiagnosticContext(id, snapshot, diagnostics);
+      setMessage(failure);
     } finally {
       activeRunId.current = null;
       setActiveRun(null);
     }
+  };
+  const inspectDiagnostic = (diagnostic: AnalysisDiagnostic) => {
+    const available = diagnostic.objects.filter((object) =>
+      object.kind === "node"
+        ? p.nodes.some(({ id }) => id === object.id)
+        : object.kind === "member"
+          ? p.members.some(({ id }) => id === object.id)
+          : p.slabs.some(({ id }) => id === object.id),
+    );
+    if (!available.length) {
+      setMessage(
+        "Os objetos deste diagnóstico não existem mais no modelo atual.",
+      );
+      return;
+    }
+    setTab("Modelo");
+    setTool("select");
+    setPending(null);
+    const selectedSlab = available.find(({ kind }) => kind === "slab");
+    if (spatial && selectedSlab) {
+      const item = p.slabs.find(({ id }) => id === selectedSlab.id);
+      if (item)
+        setPlanes((current) => ({
+          ...current,
+          primary: { kind: "XY", guideId: item.levelId },
+        }));
+      setLayout("planes");
+      setActivePanel("primary");
+    } else if (spatial) {
+      setLayout((current) =>
+        current === "planes" || current === "single" ? "dual" : current,
+      );
+      setActivePanel("perspective");
+    } else {
+      setActivePanel("primary");
+    }
+    setDisplay("model");
+    setSelection(available);
+    if (available.length === 1) setRight(true);
+    setMessage(diagnostic.action);
   };
   const cancel = async () => {
     if (!activeRun?.ready || activeRun.cancelling) return;
@@ -1870,6 +1954,11 @@ export default function App() {
               message={message}
               running={running}
               cancelling={activeRun?.cancelling ?? false}
+              diagnostics={analysisDiagnostics}
+              diagnosticsNavigable={
+                diagnosticRevision === modelRevision.current
+              }
+              onInspectDiagnostic={inspectDiagnostic}
               openRunHistory={
                 lastLog ? () => setShowRunHistory(true) : undefined
               }
@@ -1979,7 +2068,15 @@ export default function App() {
         />
       )}
       {showRunHistory && (
-        <RunHistory latest={lastLog} onClose={() => setShowRunHistory(false)} />
+        <RunHistory
+          latest={lastLog}
+          project={p}
+          onClose={() => setShowRunHistory(false)}
+          onInspect={(diagnostic) => {
+            setShowRunHistory(false);
+            inspectDiagnostic(diagnostic);
+          }}
+        />
       )}
       {loadEditor && (
         <LoadDefinitions

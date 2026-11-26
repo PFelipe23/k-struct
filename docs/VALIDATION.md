@@ -450,3 +450,9 @@ No exemplo de dois vãos, posicione A, B e C em X = 0, 4 e 8 m. Use seção de 0
 | Apoio inclinado           | Gire os apoios em 30° e prescreva −4 mm em Z local nos três nós, com X local impedido. As componentes globais são +2 mm em X e −3,464102 mm em Z. Uma adulteração do deslocamento impresso pelo solver deve ser rejeitada.                                                            |
 
 Com `OOFEM_BIN` configurado conforme o projeto, execute `npm test -- tests/prescribed-motions.test.ts`. A comparação das condições de contorno usa tolerância absoluta de 10⁻¹² m ou rad, acrescida de 2 × 10⁻⁸ vezes o módulo prescrito para o arredondamento da saída. O ensaio de interface edita o padrão, desfaz, refaz, salva, reabre e consulta o cálculo. [Condição de contorno no OOFEM 3.0](https://github.com/oofem/oofem/blob/v3.0/src/core/boundarycondition.C)
+
+## KS-38 · diagnóstico e inspeção de objetos
+
+`tests/diagnostics.test.ts` cobre um nó isolado conhecido, um componente sem restrições suficientes, uma barra que referencia um nó inexistente e uma singularidade genérica sem destaque arbitrário. O contexto salvo do histórico só permite navegar quando o projeto atual é idêntico ao snapshot da execução. `tests/e2e/diagnostics.spec.ts` cobre o fluxo de análise, seleção do nó e chegada às propriedades.
+
+Com OOFEM 3.0 AMD64 configurado, `npm run check` passou com 217 testes, sem falhas, e `npm run build` passou. O E2E de localizar o nó isolado, navegar para propriedades, corrigir e reanalisar passou em Chromium usando a saída real capturada do OOFEM. A repetição com o comando Playwright do projeto não iniciou porque a porta 1420 já estava ocupada.
