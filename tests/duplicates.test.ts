@@ -59,6 +59,7 @@ function fixture() {
     nodal: [{ ...nodalLoad("C"), fx: 7 }],
     uniform: [{ ...uniformLoad("V2"), qx: 3 }],
     pressure: [],
+    selfWeight: { ...p.loadPatterns[0].selfWeight },
   });
   p.selectionGroups.push({
     id: "grp",

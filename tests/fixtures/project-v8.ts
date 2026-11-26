@@ -6,11 +6,19 @@ export function rectangle(section: Section) {
   return section;
 }
 
+// O campo selfWeight entrou na v20. Um arquivo antigo não o continha.
+export function legacyPatterns(project: Project) {
+  return project.loadPatterns.map(
+    ({ selfWeight: _weight, ...pattern }) => pattern,
+  );
+}
+
 // v1–v9 stored untagged rectangles. Preserve the original dimensions and IDs.
 export function projectV9(project: Project) {
   return {
     ...project,
     schemaVersion: 9,
+    loadPatterns: legacyPatterns(project),
     sections: project.sections.map((s) => {
       const { shape, ...legacy } = rectangle(s);
       return legacy;

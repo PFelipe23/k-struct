@@ -450,7 +450,7 @@ const projectV18 = projectV17.extend({
     .min(1)
     .max(100),
 });
-export const projectSchema = projectV18.extend({
+const projectV19 = projectV18.extend({
   schemaVersion: z.literal(19),
   loadPatterns: z
     .array(
@@ -470,6 +470,34 @@ export const projectSchema = projectV18.extend({
     .min(1)
     .max(100),
 });
+const selfWeightSchema = z
+  .object({
+    enabled: flag,
+    direction: z.enum(["+X", "-X", "+Y", "-Y", "+Z", "-Z"]),
+    gravity: finite.nonnegative(),
+    multiplier: finite.nonnegative(),
+  })
+  .strict();
+export const projectSchema = projectV19.extend({
+  schemaVersion: z.literal(20),
+  loadPatterns: z
+    .array(
+      projectV19.shape.loadPatterns.element.extend({
+        selfWeight: selfWeightSchema,
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export function defaultSelfWeight() {
+  return {
+    enabled: false,
+    direction: "-Z" as const,
+    gravity: 9.80665,
+    multiplier: 1,
+  };
+}
+
 export type Diaphragm = NonNullable<Project["diaphragms"]>[number];
 export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
@@ -536,7 +564,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 19,
+    schemaVersion: 20,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -562,6 +590,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
       {
         id: "G",
         name: "Carga permanente",
+        selfWeight: defaultSelfWeight(),
         nodal: [],
         uniform: [],
         pressure: [],
@@ -892,6 +921,23 @@ export function parseProject(source: string): Project {
     const old = projectV18.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 19 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 19
+  ) {
+    const old = projectV19.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 20,
+        loadPatterns: old.data.loadPatterns.map((p) => ({
+          ...p,
+          selfWeight: defaultSelfWeight(),
+        })),
+      };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -935,7 +981,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 19, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 20, com valores numéricos finitos.",
     );
   }
   const errors = referenceErrors(parsed.data);

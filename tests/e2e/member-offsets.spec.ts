@@ -6,6 +6,7 @@ import {
   nodalLoad,
   parseProject,
 } from "../../src/domain/model";
+import { legacyPatterns } from "../fixtures/project-v8";
 import { DEFAULT_UNITS } from "../../src/units";
 import { analyzeInBrowser } from "../fixtures/analyze-in-browser";
 
@@ -34,7 +35,10 @@ test("edita em centímetros, desfaz, salva e consulta as faces da barra no OOFEM
       );
       localStorage.setItem("kstruct.units", JSON.stringify(units));
     },
-    { project: initial, units: { ...DEFAULT_UNITS, length: "cm" } },
+    {
+      project: { ...initial, loadPatterns: legacyPatterns(initial) },
+      units: { ...DEFAULT_UNITS, length: "cm" },
+    },
   );
   await page.goto("/");
   const button = (name: string) =>

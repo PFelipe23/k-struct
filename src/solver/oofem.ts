@@ -31,6 +31,7 @@ import {
   loadInterval,
 } from "../domain/memberDistributedLoads";
 import { memberAxis } from "../domain/memberOffsets";
+import { selfWeightSummary } from "../domain/selfWeight";
 import { caseMotions } from "../domain/prescribedMotions";
 import { floorConstraints } from "./diaphragm";
 import { rigidJointEquations } from "./rigidOffsets";
@@ -266,6 +267,15 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const densities = new Map<string, LinearDensity[]>();
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
+    if (!factor.factor) continue;
+    if (
+      !spatial &&
+      pat.selfWeight.enabled &&
+      pat.selfWeight.direction.endsWith("Y")
+    )
+      throw new Error(
+        `O padrão ${pat.name} direciona o peso próprio para Y, fora do plano XZ.`,
+      );
     const scaleLoad = (values: number[]) => {
       const components = values.map((value) => value * factor.factor);
       if (components.some((value) => !Number.isFinite(value)))
@@ -363,7 +373,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         );
       }
     }
-    for (const l of pat.uniform) {
+    for (const l of [...pat.uniform, ...selfWeightSummary(p, pat).members]) {
       if (!factor.factor || !(l.qx || l.qy || l.qz)) continue;
       const m = membersById.get(l.memberId)!;
       if (m.offsets) {
@@ -848,6 +858,7 @@ export function checkEquilibrium(
   }
   for (const f of p.analysisCases.find((c) => c.id === caseId)!.factors) {
     const pat = p.loadPatterns.find((l) => l.id === f.patternId)!;
+    if (!f.factor) continue;
     for (const l of pat.nodal) accumulateNodal(l, f.factor);
     for (const load of pat.points ?? []) {
       const m = members.get(load.memberId)!;
@@ -883,7 +894,7 @@ export function checkEquilibrium(
       );
       accumulate(force, couple, interpolate(pa, pb, 0.5));
     }
-    for (const l of pat.uniform) {
+    for (const l of [...pat.uniform, ...selfWeightSummary(p, pat).members]) {
       const m = members.get(l.memberId)!;
       const a = byId.get(m.start)!,
         b = byId.get(m.end)!;

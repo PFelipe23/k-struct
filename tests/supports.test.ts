@@ -21,8 +21,16 @@ import { inclinedBeam, rollerAngle } from "./fixtures/inclined-beam";
 describe("referenciais nodais", () => {
   it("migra v10 com eixos globais e lê e escreve um referencial local em v11", () => {
     const legacy = beamExample();
+    const { loadPatterns, ...oldProject } = legacy;
     const migrated = parseProject(
-      JSON.stringify({ ...legacy, schemaVersion: 10 }),
+      JSON.stringify({
+        ...oldProject,
+        schemaVersion: 10,
+        loadPatterns: loadPatterns.map(({ selfWeight, ...pattern }) => {
+          void selfWeight;
+          return pattern;
+        }),
+      }),
     );
     expect(migrated).toEqual(legacy);
     expect(migrated.nodes[1].supportFrame).toBeUndefined();

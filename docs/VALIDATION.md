@@ -456,3 +456,17 @@ Com `OOFEM_BIN` configurado conforme o projeto, execute `npm test -- tests/presc
 `tests/diagnostics.test.ts` cobre um nó isolado conhecido, um componente sem restrições suficientes, uma barra que referencia um nó inexistente e uma singularidade genérica sem destaque arbitrário. O contexto salvo do histórico só permite navegar quando o projeto atual é idêntico ao snapshot da execução. `tests/e2e/diagnostics.spec.ts` cobre o fluxo de análise, seleção do nó e chegada às propriedades.
 
 Com OOFEM 3.0 AMD64 configurado, `npm run check` passou com 217 testes, sem falhas, e `npm run build` passou. O E2E de localizar o nó isolado, navegar para propriedades, corrigir e reanalisar passou em Chromium usando a saída real capturada do OOFEM. A repetição com o comando Playwright do projeto não iniciou porque a porta 1420 já estava ocupada.
+
+## KS-28 · peso próprio por padrão de carga
+
+Ative **Considerar peso próprio neste padrão** em um padrão e escolha a direção global, a gravidade e o multiplicador. A contribuição mostrada para cada barra usa `ρ·A·g` em N/m e o total usa também o comprimento físico. Para painéis horizontais, a contribuição vertical usa `ρ·t·g` em N/m² e a área do painel. Cargas manuais permanecem separadas; a interface sinaliza quando há uma carga manual na mesma direção ou quando um caso soma dois padrões com peso próprio.
+
+Na viga de 6 m, use seção de 0,20 × 0,40 m, `ρ = 2.500 kg/m³`, gravidade de 10 m/s² em −Z e multiplicador 1. A área é 0,08 m², portanto `qZ = −2.000 N/m`, carga resultante −12.000 N e reações esperadas +6.000 N em cada apoio. Multiplicar por 2 dobra a ação; desativar o padrão remove somente a parcela automática.
+
+Na laje horizontal de 4 × 3 m, use espessura de 0,10 m e os mesmos valores de densidade e gravidade. A pressão calculada é −2.500 N/m², o total é −30.000 N e a soma das reações verticais deve ser +30.000 N. Pressão manual permanece listada separadamente. Repetir a exportação, trocar o refinamento e salvar/reabrir não deve mudar o total.
+
+A migração de v19 para v20 cria a configuração automática desativada e preserva as cargas manuais. O exportador recusa gravidade em Y num modelo XZ e direções não verticais para painéis, pois esses componentes não são representados pelos elementos atuais.
+
+Execute `npm run check`, `npm run build` e `npm run test:e2e`. Para repetir os equilíbrios com o solver fixado, configure `OOFEM_BIN` conforme `OOFEM.md` e execute `OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/oofem.integration.test.ts tests/plate.integration.test.ts`.
+
+O ensaio adicional compara o peso próprio com a mesma intensidade uniforme manual em uma barra de eixo excêntrico com braço rígido e EI modificado. As reações e os esforços coincidem. Um padrão horizontal com fator zero é verificado também em projeto de laje.

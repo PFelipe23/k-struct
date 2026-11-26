@@ -240,7 +240,7 @@ test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lot
 
   const positions = () =>
     page.evaluate(() =>
-      JSON.parse(localStorage.getItem("kstruct.draft.v19")!).nodes.map(
+      JSON.parse(localStorage.getItem("kstruct.draft.v20")!).nodes.map(
         (n: { id: string; x: number }) => [n.id, n.x],
       ),
     );

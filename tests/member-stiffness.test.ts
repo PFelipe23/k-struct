@@ -1,3 +1,4 @@
+import { legacyPatterns } from "./fixtures/project-v8";
 import { describe, expect, it } from "vitest";
 import {
   addPoint,
@@ -20,7 +21,13 @@ describe("modificadores de rigidez", () => {
     member.offsets = structuredClone(centeredOffsets);
     member.offsets.i.eccentricity.z = 0.1;
     member.offsets.j.rigidLength = 0.4;
-    const legacy = parseProject(JSON.stringify({ ...p, schemaVersion: 12 }));
+    const legacy = parseProject(
+      JSON.stringify({
+        ...p,
+        schemaVersion: 12,
+        loadPatterns: legacyPatterns(p),
+      }),
+    );
     expect(legacy).toEqual(p);
     member.stiffness = { ea: 1, eiy: 1, eiz: 1, gj: 1 };
     expect(exportOofem(p, "EL").deck).toBe(exportOofem(legacy, "EL").deck);

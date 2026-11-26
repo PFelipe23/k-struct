@@ -348,8 +348,8 @@ function SlabFields({
         }
       />
       <p className="help">
-        Use pZ negativo para pressão descendente. Inclua o peso próprio na
-        pressão quando aplicável.
+        Use pZ negativo para pressão descendente. O peso próprio pode ser
+        ativado nas definições do padrão.
       </p>
     </>
   );
@@ -1042,8 +1042,8 @@ export default function Inspector({
           <div className="scope-note">
             <b>Estática linear · {spatial ? "Espacial" : "Plano XZ"}</b>
             <p>
-              Barras de Euler–Bernoulli, ligações rígidas e cargas globais. Peso
-              próprio deve ser aplicado como carga.
+              Barras de Euler–Bernoulli. Configure o peso próprio nos padrões de
+              carga.
             </p>
           </div>
         )}
