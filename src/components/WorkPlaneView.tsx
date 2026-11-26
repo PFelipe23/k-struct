@@ -1,3 +1,5 @@
+import { patternWind } from "../domain/wind";
+import ThermalLoadGlyph from "./ThermalLoadGlyph";
 import {
   useCallback,
   useEffect,
@@ -13,6 +15,9 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
+  beamAxes,
+  interpolate,
+  distance,
   normalizeCoord,
   onPlane,
   parseDecimalInput,
@@ -33,7 +38,11 @@ import type {
 } from "../solver/envelopes";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
-import { beamStations, nearestSection } from "../domain/beamMesh";
+import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
+import { actionVector, pointFraction } from "../domain/memberPointLoads";
+import DistributedLoadGlyph from "./DistributedLoadGlyph";
+import PointLoadGlyph, { pointLoadLabel } from "./PointLoadGlyph";
+import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
@@ -57,7 +66,13 @@ export type PlaneCamera = {
   scale: number;
 };
 
-export type Tool = "select" | "node" | "member" | "slab";
+export type Tool =
+  | "select"
+  | "node"
+  | "member"
+  | "slab"
+  | "pointLoad"
+  | "distributedLoad";
 export type Display = "model" | "deformed" | MemberForceComponent;
 interface Props {
   project: Project;
@@ -68,6 +83,7 @@ interface Props {
   tool: Tool;
   quick: boolean;
   onWindow: (objects: SelectedObject[], additive: boolean) => void;
+  onPickLoad?: (id: string, point: Point3) => void;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
@@ -78,6 +94,7 @@ interface Props {
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
+  resultPatterns: ReadonlySet<string>;
   active: boolean;
   savedCamera: RefObject<PlaneCamera | null>;
   onActivate: () => void;
@@ -107,11 +124,13 @@ export default function WorkPlaneView({
   quick,
   onWindow,
   onSpan,
+  onPickLoad,
   result,
   envelope,
   display,
   slabMap,
   patternId,
+  resultPatterns,
   pending,
   onPoint,
   onSelect,
@@ -137,14 +156,17 @@ export default function WorkPlaneView({
     y: number;
   } | null>(null);
   // The span picker handles its own hits and does not request point placement.
-  const tool = quick ? "select" : activeTool;
+  const tool =
+    quick || activeTool === "pointLoad" || activeTool === "distributedLoad"
+      ? "select"
+      : activeTool;
   useEffect(() => {
     setSpanPointer(null);
     if (quick) setCursor(null);
   }, [quick, plane.kind, plane.offset, project.id]);
   const { labels } = layers;
   const mesh = useMemo(
-    () => (layers.mesh ? beamStations(project) : null),
+    () => (layers.mesh ? beamMeshLayout(project) : null),
     [layers.mesh, project],
   );
   const markerId = useId();
@@ -153,13 +175,31 @@ export default function WorkPlaneView({
   const uGuides = spatial || quick ? project.guides[axisU] : [];
   const vGuides = spatial || quick ? project.guides[axisV] : [];
   const nodes = project.nodes.filter((n) => onPlane(n, plane));
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const bars = project.members.filter(
-    (m) => nodeMap.has(m.start) && nodeMap.has(m.end),
+  const nodeMap = new Map(project.nodes.map((n) => [n.id, n]));
+  const bars = project.members.filter((m) =>
+    memberOnPlane(m, nodeMap.get(m.start)!, nodeMap.get(m.end)!, plane),
   );
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
+  const wind =
+    layers.loads && display === "model"
+      ? patternWind(nodeMap, project.mode, patterns)
+      : [];
+  const nodalActions = [...patterns.nodal, ...wind.flatMap((w) => w.loads)];
+  const displayedPatterns =
+    display === "model"
+      ? [patterns]
+      : project.loadPatterns.filter((p) => resultPatterns.has(p.id));
+  const floors =
+    plane.kind === "XY"
+      ? (project.diaphragms ?? []).filter((floor) =>
+          project.guides.z.some(
+            (level) =>
+              level.id === floor.levelId && level.position === plane.offset,
+          ),
+        )
+      : [];
   const slab =
     plane.kind === "XY"
       ? project.slabs.find((item) =>
@@ -199,13 +239,22 @@ export default function WorkPlaneView({
 
   const cameraBeforeFit = useRef(camera);
   const fit = () => {
+    const points = [
+      ...project.nodes,
+      ...floors.map((floor) => ({ ...floor.reference, z: plane.offset })),
+      ...bars.flatMap((m) => {
+        if (!m.offsets) return [];
+        const line = memberAxis(m, nodeMap.get(m.start)!, nodeMap.get(m.end)!);
+        return [line.start, line.end];
+      }),
+    ];
     const us = [
-      ...project.nodes.map((n) => n[axisU]),
+      ...points.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
       ...(slab ? [slab.x, slab.x + slab.lengthX] : []),
     ];
     const vs = [
-      ...project.nodes.map((n) => n[axisV]),
+      ...points.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
       ...(slab ? [slab.y, slab.y + slab.lengthY] : []),
     ];
@@ -515,7 +564,7 @@ export default function WorkPlaneView({
       </div>
       <svg
         ref={ref}
-        className={`drawing drawing-${quick ? "span" : tool}`}
+        className={`drawing drawing-${onPickLoad ? "point-load" : quick ? "span" : tool}`}
         aria-label={`Área de lançamento ${plane.kind}`}
         role="application"
         tabIndex={0}
@@ -534,6 +583,43 @@ export default function WorkPlaneView({
             setSpanPointer(null);
         }}
         onClickCapture={(event) => {
+          if (onPickLoad) {
+            event.stopPropagation();
+            const pointer = pointerPosition(event);
+            let best: { id: string; point: Point3; gap: number } | undefined;
+            for (const m of bars) {
+              const line = memberAxis(
+                m,
+                nodeMap.get(m.start)!,
+                nodeMap.get(m.end)!,
+              );
+              const x = sx(line.start[axisU]),
+                y = sy(line.start[axisV]);
+              const du = sx(line.end[axisU]) - x,
+                dv = sy(line.end[axisV]) - y;
+              const squared = du * du + dv * dv;
+              if (!squared) continue;
+              const t = Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((pointer.x - x) * du + (pointer.y - y) * dv) / squared,
+                ),
+              );
+              const gap = Math.hypot(
+                pointer.x - x - t * du,
+                pointer.y - y - t * dv,
+              );
+              if (gap <= 8 && (!best || gap < best.gap))
+                best = {
+                  id: m.id,
+                  point: interpolate(line.start, line.end, t),
+                  gap,
+                };
+            }
+            if (best) onPickLoad(best.id, best.point);
+            return;
+          }
           if (!quick) return;
           event.stopPropagation();
           const point = pointerPosition(event);
@@ -704,10 +790,16 @@ export default function WorkPlaneView({
         {bars.map((m) => {
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
-          const u = a[axisU],
-            v = a[axisV],
-            du = b[axisU] - u,
-            dv = b[axisV] - v;
+          const line = memberAxis(m, a, b);
+          const thermal =
+            display === "model" &&
+            layers.loads &&
+            patterns.thermal?.find((f) => f.memberId === m.id);
+          const u = line.faceI[axisU],
+            v = line.faceI[axisV],
+            du = line.faceJ[axisU] - u,
+            dv = line.faceJ[axisV] - v;
+          const point = (p: Point3) => `${sx(p[axisU])},${sy(p[axisV])}`;
           const active = selected.has(`member:${m.id}`);
           const loads = patterns.uniform.filter((l) => l.memberId === m.id);
           const components = coordinates.map((k) =>
@@ -774,6 +866,62 @@ export default function WorkPlaneView({
           }
           return (
             <g key={m.id}>
+              {m.offsets && (
+                <g aria-label={`Braços rígidos de ${m.name}`}>
+                  <line
+                    x1={sx(a[axisU])}
+                    y1={sy(a[axisV])}
+                    x2={sx(b[axisU])}
+                    y2={sy(b[axisV])}
+                    stroke="var(--geometry-member)"
+                    strokeDasharray="5 4"
+                    opacity=".55"
+                    pointerEvents="none"
+                  >
+                    <title>Linha entre os nós de lançamento</title>
+                  </line>
+                  {(
+                    [
+                      [a, line.start, line.faceI, "i"],
+                      [b, line.end, line.faceJ, "j"],
+                    ] as const
+                  ).map(
+                    ([joint, insertion, face, side]) =>
+                      (distance(joint, insertion) > 0 ||
+                        distance(insertion, face) > 0) && (
+                        <g
+                          key={side}
+                          onClick={(event) => {
+                            if (tool === "select") {
+                              event.stopPropagation();
+                              onSelect(
+                                { kind: "member", id: m.id },
+                                additiveSelection(event),
+                              );
+                            }
+                          }}
+                        >
+                          <title>{`Braço rígido e face ${side} de ${m.name}`}</title>
+                          <polyline
+                            points={[joint, insertion, face]
+                              .map(point)
+                              .join(" ")}
+                            fill="none"
+                            stroke="var(--geometry-support)"
+                            strokeWidth="4"
+                          />
+                          <circle
+                            data-rigid-face={side}
+                            cx={sx(face[axisU])}
+                            cy={sy(face[axisV])}
+                            r="3.5"
+                            fill="var(--geometry-support)"
+                          />
+                        </g>
+                      ),
+                  )}
+                </g>
+              )}
               <line
                 data-member-id={m.id}
                 x1={sx(u)}
@@ -837,8 +985,88 @@ export default function WorkPlaneView({
                     );
                 }}
               />
-              {mesh
-                ?.get(m.id)
+              {thermal && (
+                <ThermalLoadGlyph
+                  field={thermal}
+                  memberName={m.name}
+                  anchor={interpolate(line.faceI, line.faceJ, 0.62)}
+                  basis={beamAxes(line.start, line.end, m.roll, project.mode)}
+                  plane={plane.kind}
+                  sx={sx}
+                  sy={sy}
+                  marker={markerId}
+                />
+              )}
+              {layers.loads &&
+                displayedPatterns.flatMap((pattern) =>
+                  (pattern.distributed ?? [])
+                    .filter((load) => load.memberId === m.id)
+                    .map((load) => (
+                      <DistributedLoadGlyph
+                        key={JSON.stringify([pattern.id, load.id])}
+                        load={load}
+                        line={line}
+                        basis={beamAxes(
+                          line.start,
+                          line.end,
+                          m.roll,
+                          project.mode,
+                        )}
+                        axes={[axisU, axisV, normal]}
+                        project={(at) => [sx(at[axisU]), sy(at[axisV])]}
+                        marker={markerId}
+                        units={units}
+                        stationsOnly={display !== "model"}
+                      />
+                    )),
+                )}
+              {layers.loads &&
+                display === "model" &&
+                (patterns.points ?? [])
+                  .filter((l) => l.memberId === m.id)
+                  .map((load) => {
+                    const point = interpolate(
+                      line.start,
+                      line.end,
+                      pointFraction(load.position, line.span),
+                    );
+                    return (
+                      <PointLoadGlyph
+                        key={load.id}
+                        x={sx(point[axisU])}
+                        y={sy(point[axisV])}
+                        axes={[axisU, axisV, normal]}
+                        vector={actionVector(
+                          load,
+                          beamAxes(line.start, line.end, m.roll, project.mode),
+                        )}
+                        kind={load.kind}
+                        marker={markerId}
+                        label={pointLoadLabel(load, line.span, units)}
+                      />
+                    );
+                  })}
+              {mesh?.rigidLinks
+                .filter((l) => l.memberId === m.id)
+                .map(({ nodeId }) => {
+                  const joint = nodeMap.get(nodeId)!;
+                  return (
+                    <circle
+                      key={nodeId}
+                      data-mesh-member={m.id}
+                      data-mesh-joint={nodeId}
+                      cx={sx(joint[axisU])}
+                      cy={sy(joint[axisV])}
+                      r="8"
+                      fill="none"
+                      stroke="var(--geometry-support)"
+                      strokeWidth="2"
+                      pointerEvents="none"
+                    />
+                  );
+                })}
+              {mesh?.stations
+                .get(m.id)
                 ?.slice(1, -1)
                 .map(({ t, nodeId }) => (
                   <circle
@@ -875,8 +1103,14 @@ export default function WorkPlaneView({
                     {norm > 0 &&
                       Array.from({ length: 9 }, (_, i) =>
                         arrow(
-                          sx(u + (du * i) / 8),
-                          sy(v + (dv * i) / 8),
+                          sx(
+                            line.start[axisU] +
+                              ((line.end[axisU] - line.start[axisU]) * i) / 8,
+                          ),
+                          sy(
+                            line.start[axisV] +
+                              ((line.end[axisV] - line.start[axisV]) * i) / 8,
+                          ),
                           (qu / norm) * 34,
                           (-qv / norm) * 34,
                           String(i),
@@ -962,8 +1196,8 @@ export default function WorkPlaneView({
                 length >= tolerance && (
                   <MemberAxes2D
                     member={m}
-                    a={a}
-                    b={b}
+                    a={{ ...a, ...line.faceI }}
+                    b={{ ...b, ...line.faceJ }}
                     mode={project.mode}
                     plane={plane.kind}
                     sx={sx}
@@ -1040,6 +1274,72 @@ export default function WorkPlaneView({
             );
           }}
         />
+        {floors.map((floor) => {
+          const x = sx(floor.reference.x),
+            y = sy(floor.reference.y);
+          return (
+            <g
+              key={floor.id}
+              className="diaphragm-links"
+              role="img"
+              aria-label={`Diafragma ${floor.name}`}
+              pointerEvents="none"
+            >
+              {floor.nodeIds.map((id) => {
+                const node = nodeMap.get(id)!;
+                return (
+                  <line
+                    key={id}
+                    x1={x}
+                    y1={y}
+                    x2={sx(node.x)}
+                    y2={sy(node.y)}
+                  />
+                );
+              })}
+              <path d={`M ${x} ${y - 9} l 9 9 -9 9 -9 -9 Z`} />
+              {labels && (
+                <text x={x + 11} y={y + 16}>
+                  {floor.name} · ref.
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {wind
+          .filter((w) => {
+            const positions = w.corners.map((p) => p[normal]);
+            return (
+              plane.offset >= Math.min(...positions) - tolerance &&
+              plane.offset <= Math.max(...positions) + tolerance
+            );
+          })
+          .map((w) => (
+            <g key={w.id} pointerEvents="none">
+              <polygon
+                points={w.corners
+                  .map((p) => `${sx(p[axisU])},${sy(p[axisV])}`)
+                  .join(" ")}
+                stroke="var(--geometry-load)"
+                fill="var(--geometry-load)"
+                fillOpacity={0.1}
+                pointerEvents="none"
+              >
+                <title>
+                  Faixa de vento · {w.area.toLocaleString("pt-BR")} m²
+                </title>
+              </polygon>
+              {labels && (
+                <text
+                  className="node-label"
+                  x={sx(w.center[axisU]) + 6}
+                  y={sy(w.center[axisV]) - 6}
+                >
+                  {w.name} · {w.area.toLocaleString("pt-BR")} m²
+                </text>
+              )}
+            </g>
+          ))}
         {nodes.map((n) => {
           const active = selected.has(`node:${n.id}`);
           const x = sx(n[axisU]),
@@ -1047,7 +1347,7 @@ export default function WorkPlaneView({
           const r = n.restraints;
           const hasSupport = Object.values(r).some(Boolean);
           const fixed = spatial ? Object.values(r).every(Boolean) : r.ry;
-          const loads = patterns.nodal.filter((l) => l.nodeId === n.id);
+          const loads = nodalActions.filter((l) => l.nodeId === n.id);
           const force = (k: Coordinate) =>
             loads.reduce((sum, l) => sum + l[`f${k}`], 0);
           const fu = force(axisU),

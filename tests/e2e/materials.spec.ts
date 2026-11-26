@@ -18,7 +18,8 @@ test("dois materiais, uso compartilhado, cópia independente, histórico e entra
   page,
 }) => {
   test.setTimeout(60_000);
-  const legacy = projectV8(beamExample());
+  const original = beamExample();
+  const legacy = projectV8(original);
   await page.addInitScript(
     (source) => localStorage.setItem("kstruct.draft.v8", source),
     JSON.stringify(legacy),
@@ -114,7 +115,7 @@ test("dois materiais, uso compartilhado, cópia independente, histórico e entra
   await action("Fechar").click();
 
   const latest = (await save(page)).project;
-  expect(latest.loadPatterns).toEqual(legacy.loadPatterns);
+  expect(latest.loadPatterns).toEqual(original.loadPatterns);
   await button("Análise").click();
   const download = page.waitForEvent("download");
   await button("Entrada OOFEM").click();

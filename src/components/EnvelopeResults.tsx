@@ -16,7 +16,9 @@ import {
   getForceLabel,
   formatResult,
   formatResultQuantity,
+  reportsSectionSides,
   sectionSide,
+  sectionPositions,
 } from "./resultFormatting";
 
 const bounds = [
@@ -32,6 +34,8 @@ export function buildEnvelopeCsv(
   units: UnitPreferences = DEFAULT_UNITS,
 ) {
   const columns = forceColumns[project.mode];
+  const includeSide = reportsSectionSides(project);
+  const positions = sectionPositions(project, project.members, units);
   const included = JSON.stringify(envelope.combinationIds);
   const combinations = new Map(
     project.resultCombinations.map((item) => [item.id, item]),
@@ -56,9 +60,8 @@ export function buildEnvelopeCsv(
             fromSI(forces[key], forceQuantity(key), units),
           ),
           JSON.stringify(combination.factors),
-          ...(project.meshConnections.length
-            ? [sectionSide(station.side)]
-            : []),
+          ...(includeSide ? [sectionSide(station.side)] : []),
+          ...positions.values(member.id, station.t),
         ];
       }),
     ),
@@ -80,7 +83,8 @@ export function buildEnvelopeCsv(
         return `${symbol} (${unit})`;
       }),
       "Parcelas (ID do caso e fator)",
-      ...(project.meshConnections.length ? ["Lado da seção"] : []),
+      ...(includeSide ? ["Lado da seção"] : []),
+      ...positions.headers,
     ],
     ...rows,
   ]);
@@ -114,7 +118,13 @@ export default function EnvelopeResults({
     project.resultCombinations.map((item) => [item.id, item]),
   );
   const stations = section ? result?.[section.memberId] : undefined;
-  const range = section && stations?.[section.index]?.ranges[component];
+  const station = section && stations?.[section.index];
+  const range = station?.ranges[component];
+  const positions = sectionPositions(
+    project,
+    project.members.filter((m) => m.id === section?.memberId),
+    units,
+  );
   const exportCsv = () => {
     if (!result) return;
     setExportError("");
@@ -186,6 +196,18 @@ export default function EnvelopeResults({
         )}
         {range ? (
           <table aria-label="Esforços simultâneos do envelope">
+            {section && station && positions.headers.length > 0 && (
+              <caption>
+                Seção no trecho deformável ·{" "}
+                {positions
+                  .values(section.memberId, station.t)
+                  .map(
+                    (v, i) =>
+                      `${positions.headers[i][0]} = ${formatResult(v)} ${units.length}`,
+                  )
+                  .join(" · ")}
+              </caption>
+            )}
             <thead>
               <tr>
                 <th scope="col">Extremo</th>

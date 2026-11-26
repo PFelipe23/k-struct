@@ -1,5 +1,14 @@
+import { pointLoadFrame } from "../domain/memberPointLoads";
+import {
+  globalIntensity,
+  loadInterval,
+} from "../domain/memberDistributedLoads";
+import { distributedLoadLabel } from "./DistributedLoadGlyph";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  add,
+  scale,
+  origin,
   coordinates,
   distance,
   type Coordinate,
@@ -41,7 +50,8 @@ function describe(p: Project, ids: string[]) {
     .map((m) => {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
-      return { m, a, b, span: distance(a, b) };
+      const frame = pointLoadFrame(m, nodes, p.mode);
+      return { m, a, b, frame, span: frame.span };
     });
   const ends = new Set(rows.flatMap(({ a, b }) => [a.id, b.id]));
   return { rows, draw: drawing(p, ends, affected) };
@@ -84,41 +94,76 @@ function EditPreview({ plan, plane }: { plan: MemberEdit; plane: PlaneKind }) {
         const rows = after.rows
           .map((row) => ({ ...row, q: memberIntensity(pat, row.m.id) }))
           .filter((row) => coordinates.some((k) => row.q[k] !== 0));
-        if (!rows.length) return null;
+        const intervals = after.rows.flatMap(({ m, span }) =>
+          (pat.distributed ?? [])
+            .filter((l) => l.memberId === m.id)
+            .map((l) => ({
+              id: l.id,
+              name: m.name,
+              label: distributedLoadLabel(l, span, units),
+            })),
+        );
+        if (!rows.length && !intervals.length) return null;
         const resultant = (spans: typeof before.rows, pattern: typeof pat) =>
-          spans.reduce(
-            (total, { m, span }) => {
-              const q = memberIntensity(pattern, m.id);
-              return {
-                x: total.x + q.x * span,
-                y: total.y + q.y * span,
-                z: total.z + q.z * span,
-              };
-            },
-            { x: 0, y: 0, z: 0 },
-          );
+          spans.reduce((total, { m, span, frame }) => {
+            let sum = add(total, scale(memberIntensity(pattern, m.id), span));
+            for (const load of pattern.distributed ?? []) {
+              if (load.memberId !== m.id) continue;
+              const [a, b] = loadInterval(load, span);
+              sum = add(
+                sum,
+                globalIntensity(
+                  scale(add(load.qStart, load.qEnd), (b - a) / 2),
+                  load.system,
+                  frame.axes,
+                ),
+              );
+            }
+            return sum;
+          }, origin);
         return (
           <section key={pat.id}>
             <h3>{pat.name}</h3>
-            <table>
-              <caption>Cargas uniformes após a edição</caption>
-              <thead>
-                <tr>
-                  <th>Barra</th>
-                  <th>Extensão ({units.length})</th>
-                  <th>qX / qY / qZ ({units.distributedLoad})</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ m, span, q }) => (
-                  <tr key={m.id}>
-                    <td>{m.name}</td>
-                    <td>{formatResultQuantity(span, "length", units)}</td>
-                    <td>{vector(q, "distributedLoad", units)}</td>
+            {rows.length > 0 && (
+              <table>
+                <caption>Cargas uniformes após a edição</caption>
+                <thead>
+                  <tr>
+                    <th>Barra</th>
+                    <th>Extensão ({units.length})</th>
+                    <th>qX / qY / qZ ({units.distributedLoad})</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map(({ m, span, q }) => (
+                    <tr key={m.id}>
+                      <td>{m.name}</td>
+                      <td>{formatResultQuantity(span, "length", units)}</td>
+                      <td>{vector(q, "distributedLoad", units)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {intervals.length > 0 && (
+              <table>
+                <caption>Cargas por trecho após a edição</caption>
+                <thead>
+                  <tr>
+                    <th>Barra</th>
+                    <th>Trecho e intensidades</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {intervals.map((l) => (
+                    <tr key={l.id}>
+                      <td>{l.name}</td>
+                      <td>{l.label}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             <p>
               Resultante global em X / Y / Z ({units.force}) nas barras afetadas
               <br />

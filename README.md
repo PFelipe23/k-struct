@@ -12,11 +12,16 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
-- Editar coordenadas, apoios em referenciais globais ou inclinados, ligações rígidas, livres ou elásticas nas pontas das barras, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
+- Editar coordenadas, apoios rígidos ou elásticos em referenciais globais ou inclinados, ligações rígidas, livres ou elásticas nas pontas das barras, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
-- Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
+- Aplicar forças e momentos nos nós ou ao longo das barras, além de cargas uniformes. Em **Modelo → Carga concentrada**, clique na barra e ajuste a distância a partir de i ou a fração x/L (por exemplo, `1/3`). Escolha o padrão de cargas e o referencial global ou local. O inspetor permite editar e excluir cada ação. A malha cria ou reaproveita o nó de análise na posição indicada e conserva a barra física inteira. A tabela de esforços e o CSV identificam os lados i e j da seção. O peso próprio pode ser ativado por padrão em **Cargas**, com direção, gravidade e multiplicador.
+- Aplicar cargas distribuídas em todo o comprimento ou em parte da barra. Em **Modelo → Carga por trecho**, clique perto do início da carga, informe o início e o fim a partir de i (em distância ou x/L) e as intensidades nas duas pontas. Para um triângulo, deixe uma ponta com intensidade zero. Para um trapézio, use intensidades diferentes. Sinais opostos invertem as setas ao longo do trecho. O inspetor reúne as cargas do padrão ativo para edição.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v11, com migração dos projetos v1 a v10 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
+- Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
+- Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
+- Aplicar temperatura por barra e por padrão no inspetor, em **Ação térmica**. Informe a variação média e a diferença entre faces da seção em K. A vista indica a face mais quente. Para o material, use o coeficiente de dilatação linear α em 1/K.
+- Salvar e reabrir `.kstruct.json` no esquema v22, com migração dos projetos v1 a v21 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -100,11 +105,19 @@ Selecione nós e barras com Ctrl ou recupere um grupo em **Seleção e grupos**.
 
 Por exemplo, em duas barras com qZ de −2 e −3 kN/m, **Somar** −1 kN/m produz −3 e −4 kN/m. **Aplicar lote** registra toda a operação em uma edição. **Desfazer** recupera a seção, os vínculos e as cargas anteriores de cada objeto.
 
-### Apoios inclinados
+### Diafragma rígido de pavimento
+
+No projeto espacial, escolha **Planta XY** e o **Pavimento ativo**. Abra **Modelo → Diafragmas**, dê um nome ao piso e marque os nós que ele vincula. A seleção de nós feita na vista também pode iniciar a lista. As coordenadas X e Y identificam a referência do movimento no pavimento. Use **Usar centro dos nós** para recalculá-la ou informe outra posição. Ao aplicar, a planta mostra os vínculos tracejados e um losango na referência.
+
+O piso compartilha as translações no plano e a rotação em torno de Z. Cada nó conserva suas liberdades de deslocamento vertical e de rotação em torno de X e Y. Consulte **Deslocamentos** e **Reações** pelos nomes dos nós físicos. Ao editar ou excluir participantes, a referência salva conserva suas coordenadas. A exclusão que deixa menos de dois participantes também remove o diafragma. **Desfazer** recupera a edição inteira. [Ensaio com carga excêntrica](docs/VALIDATION.md#ks-27--diafragmas-de-pavimento)
+
+### Apoios inclinados e molas nodais
 
 Selecione um nó e escolha **Local** em **Propriedades → Apoios e restrições → Referencial do apoio**. Em XZ, informe o ângulo da tangente em graus a partir de +X no sentido de +Z. Confira a prévia e clique em **Aplicar referencial**. Um rolete bloqueia apenas a translação Z local, que corresponde à normal, e deixa livres a translação X local e a rotação Y. Em XYZ, informe a direção de x local e uma direção para y. O editor mostra a base ortonormal de mão direita antes de aplicar. As cargas nodais continuam expressas em XYZ globais.
 
 Analise o caso e abra **Reações**. Quando houver um apoio local com reação, a tabela e o CSV incluem colunas globais e locais, com unidades e o referencial de cada apoio. Em XZ, RX local corresponde à tangente e RZ local à normal. Para reproduzir a viga de 6 m com rolete inclinado, mantenha o nó inicial global e aplique −36,86989765° ao nó final da **Viga de referência**. [Valores esperados](docs/VALIDATION.md#ks-20--apoios-inclinados)
+
+Para definir apoio elástico, abra **Molas nodais** em **Apoios e restrições**. Desmarque a restrição rígida da direção e informe a rigidez de translação na unidade de força por comprimento ou de rotação na unidade de momento por radiano. Zero libera a direção. Os campos indicam o eixo global ou local conforme o referencial do nó. Em **Análise**, consulte as reações e os deslocamentos globais. Com molas inclinadas, a tabela de deslocamentos também mostra a projeção nos eixos do apoio. [Ensaios de molas nodais](docs/VALIDATION.md#ks-25--molas-nodais)
 
 ### Materiais do projeto
 
@@ -118,6 +131,8 @@ No explorador do **Modelo**, expanda **Seções** e clique no nome de um perfil.
 
 Para aplicar o perfil, selecione a barra e altere **Seção da barra**. Para lançamentos novos, use **Seção ativa**. O inspetor mostra o contorno, os eixos locais, a área e as propriedades Iy, Iz e J na unidade de seção elevada à segunda e à quarta potência, respectivamente. Editar uma seção compartilhada atualiza todas as barras que a referenciam. Analise novamente o modelo para obter os resultados da nova revisão.
 
+Para ajustar uma única barra, abra **Modificadores de rigidez** no inspetor. Informe fatores adimensionais para EA e EIy em XZ, ou EA, EIy, EIz e GJ em XYZ. A tabela mostra a rigidez bruta e a efetiva lado a lado. Use 1 para a rigidez de catálogo. Os fatores precisam ser positivos, pois zerar uma rigidez pode introduzir um mecanismo. Copiar ou dividir a barra conserva os fatores. [Ensaios de rigidez](docs/VALIDATION.md#ks-24--modificadores-de-rigidez)
+
 ### Laje retangular isolada
 
 1. Abra **Novo pórtico espacial**, deixe a **Planta XY** ativa e selecione o pavimento. Ative **Laje** (`L`) e clique em dois cantos opostos do painel.
@@ -130,6 +145,8 @@ O fluxo de laje usa um painel isolado por projeto e resultados por caso estátic
 ### Padrões, casos, combinações e envelopes
 
 Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.
+
+Para gerar vento estático, abra **Cargas e casos → Padrões → Adicionar faixa de vento**. Selecione dois nós na mesma vertical e informe a largura de fachada que descarrega nessa vertical. O intervalo de 0 a 100% cobre toda a altura entre os nós. A prévia indica a área, a linha de ação e as duas parcelas nodais. **Aplicar definições** grava as faixas no padrão selecionado. Reabra uma faixa para substituir suas parcelas ou use **Cancelar** para descartar a edição. [Exemplo de fachada de 4 × 3 m](docs/VALIDATION.md#ks-33--vento-estático-por-faixa)
 
 No desktop, escolha um caso estático em **Caso, combinação ou envelope** e clique em **Analisar**. Repita para os demais casos. O seletor alterna entre os resultados da revisão atual.
 

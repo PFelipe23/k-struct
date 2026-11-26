@@ -1,6 +1,19 @@
-import { beamAxes, distance, scale, tolerance, type Point3 } from "./geometry";
+import { rebaseThermal, setThermalField } from "./thermalLoads";
+import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
+import { globalIntensity } from "./memberDistributedLoads";
+import { actionVector, pointLoadFrame } from "./memberPointLoads";
+import { memberAxis } from "./memberOffsets";
+import {
+  beamAxes,
+  distance,
+  localComponents,
+  scale,
+  tolerance,
+  type Point3,
+} from "./geometry";
 import {
   addPoint,
+  uid,
   appendMember,
   nodalLoad,
   projectSchema,
@@ -19,7 +32,12 @@ import {
   type Transform,
   type VectorMap,
 } from "./transformGeometry";
-import { sameSupportAxes } from "./supports";
+import {
+  combineSupport,
+  hasSupport,
+  sameOrientedSupportAxes,
+  sameSupportAxes,
+} from "./supports";
 
 export type CopyOptions = {
   supports: boolean;
@@ -68,7 +86,6 @@ function selectedGeometry(source: Project, selection: SelectedObject[]) {
   return { nodes, members, nodeIds, selectedNodeIds };
 }
 const indexedNodes = (p: Project) => new Map(p.nodes.map((n) => [n.id, n]));
-const dofs = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
 const components = ["fx", "fy", "fz", "mx", "my", "mz"] as const;
 const hasLoad = (load: NodalLoad) => components.some((k) => load[k] !== 0);
 
@@ -94,19 +111,21 @@ function copyAssignments(
 ) {
   for (const node of nodes) {
     const dest = targetNodes.get(map.nodes.get(node.id)!)!;
-    if (options.supports && dofs.some((k) => node.restraints[k])) {
-      const occupied = dofs.some((k) => dest.restraints[k]);
+    if (options.supports && hasSupport(node)) {
+      const occupied = hasSupport(dest);
       if (occupied)
         plan.conflicts.push(
           `Cópia ${i} · ${node.name} → ${dest.name} · apoio existente`,
         );
       if (!occupied || options.conflicts === "combine") {
-        const { restraints, frame } = mapSupport(
-          node,
-          vector,
-          plan.project.mode,
-        );
-        if (occupied && !sameSupportAxes(dest.supportFrame, frame))
+        const support = mapSupport(node, vector, plan.project.mode, parity);
+        const { frame } = support;
+        if (
+          occupied &&
+          (support.foundation || dest.foundation
+            ? !sameOrientedSupportAxes(dest.supportFrame, frame)
+            : !sameSupportAxes(dest.supportFrame, frame))
+        )
           throw new Error(
             `Apoios de ${dest.name} usam referenciais diferentes. Escolha conservar o apoio existente.`,
           );
@@ -114,7 +133,7 @@ function copyAssignments(
           if (frame) dest.supportFrame = frame;
           else delete dest.supportFrame;
         }
-        for (const k of dofs) dest.restraints[k] ||= restraints[k];
+        combineSupport(dest, support);
         plan.restraints++;
       }
     }
@@ -123,6 +142,38 @@ function copyAssignments(
     const src = plan.source.loadPatterns.find((p) => p.id === patternId);
     const dst = plan.project.loadPatterns.find((p) => p.id === patternId);
     if (!src || !dst) throw new Error("Padrão de carga inexistente.");
+    if (options.supports && src.prescribed?.length) {
+      for (const node of nodes) {
+        const dest = targetNodes.get(map.nodes.get(node.id)!)!;
+        const motions = transformMotions(
+          src.prescribed.filter((r) => r.nodeId === node.id),
+          dest.id,
+          node.supportFrame,
+          dest.supportFrame,
+          vector,
+          parity,
+        );
+        for (const motion of motions) {
+          const previous = dst.prescribed?.find(
+            (r) => r.nodeId === dest.id && r.dof === motion.dof,
+          );
+          if (
+            !dest.restraints[motion.dof] ||
+            (previous && previous.value !== motion.value)
+          ) {
+            const conflict = `Cópia ${i} · ${dest.name} · movimento imposto ${motion.dof.toUpperCase()} em ${src.name}`;
+            plan.conflicts.push(conflict);
+            if (options.conflicts === "combine")
+              throw new Error(
+                `${conflict}: prescrições incompatíveis. Conserve o destino ou edite o movimento.`,
+              );
+            continue;
+          }
+          setPrescribedMotion(dst, motion);
+          plan.loads++;
+        }
+      }
+    }
     // Sum contributions of the same source node before deciding about a destination.
     const incoming = new Map<string, NodalLoad>();
     for (const l of src.nodal) {
@@ -147,6 +198,95 @@ function copyAssignments(
       if (existing) for (const k of components) existing[k] += next[k];
       else dst.nodal.push(next);
       plan.loads++;
+    }
+    if (src.thermal?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const field of src.thermal) {
+        const memberId = map.members.get(field.memberId);
+        if (!memberId) continue;
+        const old = plan.source.members.find((m) => m.id === field.memberId)!;
+        const copy = plan.project.members.find((m) => m.id === memberId)!;
+        const section = plan.source.sections.find(
+          (s) => s.id === old.sectionId,
+        )!;
+        const dest = plan.project.sections.find(
+          (s) => s.id === copy.sectionId,
+        )!;
+        const from = pointLoadFrame(old, originalNodes, plan.source.mode);
+        const to = pointLoadFrame(copy, targetNodes, plan.project.mode);
+        setThermalField(
+          dst,
+          rebaseThermal(
+            field,
+            from.axes,
+            to.axes,
+            memberId,
+            section,
+            dest,
+            vector,
+          ),
+        );
+        plan.loads++;
+      }
+    }
+    if (src.points?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const load of src.points) {
+        const memberId = map.members.get(load.memberId);
+        if (!memberId) continue;
+        const original = plan.source.members.find(
+          (m) => m.id === load.memberId,
+        )!;
+        const copy = plan.project.members.find((m) => m.id === memberId)!;
+        const originalAxes = pointLoadFrame(
+          original,
+          originalNodes,
+          plan.source.mode,
+        ).axes;
+        const newAxes = pointLoadFrame(
+          copy,
+          targetNodes,
+          plan.project.mode,
+        ).axes;
+        const global = scale(
+          vector(actionVector(load, originalAxes)),
+          load.kind === "moment" ? parity : 1,
+        );
+        (dst.points ??= []).push({
+          ...load,
+          id: uid(),
+          memberId,
+          position: { ...load.position },
+          components:
+            load.system === "local" ? localComponents(global, newAxes) : global,
+        });
+        plan.loads++;
+      }
+    }
+    if (src.distributed?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const load of src.distributed) {
+        const memberId = map.members.get(load.memberId);
+        if (!memberId) continue;
+        const old = plan.source.members.find((m) => m.id === load.memberId)!,
+          member = plan.project.members.find((m) => m.id === memberId)!;
+        const from = pointLoadFrame(old, originalNodes, plan.source.mode),
+          to = pointLoadFrame(member, targetNodes, plan.project.mode);
+        const transformIntensity = (q: Point3) => {
+          const global = vector(globalIntensity(q, load.system, from.axes));
+          return load.system === "local"
+            ? localComponents(global, to.axes)
+            : global;
+        };
+        (dst.distributed ??= []).push({
+          ...load,
+          id: uid(),
+          memberId,
+          qStart: transformIntensity(load.qStart),
+          qEnd: transformIntensity(load.qEnd),
+        });
+        plan.loads++;
+      }
     }
     for (const l of src.uniform) {
       const id = map.members.get(l.memberId);
@@ -210,14 +350,21 @@ export function planTransform(
         if (
           source.mode === "spatial" &&
           !(nodeIds.has(m.start) && nodeIds.has(m.end))
-        )
-          m.roll = movedRoll(
+        ) {
+          const oldLine = memberAxis(
+            m,
             original.get(m.start)!,
             original.get(m.end)!,
-            a,
-            b,
+          );
+          const newLine = memberAxis(m, a, b);
+          m.roll = movedRoll(
+            oldLine.start,
+            oldLine.end,
+            newLine.start,
+            newLine.end,
             m.roll,
           );
+        }
       }
       for (const n of nodes) {
         const dest = targets.get(n.id)!;
@@ -256,20 +403,33 @@ export function planTransform(
       const a = targets.get(start)!,
         b = targets.get(end)!;
       assertLength(a, b, m.name);
+      const transformEnd = (e: NonNullable<typeof m.offsets>["i"]) => {
+        const eccentricity = vector(e.eccentricity);
+        if (source.mode === "planar") eccentricity.y = 0;
+        return { eccentricity, rigidLength: e.rigidLength };
+      };
+      const offsets = m.offsets && {
+        i: transformEnd(m.offsets.i),
+        j: transformEnd(m.offsets.j),
+      };
       let roll = m.roll;
       if (source.mode === "spatial" && spec.kind !== "translate") {
-        const [, , z] = beamAxes(
+        const oldLine = memberAxis(
+          m,
           original.get(m.start)!,
           original.get(m.end)!,
-          m.roll,
         );
-        roll = sectionRoll(a, b, vector(z));
+        const [, , z] = beamAxes(oldLine.start, oldLine.end, m.roll);
+        const newLine = memberAxis({ offsets }, a, b);
+        roll = sectionRoll(newLine.start, newLine.end, vector(z));
       }
       const bar = appendMember(project, {
         start,
         end,
         sectionId: m.sectionId,
         roll,
+        ...(offsets ? { offsets } : {}),
+        ...(m.stiffness ? { stiffness: { ...m.stiffness } } : {}),
       });
       map.members.set(m.id, bar.id);
       plan.selected.push({ kind: "member", id: bar.id });

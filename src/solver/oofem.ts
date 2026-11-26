@@ -1,4 +1,4 @@
-import { sectionProperties } from "../domain/sections";
+import { patternWind } from "../domain/wind";
 import {
   add,
   coordinates,
@@ -7,6 +7,7 @@ import {
   interpolate,
   beamAxes,
   localComponents,
+  length,
   origin,
   scale,
   subtract,
@@ -19,22 +20,47 @@ import {
   projectSchema,
   type Project,
 } from "../domain/model";
-import { beamStations, type SectionLocation } from "../domain/beamMesh";
-import { supportBasis, supportToGlobal } from "../domain/supports";
-import { elasticMaterialRecord } from "./elasticMaterial";
+import {
+  actionVector,
+  pointFraction,
+  type MemberPointLoad,
+} from "../domain/memberPointLoads";
+import { elementDensities, type LinearDensity } from "./distributedBeamLoads";
+import {
+  globalIntensity,
+  intensityAt,
+  linearEndForces,
+  loadInterval,
+} from "../domain/memberDistributedLoads";
+import { memberAxis } from "../domain/memberOffsets";
+import { selfWeightSummary } from "../domain/selfWeight";
+import { caseMotions } from "../domain/prescribedMotions";
+import { floorConstraints } from "./diaphragm";
+import { rigidJointEquations } from "./rigidOffsets";
+import {
+  beamMeshLayout,
+  rigidGroups,
+  type SectionLocation,
+} from "../domain/beamMesh";
+import {
+  hasSpring,
+  hasSupport,
+  supportBasis,
+  supportToGlobal,
+} from "../domain/supports";
+import { foundationRecords } from "./foundation";
+import { foundationReaction } from "../domain/foundation";
+import { caseThermalFields } from "../domain/thermalLoads";
+import { beamPropertyRecords } from "./beamProperties";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
 export interface MeshNode extends Point3 {
   number: number;
   objectId?: string;
-  localBasis?: ReturnType<typeof supportBasis>;
-  rigidArm?: {
-    master: number;
-    dofIds: number[];
-    masterMask: number[];
-    dofTypes: number[];
-    lcs?: number[];
-  };
+  master?: number;
+  diaphragm?: number;
+  pointLoadStation?: boolean;
+  connection?: { masterMask: number[]; dofTypes: number[]; lcs: number[] };
 }
 export interface MeshElement {
   number: number;
@@ -43,6 +69,7 @@ export interface MeshElement {
   end: number;
   t0: number;
   t1: number;
+  dofsToCondense?: number[];
 }
 export interface AnalysisInput {
   deck: string;
@@ -137,12 +164,12 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   );
   const nodeNumber = (id: string) => modelNodes.get(id)!.number;
   const axes = new Map<string, ReturnType<typeof beamAxes>>();
-  const sectionElements = new Map(
-    p.sections.map((s) => [s.id, [] as number[]]),
-  );
   const memberElements = new Map<string, number[]>();
-  const springs: {
-    number: number;
+  const { stations: layout, rigidLinks } = beamMeshLayout(p);
+  const lines = new Map<string, ReturnType<typeof memberAxis>>();
+  const explicitDofs = new Set<number>();
+  const pointTargets = new Map<MemberPointLoad, number>();
+  const connectionSprings: {
     nodeA: number;
     nodeB: number;
     section: number;
@@ -150,44 +177,57 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     stiffness: number;
     orientation?: Point3;
   }[] = [];
-  const layout = beamStations(p);
   for (const m of p.members) {
     const a = modelNodes.get(m.start)!,
       b = modelNodes.get(m.end)!;
-    axes.set(m.id, beamAxes(a, b, m.roll, p.mode));
+    const line = memberAxis(m, a, b);
+    lines.set(m.id, line);
+    axes.set(m.id, beamAxes(line.start, line.end, m.roll, p.mode));
     const localAxes = axes.get(m.id)!;
-    const connectionNodes: [number, number] = [
-      nodeNumber(m.start),
-      nodeNumber(m.end),
-    ];
-    const active = spatial
+    const activeDofs = spatial
       ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
       : (["ux", "uz", "ry"] as const);
-    const localDofs = spatial ? [1, 2, 3, 4, 5, 6] : [1, 3, 5];
-    const localAxis = (dof: (typeof active)[number]): Point3 =>
-      dof === "ux"
+    const localAxis = (dof: (typeof activeDofs)[number]): Point3 =>
+      dof === "ux" || dof === "rx"
         ? localAxes[0]
-        : dof === "uy"
+        : dof === "uy" || dof === "ry"
           ? localAxes[1]
-          : dof === "uz"
-            ? localAxes[2]
-            : dof === "rx"
-              ? localAxes[0]
-              : dof === "ry"
-                ? localAxes[1]
-                : localAxes[2];
-    for (const [endIndex, end] of (["i", "j"] as const).entries()) {
-      const connection =
-        (end === "i" ? m.connectionI : m.connectionJ) ?? defaultEndConnection();
-      if (active.every((dof) => connection[dof].kind === "rigid")) continue;
-      const master = connectionNodes[endIndex];
+          : localAxes[2];
+    const stationNode = (t: number, nodeId?: string) => {
+      const at =
+        t === 0
+          ? line.faceI
+          : t === 1
+            ? line.faceJ
+            : interpolate(line.faceI, line.faceJ, t);
+      const joint = nodeId ? modelNodes.get(nodeId) : undefined;
+      if (
+        joint &&
+        (!m.offsets ||
+          (at.x === joint.x && at.y === joint.y && at.z === joint.z))
+      )
+        return joint.number;
       const number = nodes.length + 1;
-      const masterMask = active.map((dof) =>
-        connection[dof].kind === "rigid" ? 1 : 0,
-      );
-      const dofTypes = active.map((dof) =>
-        connection[dof].kind === "rigid" ? 2 : 0,
-      );
+      if (joint) explicitDofs.add(joint.number);
+      nodes.push({ ...at, number, ...(joint ? { master: joint.number } : {}) });
+      return number;
+    };
+    const endNode = (end: "i" | "j", nodeId: string) => {
+      const base = stationNode(end === "i" ? 0 : 1, nodeId);
+      const connection =
+        (end === "i" ? m.connectionI : m.connectionJ) ??
+        defaultEndConnection();
+      if (activeDofs.every((dof) => connection[dof].kind === "rigid"))
+        return base;
+      if (
+        !spatial &&
+        connection.ry.kind === "free" &&
+        activeDofs
+          .filter((dof) => dof !== "ry")
+          .every((dof) => connection[dof].kind === "rigid")
+      )
+        return base;
+      const number = nodes.length + 1;
       const lcs = [
         localAxes[0].x,
         localAxes[0].y,
@@ -196,53 +236,48 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         localAxes[1].y,
         localAxes[1].z,
       ];
-      const point = endIndex === 0 ? a : b;
       nodes.push({
+        ...nodes[base - 1],
         number,
-        x: point.x,
-        y: point.y,
-        z: point.z,
-        rigidArm: {
-          master,
-          dofIds: localDofs,
-          masterMask,
-          dofTypes,
+        objectId: undefined,
+        master: base,
+        connection: {
+          masterMask: activeDofs.map((dof) =>
+            connection[dof].kind === "rigid" ? 1 : 0,
+          ),
+          dofTypes: activeDofs.map((dof) =>
+            connection[dof].kind === "rigid" ? 2 : 0,
+          ),
           lcs,
         },
-        localBasis: supportBasis({
-          kind: "spatial",
-          x: localAxes[0],
-          y: localAxes[1],
-        }),
       });
-      connectionNodes[endIndex] = number;
-      for (const dof of active) {
+      const section = p.sections.findIndex(({ id }) => id === m.sectionId) + 1;
+      for (const dof of activeDofs) {
         const component = connection[dof];
         if (component.kind !== "elastic") continue;
         const rotational = dof.startsWith("r");
-        springs.push({
-          number: 0,
-          nodeA: master,
+        connectionSprings.push({
+          nodeA: base,
           nodeB: number,
-          section: p.sections.findIndex(({ id }) => id === m.sectionId) + 1,
+          section,
           mode: rotational ? (spatial ? 5 : 3) : spatial ? 4 : 2,
           stiffness: component.stiffness,
           orientation: spatial || !rotational ? localAxis(dof) : undefined,
         });
       }
-    }
+      return number;
+    };
     const ids: number[] = [];
-    let start = connectionNodes[0];
+    let start = endNode("i", m.start);
     const stations = layout.get(m.id)!;
+    for (const l of stations[0].pointLoads ?? []) pointTargets.set(l, start);
     for (let i = 1; i < stations.length; i++) {
       const { t, nodeId } = stations[i];
       const end =
-        i === stations.length - 1
-          ? connectionNodes[1]
-          : nodeId
-            ? nodeNumber(nodeId)
-            : nodes.length + 1;
-      if (!nodeId) nodes.push({ number: end, ...interpolate(a, b, t) });
+        t === 1 ? endNode("j", m.end) : stationNode(t, nodeId);
+      for (const l of stations[i].pointLoads ?? []) pointTargets.set(l, end);
+      if (t < 1 && stations[i].pointLoads?.length)
+        nodes[end - 1].pointLoadStation = true;
       if (!(distance(nodes[start - 1], nodes[end - 1]) > 0))
         throw new Error(
           `${m.name}: a malha produziria um segmento de comprimento nulo.`,
@@ -255,10 +290,20 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         end,
         t0: stations[i - 1].t,
         t1: t,
+        ...(!spatial
+          ? {
+              dofsToCondense: [
+                ...(i === 1 && m.connectionI?.ry.kind === "free" ? [3] : []),
+                ...(i === stations.length - 1 &&
+                m.connectionJ?.ry.kind === "free"
+                  ? [6]
+                  : []),
+              ],
+            }
+          : {}),
       });
       start = end;
     }
-    sectionElements.get(m.sectionId)!.push(...ids);
     memberElements.set(m.id, ids);
   }
   const sets: string[] = [],
@@ -267,21 +312,79 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     sets.push(`Set ${sets.length + 1} ${value}`);
     return sets.length;
   };
-  const cs = p.sections.map((s, i) => {
-    const ids = sectionElements.get(s.id)!;
-    const { A, Iy, Iz, J } = sectionProperties(s);
-    const spatialProperties = spatial ? ` Iz ${Iz} Ik ${J}` : "";
-    return `SimpleCS ${i + 1} area ${A} Iy ${Iy}${spatialProperties} beamShearCoeff 1.e18 material ${p.materials.findIndex((m) => m.id === s.materialId) + 1} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`;
-  });
+  const temperatures = caseThermalFields(p, analysisCase);
+  const heatedSections = new Set(
+    p.members.filter((m) => temperatures.has(m.id)).map((m) => m.sectionId),
+  );
+  const properties = beamPropertyRecords(
+    p,
+    memberElements,
+    set,
+    heatedSections,
+  );
+  const motions = caseMotions(p, analysisCase);
   for (const n of p.nodes) {
-    const fixed = dofs.filter(([key]) => n.restraints[key]).map(([, d]) => d);
+    const fixed = dofs.filter(([key]) => n.restraints[key]);
     if (fixed.length)
       bcs.push(
-        `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${fixed.length} ${fixed.join(" ")} values ${fixed.length} ${fixed.map(() => 0).join(" ")} set ${set(`nodes 1 ${nodeNumber(n.id)}`)}`,
+        `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${fixed.length} ${fixed.map(([, d]) => d).join(" ")} values ${fixed.length} ${fixed.map(([key]) => motions.get(n.id)?.[key] ?? 0).join(" ")} set ${set(`nodes 1 ${nodeNumber(n.id)}`)}`,
       );
   }
+  const membersById = new Map(p.members.map((m) => [m.id, m]));
+  const publicNodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const rigidMasters = rigidGroups(rigidLinks, p.nodes);
+  const supportRows = new Map<string, number[][]>();
+  for (const [nodeId, masterId] of rigidMasters) {
+    const master = nodeNumber(masterId),
+      joint = nodeNumber(nodeId);
+    explicitDofs.add(master);
+    modelNodes.get(nodeId)!.master = master;
+    const independent = supportRows.get(masterId) ?? [];
+    supportRows.set(masterId, independent);
+    for (const equation of rigidJointEquations(
+      publicNodes.get(masterId)!,
+      publicNodes.get(nodeId)!,
+      master,
+      joint,
+      p.mode,
+      independent,
+    ))
+      bcs.push(`LinearConstraintBC ${bcs.length + 1} ${equation}`);
+  }
+  // Flatten auxiliary links, including a face attached to a joint in a rigid zone.
+  for (const node of nodes) {
+    if (!node.master || node.objectId || node.connection) continue;
+    const joint = nodes[node.master - 1];
+    if (joint.master) node.master = joint.master;
+  }
+  function addNodalLoad(number: number, values: number[]) {
+    if (!values.some(Boolean)) return;
+    bcs.push(
+      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
+    );
+  }
+  for (const [memberId, field] of temperatures) {
+    const ids = memberElements.get(memberId)!;
+    // Beam3d's third component follows its curvature convention about local z.
+    const values = spatial
+      ? [field.uniform, field.deltaZ, -field.deltaY]
+      : [field.uniform, field.deltaZ];
+    bcs.push(
+      `StructTemperatureLoad ${bcs.length + 1} loadTimeFunction 1 Components ${values.length} ${values.join(" ")} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`,
+    );
+  }
+  const densities = new Map<string, LinearDensity[]>();
   for (const factor of analysisCase.factors) {
     const pat = p.loadPatterns.find((pat) => pat.id === factor.patternId)!;
+    if (!factor.factor) continue;
+    if (
+      !spatial &&
+      pat.selfWeight.enabled &&
+      pat.selfWeight.direction.endsWith("Y")
+    )
+      throw new Error(
+        `O padrão ${pat.name} direciona o peso próprio para Y, fora do plano XZ.`,
+      );
     const scaleLoad = (values: number[]) => {
       const components = values.map((value) => value * factor.factor);
       if (components.some((value) => !Number.isFinite(value)))
@@ -290,15 +393,119 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         );
       return components;
     };
-    for (const l of pat.nodal) {
+    for (const l of [
+      ...pat.nodal,
+      ...patternWind(publicNodes, p.mode, pat).flatMap((w) => w.loads),
+    ]) {
       const values = scaleLoad(dofs.map(([, , key]) => l[key]));
-      if (!values.some(Boolean)) continue;
-      bcs.push(
-        `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(l.nodeId) ? " cstype 0" : ""} set ${set(`nodes 1 ${nodeNumber(l.nodeId)}`)}`,
+      addNodalLoad(nodeNumber(l.nodeId), values);
+    }
+    for (const load of pat.points ?? []) {
+      const target = pointTargets.get(load)!;
+      const line = lines.get(load.memberId)!;
+      const point = interpolate(
+        line.start,
+        line.end,
+        pointFraction(load.position, line.span),
+      );
+      const vector = actionVector(load, axes.get(load.memberId)!);
+      const force = load.kind === "force" ? vector : origin;
+      // A location on a rigid arm (or snapped within tolerance) transmits its
+      // force and the work-conjugate moment at the actual analysis node.
+      const moment =
+        load.kind === "moment"
+          ? vector
+          : cross(subtract(point, nodes[target - 1]), force);
+      addNodalLoad(
+        target,
+        scaleLoad(
+          spatial
+            ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+            : [force.x, force.z, moment.y],
+        ),
       );
     }
-    for (const l of pat.uniform) {
+    for (const load of pat.distributed ?? []) {
+      if (!factor.factor) continue;
+      const m = membersById.get(load.memberId)!,
+        line = lines.get(m.id)!,
+        basis = axes.get(m.id)!;
+      const [a, b] = loadInterval(load, line.span),
+        faceI = m.offsets?.i.rigidLength ?? 0,
+        faceJ = faceI + line.clear;
+      const localIntensity = (v: Point3) => {
+        const local = load.system === "local" ? v : localComponents(v, basis);
+        const [x, y, z] = scaleLoad([local.x, local.y, local.z]);
+        return { x, y, z };
+      };
+      const density = {
+        start: a,
+        end: b,
+        qStart: localIntensity(load.qStart),
+        qEnd: localIntensity(load.qEnd),
+      };
+      const profiles = densities.get(m.id);
+      if (profiles) profiles.push(density);
+      else densities.set(m.id, [density]);
+      for (const [id, left, right] of [
+        [m.start, 0, faceI],
+        [m.end, faceJ, line.span],
+      ] as const) {
+        const start = Math.max(a, left),
+          end = Math.min(b, right);
+        if (end <= start) continue;
+        const [f0, f1] = linearEndForces(
+          globalIntensity(
+            intensityAt(load, line.span, start),
+            load.system,
+            basis,
+          ),
+          globalIntensity(
+            intensityAt(load, line.span, end),
+            load.system,
+            basis,
+          ),
+          end - start,
+        );
+        const joint = modelNodes.get(id)!;
+        const momentAt = (x: number, force: Point3) =>
+          cross(
+            subtract(interpolate(line.start, line.end, x / line.span), joint),
+            force,
+          );
+        const force = add(f0, f1),
+          moment = add(momentAt(start, f0), momentAt(end, f1));
+        addNodalLoad(
+          joint.number,
+          scaleLoad(
+            spatial
+              ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+              : [force.x, force.z, moment.y],
+          ),
+        );
+      }
+    }
+    for (const l of [...pat.uniform, ...selfWeightSummary(p, pat).members]) {
       if (!factor.factor || !(l.qx || l.qy || l.qz)) continue;
+      const m = membersById.get(l.memberId)!;
+      if (m.offsets) {
+        const line = lines.get(m.id)!;
+        for (const [id, end, insertion, face] of [
+          [m.start, m.offsets.i, line.start, line.faceI],
+          [m.end, m.offsets.j, line.end, line.faceJ],
+        ] as const) {
+          if (!end.rigidLength) continue;
+          const force = scale({ x: l.qx, y: l.qy, z: l.qz }, end.rigidLength);
+          const moment = cross(
+            subtract(interpolate(insertion, face, 0.5), modelNodes.get(id)!),
+            force,
+          );
+          const components = spatial
+            ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+            : [force.x, force.z, moment.y];
+          addNodalLoad(nodeNumber(id), scaleLoad(components));
+        }
+      }
       const ids = memberElements
         .get(l.memberId)!
         .flatMap((number) => [number, 1]);
@@ -312,42 +519,212 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
       );
     }
   }
-  springs.forEach((spring, index) => {
-    spring.number = elements.length + index + 1;
-  });
-  const springRecords = springs.map((spring) => {
+  for (const [id, profiles] of densities) {
+    const line = lines.get(id)!,
+      faceI = membersById.get(id)!.offsets?.i.rigidLength ?? 0;
+    const stations = layout.get(id)!.map((s) => faceI + s.t * line.clear);
+    const ids = memberElements.get(id)!;
+    const edgeComponents = (q: Point3) =>
+      spatial ? [q.x, q.y, q.z, 0, 0, 0] : [q.x, q.z, 0];
+    for (const { index, qStart, qEnd } of elementDensities(
+      stations,
+      profiles,
+    )) {
+      const values = [...edgeComponents(qStart), ...edgeComponents(qEnd)];
+      bcs.push(
+        `LinearEdgeLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")} loadType 3 csType 1 set ${set(`elementedges 2 ${ids[index]} 1`)}`,
+      );
+    }
+  }
+  const floors = floorConstraints(
+    p,
+    nodes,
+    modelNodes,
+    rigidMasters,
+    (type, fields) => bcs.push(`${type} ${bcs.length + 1} ${fields}`),
+    (n) => set(`nodes 1 ${n}`),
+  );
+  const springs: string[] = connectionSprings.map((spring, index) => {
     const orientation = spring.orientation
       ? ` orientation 3 ${spring.orientation.x} ${spring.orientation.y} ${spring.orientation.z}`
       : "";
-    return `Spring ${spring.number} nodes 2 ${spring.nodeA} ${spring.nodeB} crossSect ${spring.section} mode ${spring.mode} k ${spring.stiffness}${orientation}`;
+    return `Spring ${elements.length + index + 1} nodes 2 ${spring.nodeA} ${spring.nodeB} crossSect ${spring.section} mode ${spring.mode} k ${spring.stiffness}${orientation}`;
   });
+  const groundSprings: string[] = [];
+  const ground = nodes.length + 1;
+  for (const n of p.nodes) {
+    const basis = frames.get(n.id) ?? supportBasis();
+    for (const [key] of dofs) {
+      if (!hasSpring(n, key)) continue;
+      const rotation = key.startsWith("r");
+      const mode = spatial ? (rotation ? 5 : 4) : rotation ? 3 : 2;
+      const axis = basis[key[1] as keyof Point3];
+      const number = elements.length + springs.length + groundSprings.length + 1;
+      // Spring projects both endpoints onto an explicit global direction.
+      // NodalSpring assembles in global axes even when the node has an lcs.
+      groundSprings.push(
+        `Spring ${number} nodes 2 ${ground} ${nodeNumber(n.id)} crossSect 1 mode ${mode} k ${n.springs![key]} orientation 3 ${axis.x} ${axis.y} ${axis.z}`,
+      );
+    }
+  }
+  const hasGroundSprings = groundSprings.length > 0;
+  springs.push(...groundSprings);
+  if (hasGroundSprings) {
+    const zeros = dofs.map(() => 0).join(" ");
+    bcs.push(
+      `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} values ${dofs.length} ${zeros} set ${set(`nodes 1 ${ground}`)}`,
+    );
+  }
+  for (const n of p.nodes) if (n.foundation) explicitDofs.add(nodeNumber(n.id));
+  const foundations = foundationRecords(
+    p.nodes,
+    nodeNumber,
+    nodes.length + Number(hasGroundSprings),
+    elements.length + springs.length,
+  );
+  const activeNodeDofs = new Map(
+    nodes.map((node) => [node.number, new Set<number>()]),
+  );
+  const condensedNodeDofs = new Map<number, Set<number>>();
+  const condense = (number: number, id: number) => {
+    const condensed = condensedNodeDofs.get(number) ?? new Set<number>();
+    condensed.add(id);
+    condensedNodeDofs.set(number, condensed);
+  };
+  const activate = (number: number, indices: number[]) => {
+    const active = activeNodeDofs.get(number);
+    for (const index of indices) active?.add(index);
+  };
+  const allDofIds = dofs.map(([, id]) => id);
+  for (const element of elements) {
+    const condensedStart = new Set(
+      (element.dofsToCondense ?? [])
+        .filter((index) => index <= 3)
+        .map((index) => dofs[index - 1]?.[1]),
+    );
+    const condensedEnd = new Set(
+      (element.dofsToCondense ?? [])
+        .filter((index) => index > 3)
+        .map((index) => dofs[index - 4]?.[1]),
+    );
+    for (const index of element.dofsToCondense ?? []) {
+      const number = index <= 3 ? element.start : element.end;
+      const id = dofs[index <= 3 ? index - 1 : index - 4]?.[1];
+      if (id) condense(number, id);
+    }
+    activate(
+      element.start,
+      allDofIds.filter((id) => !condensedStart.has(id)),
+    );
+    activate(element.end, allDofIds.filter((id) => !condensedEnd.has(id)));
+  }
+  for (const node of nodes) {
+    if (!node.master) continue;
+    const mask = node.connection?.masterMask;
+    if (mask) {
+      activate(
+        node.master,
+        allDofIds.filter((_, index) => mask[index] === 1),
+      );
+    } else {
+      const joint = node.objectId && publicNodes.get(node.objectId);
+      activate(
+        node.master,
+        allDofIds.filter((_, index) => !joint || !joint.restraints[dofs[index][0]]),
+      );
+    }
+  }
+  for (const spring of connectionSprings) {
+    const ids = spring.mode === (spatial ? 5 : 3)
+      ? (spatial ? [4, 5, 6] : [5])
+      : spatial ? [1, 2, 3] : [1, 3];
+    activate(spring.nodeA, ids);
+    activate(spring.nodeB, ids);
+  }
+  for (const n of p.nodes) {
+    const number = nodeNumber(n.id);
+    for (const [key, id] of dofs) {
+      if (n.restraints[key] || hasSpring(n, key)) activate(number, [id]);
+    }
+    if (n.foundation || n.supportFrame) activate(number, allDofIds);
+  }
+  for (const pattern of p.loadPatterns) {
+    for (const load of pattern.nodal) {
+      const values = spatial
+        ? [load.fx, load.fy, load.fz, load.mx, load.my, load.mz]
+        : [load.fx, load.fz, load.my];
+      activate(
+        nodeNumber(load.nodeId),
+        allDofIds.filter((_, index) => values[index] !== 0),
+      );
+    }
+  }
+  for (const number of explicitDofs) activate(number, allDofIds);
+  for (const node of nodes) {
+    if (node.diaphragm) activate(node.number, allDofIds);
+  }
+  for (const [number, condensed] of condensedNodeDofs) {
+    const inactive = [...condensed].filter(
+      (id) => !activeNodeDofs.get(number)?.has(id),
+    );
+    if (!inactive.length) continue;
+    const values = inactive.map(() => 0);
+    bcs.push(
+      `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${inactive.length} ${inactive.join(" ")} values ${values.length} ${values.join(" ")} set ${set(`nodes 1 ${number}`)}`,
+    );
+  }
   const deck = [
     "analysis.out",
     `KStruct - linear static ${spatial ? "XYZ" : "XZ"} - SI N m kg s - Euler Bernoulli`,
-    "StaticStructural nsteps 1 deltat 1",
+    // Additional prescribed directions introduce Lagrange multipliers. GMRES
+    // can solve that indefinite system even with a zero diagonal pivot.
+    "StaticStructural nsteps 1 deltat 1" +
+      (floors.multipliers ||
+      [...supportRows.values()].some((rows) => rows.length)
+        ? " lstype 1 smtype 2 stype 1 lstol 1e-12 lsiter 2000"
+        : ""),
     spatial ? "domain 3dShell" : "domain 2dBeam",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${nodes.length} nelem ${elements.length + springs.length} ncrosssect ${cs.length} nmat ${p.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${nodes.length + Number(hasGroundSprings) + foundations.auxiliary.length} nelem ${elements.length + springs.length + foundations.elements.length} ncrosssect ${properties.sections.length} nmat ${properties.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...nodes.map((n) => {
-      if (n.rigidArm) {
-        const lcs = n.rigidArm.lcs ? ` lcs 6 ${n.rigidArm.lcs.join(" ")}` : "";
-        return `RigidArmNode ${n.number} coords 3 ${n.x} ${n.y} ${n.z} master ${n.rigidArm.master} dofidmask ${n.rigidArm.dofIds.length} ${n.rigidArm.dofIds.join(" ")} masterMask ${n.rigidArm.masterMask.length} ${n.rigidArm.masterMask.join(" ")} doftype ${n.rigidArm.dofTypes.length} ${n.rigidArm.dofTypes.join(" ")}${lcs}`;
-      }
+      const floor = floors.records.get(n.number);
+      if (floor) return floor;
       const basis = n.objectId && frames.get(n.objectId);
       const lcs = basis
         ? ` lcs 6 ${basis.x.x} ${basis.x.y} ${basis.x.z} ${basis.y.x} ${basis.y.y} ${basis.y.z}`
         : "";
-      const dofidmask = n.objectId ? ` dofidmask ${dofList}` : "";
-      return `Node ${n.number} coords 3 ${n.x} ${n.y} ${n.z}${dofidmask}${lcs}`;
+      const coords = `coords 3 ${n.x} ${n.y} ${n.z}`;
+      if (n.connection)
+        return `RigidArmNode ${n.number} ${coords} master ${n.master} dofidmask ${dofList} masterMask ${dofs.length} ${n.connection.masterMask.join(" ")} doftype ${dofs.length} ${n.connection.dofTypes.join(" ")} lcs 6 ${n.connection.lcs.join(" ")}`;
+      if (n.master) {
+        const joint = n.objectId && publicNodes.get(n.objectId);
+        const mask = (value: number) =>
+          `${dofs.length} ${dofs.map(([key]) => (joint && joint.restraints[key] ? 0 : value)).join(" ")}`;
+        return `RigidArmNode ${n.number} ${coords}${lcs} master ${n.master} dofidmask ${dofList} mastermask ${mask(1)} doftype ${mask(2)}`;
+      }
+      const active = activeNodeDofs.get(n.number)!;
+      const dofidmask =
+        active.size && (active.size < dofs.length || n.objectId)
+          ? ` dofidmask ${active.size} ${dofs.filter(([, id]) => active.has(id)).map(([, id]) => id).join(" ")}`
+          : explicitDofs.has(n.number) || n.diaphragm
+            ? ` dofidmask ${dofList}`
+            : "";
+      return `Node ${n.number} ${coords}${lcs}${dofidmask}`;
     }),
+    ...(hasGroundSprings
+      ? [`Node ${ground} coords 3 0 0 0 dofidmask ${dofList}`]
+      : []),
+    ...foundations.auxiliary,
     ...elements.map((e) => {
-      if (!spatial) return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}`;
+      if (!spatial)
+        return `Beam2d ${e.number} nodes 2 ${e.start} ${e.end}${e.dofsToCondense?.length ? ` dofstocondense ${e.dofsToCondense.length} ${e.dofsToCondense.join(" ")}` : ""}`;
       const z = axes.get(e.memberId)![2];
       return `Beam3d ${e.number} nodes 2 ${e.start} ${e.end} zaxis 3 ${z.x} ${z.y} ${z.z}`;
     }),
-    ...springRecords,
-    ...cs,
-    ...p.materials.map((material, i) => elasticMaterialRecord(material, i + 1)),
+    ...springs,
+    ...foundations.elements,
+    ...properties.sections,
+    ...properties.materials,
     ...bcs,
     "ConstantFunction 1 f(t) 1",
     ...sets,
@@ -380,7 +757,7 @@ export function parseOofemOutput(
     throw new Error("Resultado não finito. Análise rejeitada.");
   const nodeOutput = new Map<number, Map<number, number>>();
   for (const match of rawOutput.matchAll(
-    /Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm)?Node|\n\s*Element output)/g,
+    /^(?:RigidArm|GeneralSlave|Slave)?Node\s+(\d+)\s+\(\s*\d+\):([\s\S]*?)(?=\n(?:RigidArm|GeneralSlave|Slave)?Node|\n\s*Element output)/gm,
   )) {
     const values = new Map<number, number>();
     const node = Number(match[1]);
@@ -428,15 +805,10 @@ export function parseOofemOutput(
         : [],
     ),
   );
-  const nodeFrames = new Map(
-    input.nodes.flatMap((node) =>
-      node.localBasis ? [[node.number, node.localBasis] as const] : [],
-    ),
-  );
   const d = new Map<number, Displacement>();
   for (const [number, values] of nodeOutput) {
     if (!dofs.every(([, k]) => values.has(k))) continue;
-    const basis = frames.get(number) ?? nodeFrames.get(number);
+    const basis = frames.get(number);
     let u = {
       x: values.get(1)!,
       y: spatial ? values.get(2)! : 0,
@@ -456,6 +828,77 @@ export function parseOofemOutput(
   for (const n of input.nodes)
     if (!d.has(n.number))
       throw new Error(`Deslocamentos ausentes no nó de análise ${n.number}.`);
+  for (const n of input.nodes) {
+    if (!n.diaphragm) continue;
+    const ref = input.nodes[n.diaphragm - 1],
+      motion = d.get(ref.number)!,
+      u = d.get(n.number)!;
+    const dx = n.x - ref.x,
+      dy = n.y - ref.y;
+    for (const [actual, originValue, increment] of [
+      [u.ux, motion.ux, -motion.rz * dy],
+      [u.uy, motion.uy, motion.rz * dx],
+      [u.rz, motion.rz, 0],
+    ]) {
+      if (
+        Math.abs(actual - originValue - increment) >
+        1e-12 + 2e-8 * (Math.abs(originValue) + Math.abs(increment))
+      )
+        throw new Error(
+          `Deslocamento incompatível com a cinemática do diafragma no nó ${n.objectId}.`,
+        );
+    }
+  }
+  // Independent supports on the same rigid zone add constraint equations.
+  // Check compatibility against the printed global motions before publishing.
+  for (const n of input.nodes) {
+    if (!n.master) continue;
+    const joint = input.nodes[n.master - 1],
+      m = d.get(n.master)!,
+      s = d.get(n.number)!;
+    const arm = subtract(n, joint);
+    const theta = { x: m.rx, y: m.ry, z: m.rz },
+      rotation = { x: s.rx, y: s.ry, z: s.rz };
+    const u = { x: m.ux, y: m.uy, z: m.uz },
+      actual = { x: s.ux, y: s.uy, z: s.uz };
+    const expected = add(u, cross(theta, arm));
+    const printTolerance = 2e-8;
+    const connection = input.nodes[n.number - 1].connection;
+    let incompatible: boolean;
+    if (connection) {
+      const [x0, x1, x2, y0, y1, y2] = connection.lcs;
+      const x = { x: x0, y: x1, z: x2 };
+      const y = { x: y0, y: y1, z: y2 };
+      const z = cross(x, y);
+      const axes = spatial ? [x, y, z, x, y, z] : [x, z, y];
+      const projection = (value: Point3, axis: Point3) =>
+        value.x * axis.x + value.y * axis.y + value.z * axis.z;
+      incompatible = connection.masterMask.some((rigid, index) => {
+        if (!rigid) return false;
+        const axis = axes[index];
+        const expectedValue = index < (spatial ? 3 : 2)
+          ? projection(expected, axis)
+          : projection(theta, axis);
+        const actualValue = index < (spatial ? 3 : 2)
+          ? projection(actual, axis)
+          : projection(rotation, axis);
+        return (
+          Math.abs(expectedValue - actualValue) >
+          1e-12 + printTolerance * (Math.abs(expectedValue) + Math.abs(actualValue))
+        );
+      });
+    } else {
+      incompatible =
+        distance(theta, rotation) > 1e-12 + printTolerance * length(theta) ||
+        distance(expected, actual) >
+          1e-12 + printTolerance * (length(u) + length(theta) * length(arm));
+    }
+    if (incompatible) {
+      throw new Error(
+        `O resultado do OOFEM é incompatível com o movimento rígido entre os nós de análise ${joint.number} e ${n.number}.`,
+      );
+    }
+  }
   const forces = new Map<number, number[]>();
   for (const m of rawOutput.matchAll(
     /beam element\s+(\d+)\s+\(\s*\d+\)\s*:\r?\n[^\n]*local displacements[^\n]*\n[ \t]*local end forces[ \t]+([^\n]+)/g,
@@ -488,29 +931,71 @@ export function parseOofemOutput(
     };
     // Internal editable joints can exchange forces with loads, supports and other bars.
     if (!stations.length) stations.push(station(false));
-    else if (input.nodes[e.start - 1].objectId)
+    else if (
+      input.nodes[e.start - 1].objectId ||
+      input.nodes[e.start - 1].master ||
+      input.nodes[e.start - 1].pointLoadStation
+    )
       stations.push({ ...station(false), side: "right" });
     const end = station(true);
-    if (e.t1 < 1 && input.nodes[e.end - 1].objectId) end.side = "left";
+    if (
+      e.t1 < 1 &&
+      (input.nodes[e.end - 1].objectId ||
+        input.nodes[e.end - 1].master ||
+        input.nodes[e.end - 1].pointLoadStation)
+    )
+      end.side = "left";
     stations.push(end);
   }
   const reactions: Reaction[] = [];
   const printedLocalReactions: Reaction[] = [];
+  const imposed = caseMotions(
+    input.project,
+    input.project.analysisCases.find((c) => c.id === input.caseId)!,
+  );
   for (const n of input.project.nodes) {
-    if (!Object.values(n.restraints).some(Boolean)) continue;
+    if (!hasSupport(n)) continue;
     const num = modelNumbers.get(n.id)!;
-    const result = nodalLoad(n.id);
+    const result = nodalLoad(n.id),
+      prescribed = nodalLoad(n.id);
+    const localDisplacements = nodeOutput.get(num)!;
     for (const [key, dof, axis] of dofs) {
       if (n.restraints[key]) {
+        const expected = imposed.get(n.id)?.[key] ?? 0;
+        if (
+          Math.abs(localDisplacements.get(dof)! - expected) >
+          1e-12 + 2e-8 * Math.abs(expected)
+        )
+          throw new Error(
+            `Movimento calculado incompatível com a prescrição em ${n.name}, ${key.toUpperCase()} no referencial do apoio.`,
+          );
         const value = reactionMap.get(`${num}:${dof}`);
         if (value === undefined)
           throw new Error(`Reação ausente em ${n.name}, ${key}.`);
-        result[axis] = value;
+        prescribed[axis] = result[axis] = value;
+      } else if (hasSpring(n, key)) {
+        // Use the printed nodal component in the support frame to recover the
+        // action of the spring on the structure at the physical node.
+        const value = -n.springs![key]! * localDisplacements.get(dof)!;
+        if (!Number.isFinite(value))
+          throw new Error(
+            `Reação de mola fora do intervalo numérico em ${n.name}, ${key}.`,
+          );
+        result[axis] = value === 0 ? 0 : value;
       }
+    }
+    if (n.foundation) {
+      const reaction = foundationReaction(
+        n.foundation,
+        dofs.map(([, dof]) => localDisplacements.get(dof)!),
+      );
+      dofs.forEach(([, , axis], i) => {
+        result[axis] += reaction[i];
+      });
     }
     const basis = frames.get(num);
     if (basis) {
-      printedLocalReactions.push(result);
+      printedLocalReactions.push(prescribed);
       const force = supportToGlobal(
         { x: result.fx, y: result.fy, z: result.fz },
         basis,
@@ -620,15 +1105,55 @@ export function checkEquilibrium(
   }
   for (const f of p.analysisCases.find((c) => c.id === caseId)!.factors) {
     const pat = p.loadPatterns.find((l) => l.id === f.patternId)!;
-    for (const l of pat.nodal) accumulateNodal(l, f.factor);
-    for (const l of pat.uniform) {
+    if (!f.factor) continue;
+    for (const l of [
+      ...pat.nodal,
+      ...patternWind(byId, p.mode, pat).flatMap((w) => w.loads),
+    ])
+      accumulateNodal(l, f.factor);
+    for (const load of pat.points ?? []) {
+      const m = members.get(load.memberId)!;
+      const line = memberAxis(m, byId.get(m.start)!, byId.get(m.end)!);
+      const v = scale(
+        actionVector(load, beamAxes(line.start, line.end, m.roll, p.mode)),
+        f.factor,
+      );
+      accumulate(
+        load.kind === "force" ? v : origin,
+        load.kind === "moment" ? v : origin,
+        interpolate(
+          line.start,
+          line.end,
+          pointFraction(load.position, line.span),
+        ),
+      );
+    }
+    for (const load of pat.distributed ?? []) {
+      const m = members.get(load.memberId)!,
+        line = memberAxis(m, byId.get(m.start)!, byId.get(m.end)!);
+      const basis = beamAxes(line.start, line.end, m.roll, p.mode),
+        [a, b] = loadInterval(load, line.span);
+      const q0 = globalIntensity(load.qStart, load.system, basis),
+        q1 = globalIntensity(load.qEnd, load.system, basis);
+      // About the interval midpoint the first moment remains nonzero for q0 = −q1.
+      const pa = interpolate(line.start, line.end, a / line.span),
+        pb = interpolate(line.start, line.end, b / line.span);
+      const force = scale(add(q0, q1), ((b - a) * f.factor) / 2);
+      const couple = cross(
+        subtract(pb, pa),
+        scale(subtract(q1, q0), ((b - a) * f.factor) / 12),
+      );
+      accumulate(force, couple, interpolate(pa, pb, 0.5));
+    }
+    for (const l of [...pat.uniform, ...selfWeightSummary(p, pat).members]) {
       const m = members.get(l.memberId)!;
       const a = byId.get(m.start)!,
         b = byId.get(m.end)!;
+      const line = memberAxis(m, a, b);
       accumulate(
-        scale({ x: l.qx, y: l.qy, z: l.qz }, distance(a, b) * f.factor),
+        scale({ x: l.qx, y: l.qy, z: l.qz }, line.span * f.factor),
         origin,
-        interpolate(a, b, 0.5),
+        interpolate(line.start, line.end, 0.5),
       );
     }
   }

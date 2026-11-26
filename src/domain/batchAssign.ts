@@ -9,7 +9,12 @@ import {
   type UniformLoad,
 } from "./model";
 
-import { supportDofs, type SupportDof } from "./supports";
+import {
+  hasSpring,
+  setRigidSupport,
+  supportDofs,
+  type SupportDof,
+} from "./supports";
 
 export type DofKey = SupportDof;
 export type SupportAction = "keep" | "restrict" | "release";
@@ -35,7 +40,7 @@ export type ValueSummary =
   | { kind: "uniform"; value: number }
   | { kind: "mixed"; min: number; max: number };
 
-export type SupportSummary = "restricted" | "free" | "mixed";
+export type SupportSummary = "restricted" | "elastic" | "free" | "mixed";
 
 export type SectionSummary =
   | { kind: "uniform"; sectionId: string }
@@ -141,12 +146,15 @@ export function summarizeBatchSelection(
   const restraints: Partial<Record<DofKey, SupportSummary>> = {};
   for (const dof of activeDofs) {
     const fixedCount = nodes.filter((n) => n.restraints[dof]).length;
+    const springCount = nodes.filter((n) => hasSpring(n, dof)).length;
     restraints[dof] =
-      fixedCount === 0
+      fixedCount === 0 && springCount === 0
         ? "free"
         : fixedCount === nodes.length
           ? "restricted"
-          : "mixed";
+          : springCount === nodes.length
+            ? "elastic"
+            : "mixed";
   }
 
   const nodal: Partial<Record<NodalLoadKey, ValueSummary>> = {};
@@ -371,7 +379,7 @@ function planBatchAssignment(
     )
     .map((dof) => ({ dof, fixed: spec.restraints![dof] === "restrict" }));
   const supportNodes = nodes.filter((n) =>
-    actions.some((a) => n.restraints[a.dof] !== a.fixed),
+    actions.some((a) => n.restraints[a.dof] !== a.fixed || hasSpring(n, a.dof)),
   );
   const sectionMembers = spec.sectionId
     ? members.filter((m) => m.sectionId !== spec.sectionId)
@@ -405,7 +413,8 @@ export function applyBatchAssignment(
   const plan = planBatchAssignment(project, selection, patternId, spec);
   for (const member of plan.sectionMembers) member.sectionId = spec.sectionId!;
   for (const node of plan.supportNodes)
-    for (const { dof, fixed } of plan.actions) node.restraints[dof] = fixed;
+    for (const { dof, fixed } of plan.actions)
+      setRigidSupport(node, dof, fixed);
   plan.pattern.nodal = plan.nodal.rows;
   plan.pattern.uniform = plan.uniform.rows;
   return {

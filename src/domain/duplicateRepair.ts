@@ -1,3 +1,14 @@
+import { rebaseThermal, sameThermal, setThermalField } from "./thermalLoads";
+import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
+import { rebaseDistributedLoad } from "./memberDistributedLoads";
+import {
+  pointLoadFrame,
+  rebasePointLoad,
+  type LoadFrame,
+} from "./memberPointLoads";
+import { remapDiaphragmNodes } from "./diaphragms";
+import { centeredOffsets } from "./memberOffsets";
+import { sameStiffness } from "./memberStiffness";
 import { distance, tolerance } from "./geometry";
 import {
   endpoints,
@@ -19,7 +30,13 @@ import {
   type Project,
   type StructuralNode,
 } from "./model";
-import { sameSupportAxes } from "./supports";
+import {
+  combineSupport,
+  hasElasticSupport,
+  hasSpring,
+  hasSupport,
+  sameSupportAxes,
+} from "./supports";
 
 export type Decisions = {
   nodes: Merge[];
@@ -43,11 +60,18 @@ export type Question = {
 type Item = { id: string; name: string };
 export const named = (item: Item) => `${item.name} [${item.id}]`;
 const dofs = Object.keys(free()) as (keyof ReturnType<typeof free>)[];
-const hasRestraints = (n: StructuralNode) => dofs.some((k) => n.restraints[k]);
 export const supportText = (node: StructuralNode) => {
   const keys = dofs
-    .filter((k) => node.restraints[k])
-    .map((k) => k.toUpperCase())
+    .flatMap((k) =>
+      node.restraints[k]
+        ? [k.toUpperCase()]
+        : hasSpring(node, k)
+          ? [
+              `${k.toUpperCase()} elástico (${node.springs![k]} ${k[0] === "u" ? "N/m" : "N·m/rad"})`,
+            ]
+          : [],
+    )
+    .concat(node.foundation ? [`Fundação ${node.foundation.name}`] : [])
     .join(", ");
   return keys
     ? `${keys} · ${node.supportFrame ? "referencial local" : "referencial global"}`
@@ -170,16 +194,22 @@ export function planRepair(
       supports = ids.map((id) => nodes.get(id)!);
     for (const n of supports)
       notes.push(`Apoio · ${named(n)} → ${label} · ${supportText(n)}`);
-    const restrained = supports.filter(hasRestraints);
-    const targetFrame = (hasRestraints(dst) ? dst : restrained[0])
-      ?.supportFrame;
-    const canUnion = restrained.every((n) =>
-      sameSupportAxes(n.supportFrame, targetFrame),
-    );
+    const restrained = supports.filter(hasSupport);
+    const elasticCount = restrained.filter(hasElasticSupport).length;
+    const targetFrame = (hasSupport(dst) ? dst : restrained[0])?.supportFrame;
+    const hasFoundation = restrained.some((n) => n.foundation);
+    const canUnion =
+      !hasFoundation &&
+      restrained.every((n) => sameSupportAxes(n.supportFrame, targetFrame));
     if (
       !canUnion ||
+      elasticCount > 1 ||
       supports.some((n) =>
-        dofs.some((k) => n.restraints[k] !== dst.restraints[k]),
+        dofs.some(
+          (k) =>
+            n.restraints[k] !== dst.restraints[k] ||
+            (n.springs?.[k] ?? 0) !== (dst.springs?.[k] ?? 0),
+        ),
       )
     ) {
       const value = ask(
@@ -190,7 +220,9 @@ export function planRepair(
             ? [
                 {
                   value: "union",
-                  label: "Unir os graus de liberdade restringidos",
+                  label: elasticCount
+                    ? "Unir vínculos e somar molas em paralelo"
+                    : "Unir os graus de liberdade restringidos",
                 },
               ]
             : []),
@@ -202,16 +234,65 @@ export function planRepair(
         else delete dst.supportFrame;
         for (const k of dofs)
           dst.restraints[k] = supports.some((n) => n.restraints[k]);
+        delete dst.springs;
+        for (const n of supports) combineSupport(dst, n);
       } else if (value) {
         const chosen = nodes.get(value.slice(4))!;
         dst.restraints = { ...chosen.restraints };
+        if (chosen.foundation)
+          dst.foundation = structuredClone(chosen.foundation);
+        else delete dst.foundation;
+        if (chosen.springs) dst.springs = { ...chosen.springs };
+        else delete dst.springs;
         if (chosen.supportFrame) dst.supportFrame = chosen.supportFrame;
         else delete dst.supportFrame;
       }
       if (value) notes.push(`Apoio final · ${label} · ${supportText(dst)}`);
     }
-    for (const pat of p.loadPatterns)
+    for (const pat of p.loadPatterns) {
       pat.nodal = resolveRows(pat.nodal, ids, nodes, "nodeId", pat);
+      const original = pat.prescribed?.filter((r) => ids.includes(r.nodeId));
+      if (!original?.length) continue;
+      pat.prescribed = pat.prescribed!.filter((r) => !ids.includes(r.nodeId));
+      const contributions = supports.flatMap((n) => {
+        const rows = original.filter((r) => r.nodeId === n.id);
+        if (rows.length && !sameSupportAxes(n.supportFrame, dst.supportFrame)) {
+          blocking.push(
+            `${pat.name} · ${n.name}: alinhe os eixos dos apoios antes de unir nós com movimentos prescritos.`,
+          );
+          return [];
+        }
+        return transformMotions(
+          rows,
+          keep,
+          n.supportFrame,
+          dst.supportFrame,
+          (v) => v,
+          1,
+        ).map((r) => ({ ...r, source: n.id }));
+      });
+      for (const dof of dofs) {
+        const rows = contributions.filter((r) => r.dof === dof);
+        if (!rows.length) continue;
+        if (!dst.restraints[dof]) {
+          blocking.push(
+            `${label} · ${dof.toUpperCase()}: a união precisa conservar a restrição do movimento prescrito em ${pat.name}.`,
+          );
+          continue;
+        }
+        let selected = rows[0];
+        if (rows.some((r) => r.value !== selected.value)) {
+          const choice = ask(
+            ["motion", pat.id, dof, ...ids],
+            `Movimentos ${dof.toUpperCase()} diferentes em ${pat.name} para ${label}`,
+            rows.map((r) => sourceOption(nodes.get(r.source)!)),
+          );
+          if (!choice) continue;
+          selected = rows.find((r) => choice === "use:" + r.source)!;
+        }
+        setPrescribedMotion(pat, { nodeId: keep, dof, value: selected.value });
+      }
+    }
   }
   for (const m of stage.members) {
     const old = members.get(m.id)!;
@@ -255,8 +336,133 @@ export function planRepair(
         acknowledge,
       );
     }
-    for (const pat of p.loadPatterns)
+    const ends = dst.offsets ?? centeredOffsets;
+    if (ids.some((id) => !sameStiffness(members.get(id)!, dst, source.mode))) {
+      ask(
+        ["stiffness", ...ids],
+        `Conservar os modificadores de rigidez de ${named(dst)}`,
+        acknowledge,
+      );
+    }
+    if (
+      ids.some((id) => {
+        const source = members.get(id)!.offsets ?? centeredOffsets;
+        const same = candidate.get(id)!.start === candidate.get(keep)!.start;
+        return (["i", "j"] as const).some((side) => {
+          const other = source[same ? side : side === "i" ? "j" : "i"];
+          return (
+            ends[side].rigidLength !== other.rigidLength ||
+            distance(ends[side].eccentricity, other.eccentricity) > 0
+          );
+        });
+      })
+    )
+      ask(
+        ["offsets", ...ids],
+        `Conservar as excentricidades e os trechos rígidos de ${named(dst)}`,
+        acknowledge,
+      );
+    for (const pat of p.loadPatterns) {
       pat.uniform = resolveRows(pat.uniform, ids, members, "memberId", pat);
+      function mergeActions<T extends { memberId: string }>(
+        actions: T[],
+        key: string,
+        label: string,
+        rebase: (l: T, from: LoadFrame, to: LoadFrame, id: string) => T,
+      ) {
+        const owners = new Set(
+          actions
+            .filter((l) => ids.includes(l.memberId))
+            .map((l) => l.memberId),
+        );
+        if (!owners.size) return actions;
+        const policy =
+          owners.size === 1
+            ? "all"
+            : ask(
+                [key, pat.id, ...ids],
+                `${label} de ${pat.name} em ${dst.name}`,
+                [
+                  { value: "all", label: "Manter as ações de todas as barras" },
+                  ...ids.map((id) => sourceOption(members.get(id)!)),
+                ],
+              );
+        const target = pointLoadFrame(
+          survivingMembers.get(keep)!,
+          nodeDraft,
+          p.mode,
+        );
+        const result = actions.flatMap((l) => {
+          if (!owners.has(l.memberId)) return [l];
+          if (policy !== "all" && policy !== "use:" + l.memberId) return [];
+          return [
+            rebase(
+              l,
+              pointLoadFrame(members.get(l.memberId)!, nodes, p.mode),
+              target,
+              keep,
+            ),
+          ];
+        });
+        notes.push(`${pat.name}: ${label} na união de ${dst.name}.`);
+        return result;
+      }
+      if (pat.thermal?.some((f) => ids.includes(f.memberId))) {
+        const target = pointLoadFrame(
+          survivingMembers.get(keep)!,
+          nodeDraft,
+          p.mode,
+        );
+        const destSection = p.sections.find((s) => s.id === dst.sectionId)!;
+        const fields = pat.thermal
+          .filter((f) => ids.includes(f.memberId))
+          .map((f) => {
+            const m = members.get(f.memberId)!;
+            const from = pointLoadFrame(m, nodes, p.mode);
+            const section = p.sections.find((s) => s.id === m.sectionId)!;
+            return {
+              source: m,
+              field: rebaseThermal(
+                f,
+                from.axes,
+                target.axes,
+                keep,
+                section,
+                destSection,
+              ),
+            };
+          });
+        let selected = fields[0];
+        if (!fields.every((row) => sameThermal(row.field, selected.field))) {
+          const choice = ask(
+            ["thermal", pat.id, ...ids],
+            `Ação térmica de ${pat.name} em ${dst.name}`,
+            fields.map((row) => sourceOption(row.source)),
+          );
+          selected =
+            fields.find((row) => choice === "use:" + row.source.id) ?? selected;
+        }
+        pat.thermal = pat.thermal.filter((f) => !ids.includes(f.memberId));
+        setThermalField(pat, selected.field);
+        notes.push(
+          `${pat.name}: conservar a ação térmica de ${named(selected.source)}.`,
+        );
+      }
+      if (pat.points)
+        pat.points = mergeActions(
+          pat.points,
+          "points",
+          "Cargas concentradas",
+          rebasePointLoad,
+        );
+      if (pat.distributed)
+        pat.distributed = mergeActions(
+          pat.distributed,
+          "distributed",
+          "Cargas por trecho",
+          (load, from, to, id) => rebaseDistributedLoad(load, from, to, id),
+        );
+    }
   }
   for (const id of stage.nulls) {
     const m = members.get(id)!;
@@ -268,6 +474,22 @@ export function planRepair(
             `${named(pat)} · excluir carga de ${named(m)} · ${formatLoad(l)}`,
           );
         pat.uniform = pat.uniform.filter((l) => l.memberId !== id);
+        if (pat.thermal?.some((f) => f.memberId === id)) {
+          notes.push(`${pat.name}: excluir a ação térmica de ${named(m)}.`);
+          pat.thermal = pat.thermal.filter((f) => f.memberId !== id);
+        }
+        if (pat.distributed?.some((l) => l.memberId === id)) {
+          notes.push(
+            `${pat.name}: excluir as cargas por trecho de ${named(m)}.`,
+          );
+          pat.distributed = pat.distributed.filter((l) => l.memberId !== id);
+        }
+        if (pat.points?.some((l) => l.memberId === id)) {
+          notes.push(
+            `${pat.name}: excluir as cargas concentradas de ${named(m)}.`,
+          );
+          pat.points = pat.points.filter((l) => l.memberId !== id);
+        }
       }
     } else if (distance(nodes.get(m.start)!, nodes.get(m.end)!) >= tolerance)
       blocking.push(
@@ -337,6 +559,12 @@ export function planRepair(
           `Grupo ${named(group)} · ${obj.id} → ${ids[0] ?? "removido"}`,
         );
     }
+  for (const pattern of p.loadPatterns)
+    for (const strip of pattern.wind ?? []) {
+      strip.bottomId = changedNode.get(strip.bottomId) ?? strip.bottomId;
+      strip.topId = changedNode.get(strip.topId) ?? strip.topId;
+    }
+  remapDiaphragmNodes(p, nodeRefs);
   remapGroups(p, "node", nodeRefs);
   remapGroups(p, "member", memberRefs);
   const changes = changedNode.size + changedMember.size + removed.size;

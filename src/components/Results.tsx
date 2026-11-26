@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
+import { caseMotions, combinationMotions } from "../domain/prescribedMotions";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
-import { supportBasis, supportToLocal } from "../domain/supports";
+import {
+  hasElasticSupport,
+  supportBasis,
+  supportsDof,
+  supportToLocal,
+} from "../domain/supports";
+import type { AnalysisDiagnostic } from "../domain/diagnostics";
 import type {
   AnalysisResult,
   Displacement,
@@ -23,7 +30,9 @@ import {
   getForceLabel,
   formatResult,
   resultFractionDigits,
+  reportsSectionSides,
   sectionSide,
+  sectionPositions,
 } from "./resultFormatting";
 
 type ResultView =
@@ -53,9 +62,11 @@ export function buildResultTable(
   result: StructuralResult | null,
   forceMemberId = "",
   units: UnitPreferences = DEFAULT_UNITS,
+  view?: ResultView,
 ) {
   const spatial = project.mode === "spatial";
-  const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
+  const modelMembers = new Map(project.members.map((m) => [m.id, m]));
+  const nodes = new Map(project.nodes.map((node) => [node.id, node]));
   const includeMemberIds =
     tab === "forces" && hasAmbiguousMemberNames(project.members);
   const memberNames = new Map(
@@ -70,7 +81,6 @@ export function buildResultTable(
     const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
       ? ["fx", "fy", "fz", "mx", "my", "mz"]
       : ["fx", "fz", "my"];
-    const nodes = new Map(project.nodes.map((node) => [node.id, node]));
     const hasLocal = (result?.reactions ?? []).some(
       ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
     );
@@ -86,7 +96,7 @@ export function buildResultTable(
       headers.push(...componentHeaders("local"), "Referencial do apoio");
     rows = (result?.reactions ?? []).map((r) => {
       const row: (string | number)[] = [
-        nodeNames.get(r.nodeId) ?? r.nodeId,
+        nodes.get(r.nodeId)?.name ?? r.nodeId,
         ...keys.map((key) => fromSI(r[key], quantity(key), units)),
       ];
       if (hasLocal) {
@@ -98,7 +108,8 @@ export function buildResultTable(
         row.push(
           ...keys.map((key) => {
             const axis = key[1] as "x" | "y" | "z";
-            return node.restraints[`${key[0] === "f" ? "u" : "r"}${axis}`]
+            return node.foundation ||
+              supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
               ? fromSI(local[key], quantity(key), units)
               : 0;
           }),
@@ -108,6 +119,20 @@ export function buildResultTable(
       return row;
     });
   } else if (tab === "displacements") {
+    const showImposed =
+      !!view && project.loadPatterns.some((p) => p.prescribed?.length);
+    const imposed =
+      showImposed && result
+        ? view.kind === "case"
+          ? caseMotions(project, view.definition)
+          : combinationMotions(project, view.definition)
+        : undefined;
+    const keys = spatial
+      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+      : (["ux", "uz", "ry"] as const);
+    const hasLocal = project.nodes.some(
+      (node) => node.supportFrame && (showImposed || hasElasticSupport(node)),
+    );
     const values = (d: Displacement) => [
       ...[d.ux, ...(spatial ? [d.uy] : []), d.uz].map((value) =>
         fromSI(value, "displacement", units),
@@ -115,32 +140,81 @@ export function buildResultTable(
       ...(spatial ? [d.rx, d.ry, d.rz] : [d.ry]).map((value) => value * 1000),
     ];
     const displacement = unitLabel("displacement", units);
-    headers = [
-      "Nó / estação",
+    const components = (suffix = "") => [
       ...["UX", ...(spatial ? ["UY"] : []), "UZ"].map(
-        (label) => `${label} (${displacement})`,
+        (label) => `${label}${suffix} (${displacement})`,
       ),
       ...(spatial ? ["RX", "RY", "RZ"] : ["RY"]).map(
-        (label) => `${label} (mrad)`,
+        (label) => `${label}${suffix} (mrad)`,
       ),
     ];
+    const localColumns = hasLocal
+      ? [
+          ...components(showImposed ? " calculado local" : " local"),
+          "Referencial do apoio",
+        ]
+      : [];
+    headers = [
+      "Nó / estação",
+      ...components(
+        showImposed
+          ? " calculado global"
+          : hasLocal || project.nodes.some((n) => n.foundation)
+            ? " global"
+            : "",
+      ),
+      ...localColumns,
+      ...(showImposed ? components(" imposto no apoio") : []),
+    ];
     rows = [
-      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => [
-        nodeNames.get(id) ?? id,
-        ...values(d),
-      ]),
+      ...Object.entries(result?.displacements ?? {}).map(([id, d]) => {
+        const node = nodes.get(id);
+        const row: (string | number)[] = [node?.name ?? id, ...values(d)];
+        if (hasLocal) {
+          const frame = node?.supportFrame;
+          const basis = supportBasis(frame);
+          const u = supportToLocal({ x: d.ux, y: d.uy, z: d.uz }, basis);
+          const r = supportToLocal({ x: d.rx, y: d.ry, z: d.rz }, basis);
+          row.push(
+            ...values({ ux: u.x, uy: u.y, uz: u.z, rx: r.x, ry: r.y, rz: r.z }),
+            frame ? "Local" : "Global",
+          );
+        }
+        if (showImposed)
+          for (const key of keys) {
+            const value = imposed?.get(id)?.[key] ?? 0;
+            row.push(
+              node?.restraints[key]
+                ? key[0] === "u"
+                  ? fromSI(value, "displacement", units)
+                  : value * 1000
+                : "",
+            );
+          }
+        return row;
+      }),
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
         stations
-          .slice(1, -1)
-          .filter((s) => s.side !== "right")
+          .filter(
+            (s) =>
+              s.side !== "right" &&
+              ((s.t > 0 && s.t < 1) || modelMembers.get(id)?.offsets),
+          )
           .map((s) => [
-            `${memberNames.get(id) ?? id} · x/L ${s.t}`,
+            `${memberNames.get(id) ?? id} · ${s.t === 0 ? "face i" : s.t === 1 ? "face j" : `x/L ${s.t}`}`,
             ...values(s),
+            ...localColumns.map(() => ""),
+            ...(showImposed ? keys.map(() => "") : []),
           ]),
       ),
     ];
   } else if (tab === "forces") {
     const components = forceColumns[project.mode];
+    const visible = project.members.filter(
+      (m) => !forceMemberId || m.id === forceMemberId,
+    );
+    const includeSide = reportsSectionSides(project);
+    const positions = sectionPositions(project, visible, units);
     headers = [
       "Barra",
       "x/L",
@@ -148,9 +222,8 @@ export function buildResultTable(
         const { symbol, unit } = getForceLabel(key, units);
         return `${symbol} (${unit})`;
       }),
-      ...(project.meshConnections.length
-        ? ["Lado da seção", "ID da barra"]
-        : []),
+      ...(includeSide ? ["Lado da seção", "ID da barra"] : []),
+      ...positions.headers,
     ];
     rows = Object.entries(result?.members ?? {})
       .filter(([id]) => !forceMemberId || id === forceMemberId)
@@ -159,7 +232,8 @@ export function buildResultTable(
           memberNames.get(id) ?? id,
           s.t,
           ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
-          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
+          ...(includeSide ? [sectionSide(s.side), id] : []),
+          ...positions.values(id, s.t),
         ]),
       );
   }
@@ -179,6 +253,7 @@ export function buildResultCsv(
     view.result,
     forceMemberId,
     units,
+    view,
   );
   const { definition } = view;
   const combination = view.kind === "combination" ? view.definition : null;
@@ -202,6 +277,9 @@ export default function Results({
   running,
   cancelling,
   openRunHistory,
+  diagnostics = [],
+  diagnosticsNavigable = false,
+  onInspectDiagnostic,
 }: {
   project: Project;
   forceMemberId: string;
@@ -211,6 +289,9 @@ export default function Results({
   running: boolean;
   cancelling: boolean;
   openRunHistory?: () => void;
+  diagnostics?: AnalysisDiagnostic[];
+  diagnosticsNavigable?: boolean;
+  onInspectDiagnostic?: (diagnostic: AnalysisDiagnostic) => void;
 }) {
   const { units } = useUnits();
   const [tab, setTab] = useState("log");
@@ -243,6 +324,7 @@ export default function Results({
     result,
     forceMemberId,
     units,
+    view,
   );
   return (
     <section className="results">
@@ -337,16 +419,46 @@ export default function Results({
           </p>
         )}
         {tab === "log" ? (
-          <div className="message-log">
-            <span className={running ? "working" : "log-dot"} />
-            <pre role="status">
-              {cancelling
-                ? "Cancelando execução do OOFEM…"
-                : running
-                  ? "OOFEM em execução…"
-                  : logMessage}
-            </pre>
-          </div>
+          <>
+            <div className="message-log">
+              <span className={running ? "working" : "log-dot"} />
+              <pre role="status">
+                {cancelling
+                  ? "Cancelando execução do OOFEM…"
+                  : running
+                    ? "OOFEM em execução…"
+                    : logMessage}
+              </pre>
+            </div>
+            {diagnostics.length > 0 && (
+              <div className="analysis-diagnostics" aria-label="Diagnósticos">
+                {diagnostics.map((diagnostic) => (
+                  <article key={diagnostic.id}>
+                    <strong>
+                      {diagnostic.severity === "erro" ? "Erro" : "Aviso"} ·{" "}
+                      {diagnostic.stage}
+                    </strong>
+                    <p>{diagnostic.message}</p>
+                    <p>{diagnostic.action}</p>
+                    {diagnostic.objects.length > 0 && diagnosticsNavigable && (
+                      <button
+                        type="button"
+                        onClick={() => onInspectDiagnostic?.(diagnostic)}
+                      >
+                        Inspecionar {diagnostic.objects.length} objeto(s)
+                      </button>
+                    )}
+                    {diagnostic.objects.length > 0 && !diagnosticsNavigable && (
+                      <small>
+                        Este diagnóstico pertence a uma revisão anterior do
+                        modelo.
+                      </small>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         ) : !result && view.kind === "combination" ? (
           <div className="no-results">{view.problem.replace("\n", " ")}</div>
         ) : !result ? (
@@ -361,6 +473,19 @@ export default function Results({
           </div>
         ) : (
           <table>
+            {(project.members.some((m) => m.offsets) ||
+              (tab !== "forces" &&
+                project.nodes.some((n) => n.foundation))) && (
+              <caption>
+                {tab === "forces"
+                  ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
+                  : tab === "reactions"
+                    ? "Ações dos apoios sobre a estrutura, com forças e momentos referidos ao nó."
+                    : headers.includes("Referencial do apoio")
+                      ? "Deslocamentos nos nós de lançamento e nas estações do trecho deformável. As colunas identificam o referencial."
+                      : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
+              </caption>
+            )}
             <thead>
               <tr>
                 {headers.map((h) => (
@@ -377,8 +502,7 @@ export default function Results({
                         ? formatResult(
                             v,
                             tab === "displacements" &&
-                              j > 0 &&
-                              j <= (project.mode === "spatial" ? 3 : 2)
+                              headers[j].startsWith("U")
                               ? resultFractionDigits("displacement", units)
                               : 5,
                           )

@@ -1,3 +1,5 @@
+import { patternWind } from "../domain/wind";
+import { thermalLabel } from "../domain/thermalLoads";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -5,7 +7,18 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import { beamStations } from "../domain/beamMesh";
+import {
+  actionVector,
+  pointFraction,
+  type MemberPointLoad,
+} from "../domain/memberPointLoads";
+import {
+  distributedArrows,
+  distributedLoadLabel,
+} from "./DistributedLoadGlyph";
+import { pointLoadLabel } from "./PointLoadGlyph";
+import { memberAxis } from "../domain/memberOffsets";
+import { beamMeshLayout } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import { formatResult } from "./resultFormatting";
 import { Maximize, Plus, Minus } from "lucide-react";
@@ -14,6 +27,7 @@ import {
   coordinates,
   distance,
   interpolate,
+  scale,
   tolerance,
   type Point3,
 } from "../domain/geometry";
@@ -62,6 +76,14 @@ function createModelMaterials() {
     selectedSlab: new THREE.MeshStandardMaterial(),
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
+    rigidArm: new THREE.LineBasicMaterial(),
+    launchAxis: new THREE.LineDashedMaterial({
+      dashSize: 0.12,
+      gapSize: 0.08,
+      transparent: true,
+      opacity: 0.5,
+    }),
+    load: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
     axisX: new THREE.LineBasicMaterial({ depthTest: false }),
     axisY: new THREE.LineBasicMaterial({ depthTest: false }),
@@ -172,6 +194,44 @@ function drawMemberAxes(
   }
 }
 
+function drawPointAction(
+  group: THREE.Group,
+  material: THREE.LineBasicMaterial,
+  at: THREE.Vector3,
+  vector: Point3,
+  span: number,
+  kind: MemberPointLoad["kind"],
+  proportion = 1,
+) {
+  const length = Math.min(Math.max(span * 0.12, 0.18), 1.1) * proportion;
+  const dir = scenePoint(vector).normalize();
+  const side = dir
+    .clone()
+    .cross(
+      Math.abs(dir.y) < 0.9
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(1, 0, 0),
+    )
+    .normalize();
+  const points = [at.clone().addScaledVector(dir, -length), at];
+  for (const fraction of kind === "moment" ? [0, 0.32] : [0]) {
+    const tip = at.clone().addScaledVector(dir, -length * fraction);
+    const neck = tip.clone().addScaledVector(dir, -length * 0.22);
+    points.push(
+      tip,
+      neck.clone().addScaledVector(side, length * 0.1),
+      tip,
+      neck.clone().addScaledVector(side, -length * 0.1),
+    );
+  }
+  group.add(
+    new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(points),
+      material,
+    ),
+  );
+}
+
 function loadComponents<T>(
   loads: T[],
   keys: (keyof T & string)[],
@@ -201,6 +261,7 @@ export default function SpatialView({
   selection,
   result,
   onSelect,
+  onPickLoad,
 }: LayerControls & {
   active: boolean;
   onActivate: () => void;
@@ -212,12 +273,15 @@ export default function SpatialView({
   selection: SelectedObject[];
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
+  onPickLoad?: (id: string, point: Point3) => void;
 }) {
   const { units } = useUnits();
   const container = useRef<HTMLDivElement>(null),
     state = useRef<SceneState | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const pickLoad = useRef(onPickLoad);
+  pickLoad.current = onPickLoad;
   const [error, setError] = useState(false);
   const deformationScale = useMemo(() => {
     if (!result) return 0;
@@ -285,8 +349,11 @@ export default function SpatialView({
       materials.axisZ.color.set(color("--axis-z"));
       materials.slab.color.set(color("--geometry-member"));
       materials.selectedSlab.color.set(color("--geometry-selected"));
+      materials.rigidArm.color.set(color("--geometry-support"));
+      materials.launchAxis.color.set(color("--geometry-member"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
+      materials.load.color.set(color("--geometry-load"));
       materials.deformed.color.set(color("--geometry-deformed"));
       materials.meshStation.color.set(color("--geometry-deformed"));
       materials.node.color.set(color("--scene-node"));
@@ -362,7 +429,20 @@ export default function SpatialView({
       );
       const hit = ray
         .intersectObjects(model.children, true)
-        .find((h) => h.object.userData.selection);
+        .find((h) =>
+          pickLoad.current
+            ? h.object.userData.selection?.kind === "member"
+            : h.object.userData.selection,
+        );
+      if (pickLoad.current) {
+        if (hit)
+          pickLoad.current(hit.object.userData.selection.id, {
+            x: hit.point.x,
+            y: -hit.point.z,
+            z: hit.point.y,
+          });
+        return;
+      }
       select.current(
         hit?.object.userData.selection ?? null,
         additiveSelection(e),
@@ -420,6 +500,34 @@ export default function SpatialView({
       selection.map((item) => `${item.kind}:${item.id}`),
     );
     const pattern = project.loadPatterns.find(({ id }) => id === patternId);
+    const wind =
+      layers.loads && pattern ? patternWind(nodes, project.mode, pattern) : [];
+    const nodalActions = [
+      ...(pattern?.nodal ?? []),
+      ...wind.flatMap((w) => w.loads),
+    ];
+    for (const w of wind) {
+      s.model.add(
+        new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(w.corners.map(scenePoint)),
+          s.materials.load,
+        ),
+      );
+      if (layers.labels)
+        annotate(s.model, scenePoint(w.center), [
+          `${w.name} · ${w.area.toLocaleString("pt-BR")} m²`,
+        ]);
+      for (const load of w.loads)
+        if (load.fx || load.fy)
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            scenePoint(nodes.get(load.nodeId)!),
+            { x: load.fx, y: load.fy, z: 0 },
+            w.corners[1].z - w.corners[0].z,
+            "force",
+          );
+    }
     for (const slab of project.slabs) {
       const z = project.guides.z.find(
         ({ id }) => id === slab.levelId,
@@ -453,15 +561,21 @@ export default function SpatialView({
       );
     }
     if (layers.mesh) {
-      const layout = beamStations(project);
+      const layout = beamMeshLayout(project);
       const regular: THREE.Vector3[] = [];
-      const joints = new Set<string>();
+      const joints = new Map<string, { id: string; at: THREE.Vector3 }>();
+      const markJoint = (id: string, at: THREE.Vector3) =>
+        joints.set(JSON.stringify([id, at.x, at.y, at.z]), { id, at });
+      for (const { nodeId } of layout.rigidLinks)
+        markJoint(nodeId, scenePoint(nodes.get(nodeId)!));
       for (const m of project.members) {
         const a = nodes.get(m.start)!,
           b = nodes.get(m.end)!;
-        for (const { t, nodeId } of layout.get(m.id)!.slice(1, -1)) {
-          if (nodeId) joints.add(nodeId);
-          else regular.push(scenePoint(interpolate(a, b, t)));
+        const axis = memberAxis(m, a, b);
+        for (const { t, nodeId } of layout.stations.get(m.id)!.slice(1, -1)) {
+          const at = scenePoint(interpolate(axis.faceI, axis.faceJ, t));
+          if (nodeId) markJoint(nodeId, at);
+          else regular.push(at);
         }
       }
       if (regular.length) {
@@ -472,22 +586,23 @@ export default function SpatialView({
         markers.renderOrder = 2;
         s.model.add(markers);
       }
-      for (const id of joints) {
+      for (const { id, at } of joints.values()) {
         const element = document.createElement("span");
         element.className = "scene-mesh-joint";
         element.dataset.meshJoint = id;
         const ring = new CSS2DObject(element);
-        ring.position.copy(scenePoint(nodes.get(id)!));
+        ring.position.copy(at);
         s.model.add(ring);
       }
     }
     for (const m of project.members) {
       const a = nodes.get(m.start)!,
         b = nodes.get(m.end)!;
+      const axis = memberAxis(m, a, b);
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
-          scenePoint(a),
-          scenePoint(b),
+          scenePoint(axis.faceI),
+          scenePoint(axis.faceJ),
         ]),
         selectedIds.has(`member:${m.id}`)
           ? s.materials.selectedMember
@@ -525,12 +640,48 @@ export default function SpatialView({
         marker.position.copy(scenePoint(point));
         s.model.add(marker);
       }
+      if (m.offsets) {
+        if (distance(a, axis.start) || distance(b, axis.end)) {
+          const launch = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              scenePoint(a),
+              scenePoint(b),
+            ]),
+            s.materials.launchAxis,
+          );
+          launch.computeLineDistances();
+          s.model.add(launch);
+        }
+        for (const [joint, insertion, face, side] of [
+          [a, axis.start, axis.faceI, "i"],
+          [b, axis.end, axis.faceJ, "j"],
+        ] as const) {
+          if (!distance(joint, insertion) && !distance(insertion, face))
+            continue;
+          const arm = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(
+              [joint, insertion, face].map(scenePoint),
+            ),
+            s.materials.rigidArm,
+          );
+          arm.userData.selection = line.userData.selection;
+          s.model.add(arm);
+          const marker = new THREE.Points(
+            new THREE.BufferGeometry().setFromPoints([scenePoint(face)]),
+            s.materials.meshStation,
+          );
+          s.model.add(marker);
+          if (selectedIds.has(`member:${m.id}`) && layers.labels) {
+            annotate(s.model, scenePoint(face), [`Face ${side}`]);
+          }
+        }
+      }
       const loads = layers.loads
         ? (pattern?.uniform.filter((load) => load.memberId === m.id) ?? [])
         : [];
       annotate(
         s.model,
-        scenePoint(interpolate(a, b, 0.5)),
+        scenePoint(interpolate(axis.start, axis.end, 0.5)),
         [
           ...(layers.labels ? [m.name] : []),
           ...loadComponents(
@@ -542,10 +693,97 @@ export default function SpatialView({
         ],
         selectedIds.has(`member:${m.id}`),
       );
+      if (layers.loads) {
+        const axes = beamAxes(axis.start, axis.end, m.roll, project.mode);
+        const temperature = pattern?.thermal?.find((f) => f.memberId === m.id);
+        if (temperature && thermalLabel(temperature)) {
+          const at = scenePoint(interpolate(axis.faceI, axis.faceJ, 0.62));
+          const size = Math.min(Math.max(axis.span * 0.12, 0.18), 1.1);
+          const labelAt = at.clone();
+          for (const [i, delta] of [
+            temperature.deltaY,
+            temperature.deltaZ,
+          ].entries()) {
+            if (!delta) continue;
+            const vector = scale(axes[i + 1], Math.sign(delta));
+            const dir = scenePoint(vector);
+            drawPointAction(
+              s.model,
+              s.materials.load,
+              at.clone().addScaledVector(dir, size),
+              vector,
+              axis.span,
+              "force",
+            );
+            labelAt.addScaledVector(dir, size);
+          }
+          const label = annotate(s.model, labelAt, [
+            thermalLabel(temperature),
+          ])!;
+          label.element.dataset.thermalMember = m.id;
+        }
+        for (const load of pattern?.distributed ?? []) {
+          if (load.memberId !== m.id) continue;
+          const samples = distributedArrows(load, axis, axes),
+            tails: THREE.Vector3[] = [];
+          const size = Math.min(Math.max(axis.span * 0.12, 0.18), 1.1);
+          for (const sample of samples) {
+            const at = scenePoint(sample.at),
+              vector = scenePoint(sample.direction);
+            tails.push(at.clone().addScaledVector(vector, -size));
+            if (vector.length() > 1e-12)
+              drawPointAction(
+                s.model,
+                s.materials.load,
+                at,
+                sample.direction,
+                axis.span,
+                "force",
+                vector.length(),
+              );
+          }
+          s.model.add(
+            new THREE.Line(
+              new THREE.BufferGeometry().setFromPoints(tails),
+              s.materials.load,
+            ),
+          );
+          const label = annotate(
+            s.model,
+            tails[0].clone().lerp(tails.at(-1)!, 0.5),
+            [distributedLoadLabel(load, axis.span, units)],
+          )!;
+          label.element.classList.add("scene-point-load");
+          label.element.dataset.distributedLoad = load.id;
+        }
+        for (const load of pattern?.points ?? []) {
+          if (load.memberId !== m.id) continue;
+          const at = scenePoint(
+            interpolate(
+              axis.start,
+              axis.end,
+              pointFraction(load.position, axis.span),
+            ),
+          );
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            at,
+            actionVector(load, axes),
+            axis.span,
+            load.kind,
+          );
+          const label = annotate(s.model, at, [
+            pointLoadLabel(load, axis.span, units),
+          ])!;
+          label.element.classList.add("scene-point-load");
+          label.element.dataset.pointLoad = load.id;
+        }
+      }
       const stations = result?.members[m.id];
       if (stations) {
         const positions = stations.map((v) => {
-          const p = interpolate(a, b, v.t);
+          const p = interpolate(axis.faceI, axis.faceJ, v.t);
           return scenePoint({
             x: p.x + v.ux * deformationScale,
             y: p.y + v.uy * deformationScale,
@@ -570,7 +808,7 @@ export default function SpatialView({
       sphere.userData.selection = { kind: "node", id: n.id };
       s.model.add(sphere);
       const loads = layers.loads
-        ? (pattern?.nodal.filter((load) => load.nodeId === n.id) ?? [])
+        ? nodalActions.filter((load) => load.nodeId === n.id)
         : [];
       const blocked = restrainedDofs(n.restraints);
       annotate(
@@ -636,12 +874,15 @@ export default function SpatialView({
       const nodes = new Map(project.nodes.map((node) => [node.id, node]));
       for (const member of project.members) {
         if (selected.size && !selected.has(member.id)) continue;
+        const a = nodes.get(member.start)!,
+          b = nodes.get(member.end)!;
+        const axis = memberAxis(member, a, b);
         drawMemberAxes(
           s.memberAxes,
           s.materials,
           member,
-          nodes.get(member.start)!,
-          nodes.get(member.end)!,
+          { ...a, ...axis.faceI },
+          { ...b, ...axis.faceJ },
           project.mode,
         );
       }

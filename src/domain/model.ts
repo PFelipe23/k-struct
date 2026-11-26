@@ -1,8 +1,29 @@
+import { distributeWind } from "./wind";
 import { z } from "zod";
-import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
+import {
+  geometrySchemas,
+  geometryErrors,
+  defaultGeometry,
+  sectionProperties,
+} from "./sections";
+import {
+  memberStiffnessError,
+  stiffnessFactorError,
+  stiffnessLabels,
+} from "./memberStiffness";
+import { memberAxis, offsetError, setOffsets } from "./memberOffsets";
+import {
+  diaphragmErrors,
+  remapDiaphragmNodes,
+  diaphragmStability,
+} from "./diaphragms";
+import { thermalFieldError } from "./thermalLoads";
+import { distributedLoadError } from "./memberDistributedLoads";
+import { componentError, positionError } from "./memberPointLoads";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
-import { supportBasis } from "./supports";
+import { foundationConstraintRows, globalFoundationMatrix } from "./foundation";
+import { hasSpring, supportBasis, supportDofs, supportsDof } from "./supports";
 import {
   coordinates,
   cross,
@@ -310,12 +331,247 @@ const supportFrameSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
-export const projectSchema = projectV10.extend({
+const supportNodeSchema = nodeSchema.extend({
+  supportFrame: supportFrameSchema.optional(),
+});
+const projectV11 = projectV10.extend({
   schemaVersion: z.literal(11),
-  nodes: z
-    .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
+  nodes: z.array(supportNodeSchema).max(1000),
+});
+const offsetEnd = z.strictObject({
+  eccentricity: directionSchema,
+  rigidLength: finite.nonnegative(),
+});
+const offsetMemberSchema = memberSchema.extend({
+  offsets: z.strictObject({ i: offsetEnd, j: offsetEnd }).optional(),
+});
+const projectV12 = projectV11.extend({
+  schemaVersion: z.literal(12),
+  members: z
+    .array(
+      offsetMemberSchema.transform((member) => {
+        if (member.offsets) setOffsets(member, member.offsets);
+        return member;
+      }),
+    )
     .max(1000),
 });
+const stiffnessFactor = finite.positive().optional();
+const projectV13 = projectV12.extend({
+  schemaVersion: z.literal(13),
+  members: z
+    .array(
+      offsetMemberSchema
+        .extend({
+          stiffness: z
+            .strictObject({
+              ea: stiffnessFactor,
+              eiy: stiffnessFactor,
+              eiz: stiffnessFactor,
+              gj: stiffnessFactor,
+            })
+            .optional(),
+        })
+        .transform((member) => {
+          if (member.offsets) setOffsets(member, member.offsets);
+          return member;
+        }),
+    )
+    .max(1000),
+});
+const spring = finite.nonnegative().optional();
+const elasticNodeSchema = supportNodeSchema.extend({
+  springs: z
+    .strictObject({
+      ux: spring,
+      uy: spring,
+      uz: spring,
+      rx: spring,
+      ry: spring,
+      rz: spring,
+    })
+    .optional(),
+});
+const projectV14 = projectV13.extend({
+  schemaVersion: z.literal(14),
+  nodes: z.array(elasticNodeSchema).max(1000),
+});
+const projectV15 = projectV14.extend({
+  schemaVersion: z.literal(15),
+  diaphragms: z
+    .array(
+      z.strictObject({
+        id,
+        name: text,
+        levelId: id,
+        reference: z.strictObject({ x: finite, y: finite }),
+        nodeIds: z.array(id).min(2).max(1000),
+      }),
+    )
+    .max(500)
+    .optional(),
+});
+const foundationSchema = z.strictObject({
+  name: z.string().min(1).max(255),
+  fileName: z.string().min(1).max(255),
+  matrix: z.array(z.array(finite).length(6)).length(6),
+  freeDofs: z.array(z.enum(supportDofs)).max(6),
+  metadata: z.array(z.array(z.string().max(8192)).min(2).max(12)).max(512),
+  offset: directionSchema,
+  reference: z.enum(["node", "offset"]),
+  reflected: z.literal(true).optional(),
+});
+const projectV16 = projectV15.extend({
+  schemaVersion: z.literal(16),
+  nodes: z
+    .array(
+      elasticNodeSchema.extend({ foundation: foundationSchema.optional() }),
+    )
+    .max(1000),
+});
+const pointLoadSchema = z.strictObject({
+  id,
+  memberId: id,
+  kind: z.enum(["force", "moment"]),
+  system: z.enum(["global", "local"]),
+  position: z.strictObject({
+    kind: z.enum(["distance", "relative"]),
+    value: finite,
+  }),
+  components: directionSchema,
+});
+const projectV17 = projectV16.extend({
+  schemaVersion: z.literal(17),
+  loadPatterns: z
+    .array(
+      projectV16.shape.loadPatterns.element.extend({
+        points: z.array(pointLoadSchema).max(patternLoadLimit).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+const distributedSchema = z.strictObject({
+  id,
+  memberId: id,
+  system: pointLoadSchema.shape.system,
+  measure: pointLoadSchema.shape.position.shape.kind,
+  start: finite,
+  end: finite,
+  qStart: directionSchema,
+  qEnd: directionSchema,
+});
+const projectV18 = projectV17.extend({
+  schemaVersion: z.literal(18),
+  loadPatterns: z
+    .array(
+      projectV17.shape.loadPatterns.element.extend({
+        distributed: z
+          .array(distributedSchema)
+          .max(patternLoadLimit)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+const projectV19 = projectV18.extend({
+  schemaVersion: z.literal(19),
+  loadPatterns: z
+    .array(
+      projectV18.shape.loadPatterns.element.extend({
+        prescribed: z
+          .array(
+            z.strictObject({
+              nodeId: id,
+              dof: z.enum(supportDofs),
+              value: finite,
+            }),
+          )
+          .max(patternLoadLimit)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+const selfWeightSchema = z
+  .object({
+    enabled: flag,
+    direction: z.enum(["+X", "-X", "+Y", "-Y", "+Z", "-Z"]),
+    gravity: finite.nonnegative(),
+    multiplier: finite.nonnegative(),
+  })
+  .strict();
+const projectV20 = projectV19.extend({
+  schemaVersion: z.literal(20),
+  loadPatterns: z
+    .array(
+      projectV19.shape.loadPatterns.element.extend({
+        selfWeight: selfWeightSchema,
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+const projectV21 = projectV20.extend({
+  schemaVersion: z.literal(21),
+  loadPatterns: z
+    .array(
+      projectV20.shape.loadPatterns.element.extend({
+        wind: z
+          .array(
+            z.strictObject({
+              id,
+              name: text,
+              bottomId: id,
+              topId: id,
+              angle: finite.min(-360).max(360),
+              pressure: finite.nonnegative(),
+              coefficient: finite,
+              width: finite.positive(),
+              from: finite.min(0).max(1),
+              to: finite.min(0).max(1),
+            }),
+          )
+          .max(500)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export const projectSchema = projectV21.extend({
+  schemaVersion: z.literal(22),
+  loadPatterns: z
+    .array(
+      projectV21.shape.loadPatterns.element.extend({
+        thermal: z
+          .array(
+            z.strictObject({
+              memberId: id,
+              uniform: finite,
+              deltaY: finite,
+              deltaZ: finite,
+            }),
+          )
+          .max(patternLoadLimit)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export function defaultSelfWeight() {
+  return {
+    enabled: false,
+    direction: "-Z" as const,
+    gravity: 9.80665,
+    multiplier: 1,
+  };
+}
+
+export type Diaphragm = NonNullable<Project["diaphragms"]>[number];
 export type Section = z.infer<typeof sectionSchema>;
 export type Material = z.infer<typeof materialSchema>;
 export const defaultElasticProperties = {
@@ -390,7 +646,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 11,
+    schemaVersion: 22,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -416,6 +672,7 @@ export function createProject(mode: Project["mode"] = "planar"): Project {
       {
         id: "G",
         name: "Carga permanente",
+        selfWeight: defaultSelfWeight(),
         nodal: [],
         uniform: [],
         pressure: [],
@@ -674,11 +931,159 @@ export function parseProject(source: string): Project {
     const old = projectV10.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 11 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 11
+  ) {
+    const old = projectV11.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 12 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 12
+  ) {
+    const old = projectV12.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 13 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 13
+  ) {
+    const old = projectV13.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 14 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 14
+  ) {
+    const old = projectV14.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 15 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 15
+  ) {
+    const old = projectV15.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 16 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 16
+  ) {
+    const old = projectV16.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 17 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 17
+  ) {
+    const old = projectV17.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 18 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 18
+  ) {
+    const old = projectV18.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 19 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 19
+  ) {
+    const old = projectV19.safeParse(value);
+    if (old.success)
+      value = {
+        ...old.data,
+        schemaVersion: 20,
+        loadPatterns: old.data.loadPatterns.map((p) => ({
+          ...p,
+          selfWeight: defaultSelfWeight(),
+        })),
+      };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 20
+  ) {
+    const old = projectV20.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 21 };
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 21
+  ) {
+    const old = projectV21.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 22 };
+  }
   const parsed = projectSchema.safeParse(value);
-  if (!parsed.success)
-    throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 11, com valores numéricos finitos.",
+  if (!parsed.success) {
+    const factorIssue = parsed.error.issues.find(
+      ({ path }) =>
+        path[0] === "members" && path[2] === "stiffness" && path.length === 4,
     );
+    if (
+      factorIssue &&
+      value &&
+      typeof value === "object" &&
+      "members" in value &&
+      Array.isArray(value.members)
+    ) {
+      const [, index, , component] = factorIssue.path;
+      const member = value.members[Number(index)];
+      const key = component as keyof typeof stiffnessLabels;
+      const name =
+        typeof member.name === "string"
+          ? member.name
+          : String(Number(index) + 1);
+      const reason = stiffnessFactorError(member.stiffness[key]);
+      throw new Error(`Barra ${name} · ${stiffnessLabels[key]}. ${reason}`);
+    }
+    const springIssue = parsed.error.issues.find(
+      ({ path }) =>
+        path[0] === "nodes" && path[2] === "springs" && path.length === 4,
+    );
+    if (
+      springIssue &&
+      value &&
+      typeof value === "object" &&
+      "nodes" in value &&
+      Array.isArray(value.nodes)
+    ) {
+      const [, index, , dof] = springIssue.path;
+      const node = value.nodes[Number(index)];
+      const name =
+        typeof node?.name === "string" ? node.name : String(Number(index) + 1);
+      throw new Error(
+        `Nó ${name} · ${String(dof).toUpperCase()}. Informe uma rigidez de mola finita e não negativa.`,
+      );
+    }
+    throw new Error(
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 22, com valores numéricos finitos.",
+    );
+  }
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
   if (source.length * 3 > projectFileLimit) serializeProject(parsed.data);
@@ -706,6 +1111,7 @@ export function referenceErrors(p: Project): string[] {
     p.resultCombinations,
     p.resultEnvelopes,
     p.selectionGroups,
+    p.diaphragms ?? [],
     ...Object.values(p.guides),
   ]) {
     if (new Set(list.map((v) => v.id)).size !== list.length)
@@ -741,6 +1147,26 @@ export function referenceErrors(p: Project): string[] {
   }
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   for (const n of p.nodes) {
+    for (const dof of supportDofs) {
+      if (!hasSpring(n, dof)) continue;
+      if (n.restraints[dof])
+        errors.push(
+          `${n.name} (${n.id}): ${dof.toUpperCase()} tem mola e restrição rígida simultâneas.`,
+        );
+      if (p.mode === "planar" && (dof === "uy" || dof === "rx" || dof === "rz"))
+        errors.push(
+          `${n.name} (${n.id}): mola ${dof.toUpperCase()} fora do plano XZ.`,
+        );
+    }
+    if (n.foundation) {
+      if (p.mode !== "spatial")
+        errors.push(`${n.name}: uma matriz de fundação exige um nó espacial.`);
+      try {
+        globalFoundationMatrix(n.foundation, n.supportFrame);
+      } catch (error) {
+        errors.push(`${n.name}: ${(error as Error).message}`);
+      }
+    }
     if (!n.supportFrame) continue;
     if (n.supportFrame.kind !== p.mode) {
       errors.push(
@@ -754,11 +1180,33 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${n.name}: ${(error as Error).message}`);
     }
   }
+  const sections = new Map(p.sections.map((s) => [s.id, s]));
+  const materials = new Map(
+    p.materials.map((material) => [material.id, material]),
+  );
   for (const m of p.members) {
     if (!nodes.has(m.start) || !nodes.has(m.end))
       errors.push(`${m.name}: nó de extremidade inexistente.`);
-    if (!p.sections.some((s) => s.id === m.sectionId))
-      errors.push(`${m.name}: seção inexistente.`);
+    const a = nodes.get(m.start),
+      b = nodes.get(m.end);
+    if (a && b) {
+      const error = offsetError(m, a, b, p.mode);
+      if (error) errors.push(error);
+    }
+    const section = sections.get(m.sectionId);
+    if (!section) errors.push(`${m.name}: seção inexistente.`);
+    else if (m.stiffness) {
+      const material = materials.get(section.materialId);
+      if (material) {
+        const error = memberStiffnessError(
+          p.mode,
+          sectionProperties(section),
+          material,
+          m.stiffness,
+        );
+        if (error) errors.push(`${m.name} (${m.id}): ${error}`);
+      }
+    }
   }
   try {
     connectionStations(p);
@@ -796,7 +1244,90 @@ export function referenceErrors(p: Project): string[] {
       }
     }
   }
+  const membersById = new Map(p.members.map((m) => [m.id, m]));
   for (const pat of p.loadPatterns) {
+    const windIds = new Set<string>();
+    for (const strip of pat.wind ?? []) {
+      if (windIds.has(strip.id))
+        errors.push(`${pat.name}: faixa de vento com ID repetido.`);
+      windIds.add(strip.id);
+      try {
+        distributeWind(nodes, p.mode, strip);
+      } catch (error) {
+        errors.push(`${pat.name} · ${strip.name}: ${(error as Error).message}`);
+      }
+    }
+    const motions = new Set<string>();
+    for (const { nodeId, dof } of pat.prescribed ?? []) {
+      const node = nodes.get(nodeId);
+      const label = `${pat.name} · ${node?.name ?? nodeId} · ${dof.toUpperCase()}`;
+      if (!node)
+        errors.push(`${label}: movimento prescrito em nó inexistente.`);
+      else if (p.mode === "planar" && ["uy", "rx", "rz"].includes(dof))
+        errors.push(`${label}: movimento prescrito fora do plano XZ.`);
+      else if (!node.restraints[dof])
+        errors.push(
+          `${label}: o movimento prescrito exige restrição rígida. Remova a prescrição antes de liberar o grau de liberdade.`,
+        );
+      const key = nodeId + ":" + dof;
+      if (motions.has(key))
+        errors.push(`${label}: movimento prescrito repetido no mesmo padrão.`);
+      motions.add(key);
+    }
+    const seen = new Set<string>();
+    for (const load of pat.points ?? []) {
+      const m = membersById.get(load.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: carga concentrada em barra inexistente.`);
+        continue;
+      }
+      if (seen.has(load.id))
+        errors.push(`${pat.name}: carga concentrada com ID repetido.`);
+      seen.add(load.id);
+      const a = nodes.get(m.start),
+        b = nodes.get(m.end);
+      if (!a || !b) continue;
+      const error =
+        positionError(load.position, memberAxis(m, a, b).span) ??
+        componentError(load, p.mode);
+      if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+    }
+    for (const load of pat.distributed ?? []) {
+      const m = membersById.get(load.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: carga distribuída em barra inexistente.`);
+        continue;
+      }
+      if (seen.has(load.id))
+        errors.push(`${pat.name}: ID de carga distribuída repetido.`);
+      seen.add(load.id);
+      const a = nodes.get(m.start),
+        b = nodes.get(m.end);
+      if (!a || !b) continue;
+      const error = distributedLoadError(
+        load,
+        memberAxis(m, a, b).span,
+        p.mode,
+      );
+      if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+    }
+    const heated = new Set<string>();
+    for (const field of pat.thermal ?? []) {
+      const m = membersById.get(field.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: ação térmica em barra inexistente.`);
+        continue;
+      }
+      if (heated.has(m.id))
+        errors.push(`${pat.name} · ${m.name}: ação térmica repetida.`);
+      heated.add(m.id);
+      const section = sections.get(m.sectionId);
+      const material = section && materials.get(section.materialId);
+      if (section && material) {
+        const error = thermalFieldError(field, p.mode, section, material.alpha);
+        if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+      }
+    }
     if (pat.nodal.some((l) => !nodes.has(l.nodeId)))
       errors.push(`${pat.name}: carga em nó inexistente.`);
     if (pat.uniform.some((l) => !p.members.some((m) => m.id === l.memberId)))
@@ -842,6 +1373,8 @@ export function referenceErrors(p: Project): string[] {
         `Inclua cada combinação uma única vez no envelope ${envelope.name}.`,
       );
   }
+  if (!errors.length && p.diaphragms?.length)
+    errors.push(...diaphragmErrors(p));
   return errors;
 }
 
@@ -899,7 +1432,11 @@ export function analysisErrors(p: Project): string[] {
     return errors;
   }
   const byId = new Map(p.nodes.map((n) => [n.id, n]));
-  if (!p.members.length)
+  if (
+    !p.members.length &&
+    !p.diaphragms?.length &&
+    !p.nodes.some((n) => n.foundation)
+  )
     errors.push("Lance pelo menos uma barra para analisar.");
   if (p.mode === "planar") {
     if (p.nodes.some((n) => Math.abs(n.y) > 1e-8))
@@ -942,12 +1479,14 @@ export function analysisErrors(p: Project): string[] {
     if (pairs.has(key)) errors.push(`${m.name}: barra duplicada.`);
     pairs.add(key);
   }
+  const floorNodes = new Set(p.diaphragms?.flatMap((f) => f.nodeIds));
   for (const n of p.nodes) {
-    if (edges.get(n.id)!.size) continue;
+    if (edges.get(n.id)!.size || floorNodes.has(n.id)) continue;
     const host = p.members.find(
       (m) =>
         interiorParameter(n, byId.get(m.start)!, byId.get(m.end)!) !== null,
     );
+    if (n.foundation && !host) continue;
     errors.push(
       host
         ? `${n.name} está isolado no interior de ${host.name}. Use Conexões da malha.`
@@ -962,6 +1501,7 @@ export function analysisErrors(p: Project): string[] {
     errors.push(
       "Há nós coincidentes com IDs distintos. Conecte as barras ao mesmo nó.",
     );
+  const bodies: StructuralNode[][] = [];
   const visited = new Set<string>();
   for (const seed of p.nodes) {
     if (visited.has(seed.id)) continue;
@@ -974,22 +1514,27 @@ export function analysisErrors(p: Project): string[] {
       component.push(byId.get(id)!);
       stack.push(...edges.get(id)!);
     }
+    if (component.some((n) => floorNodes.has(n.id))) {
+      bodies.push(component);
+      continue;
+    }
     const span = Math.max(
-      tolerance,
+      component.length === 1 && seed.foundation ? 1 : tolerance,
       ...component.map((n) => distance(n, seed)),
     );
     const constraints: number[][] = [];
     for (const n of component) {
       const pos = scale(subtract(n, seed), 1 / span);
       const basis = supportBasis(n.supportFrame);
+      constraints.push(...foundationConstraintRows(n, pos, span));
       const row = (u: Point3, r: Point3) =>
         p.mode === "planar" ? [u.x, u.z, r.y] : [u.x, u.y, u.z, r.x, r.y, r.z];
       for (const k of coordinates) {
         const axis = basis[k];
         // a·(u + ω × r) = a·u + (r × a)·ω.
-        if (n.restraints[`u${k}`])
+        if (supportsDof(n, `u${k}`))
           constraints.push(row(axis, cross(pos, axis)));
-        if (n.restraints[`r${k}`]) constraints.push(row(origin, axis));
+        if (supportsDof(n, `r${k}`)) constraints.push(row(origin, axis));
       }
     }
     const dofs = p.mode === "planar" ? 3 : 6;
@@ -998,6 +1543,7 @@ export function analysisErrors(p: Project): string[] {
         `Estrutura ligada a ${seed.name}: apoios insuficientes para impedir movimento de corpo rígido.`,
       );
   }
+  if (bodies.length) errors.push(...diaphragmStability(p, bodies));
   return [...new Set(errors)];
 }
 
@@ -1057,14 +1603,27 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   p.meshConnections = p.meshConnections.filter(
     (l) => !nodes.has(l.nodeId) && !bars.has(l.memberId),
   );
+  remapDiaphragmNodes(p, new Map([...nodes].map((id) => [id, []])));
   p.nodes = p.nodes.filter((n) => !nodes.has(n.id));
   p.slabs = p.slabs.filter((slab) => !slabs.has(slab.id));
   const removed = { node: nodes, member: bars, slab: slabs };
   for (const group of p.selectionGroups)
     group.objects = group.objects.filter((o) => !removed[o.kind].has(o.id));
   for (const pat of p.loadPatterns) {
+    if (pat.wind)
+      pat.wind = pat.wind.filter(
+        (w) => !nodes.has(w.bottomId) && !nodes.has(w.topId),
+      );
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
+    if (pat.thermal)
+      pat.thermal = pat.thermal.filter((l) => !bars.has(l.memberId));
+    if (pat.points)
+      pat.points = pat.points.filter((l) => !bars.has(l.memberId));
+    if (pat.distributed)
+      pat.distributed = pat.distributed.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
+    if (pat.prescribed)
+      pat.prescribed = pat.prescribed.filter((l) => !nodes.has(l.nodeId));
     pat.pressure = pat.pressure.filter((load) => !slabs.has(load.slabId));
   }
 }

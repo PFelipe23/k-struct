@@ -1,3 +1,5 @@
+import { offsetError } from "./memberOffsets";
+import { reverseMember } from "./editing";
 import { distance, memberLengthError } from "./geometry";
 import { DEFAULT_UNITS, parseUnitInput, type UnitPreferences } from "../units";
 import { connectionStations } from "./beamMesh";
@@ -632,11 +634,24 @@ export function inspectTabularImport(
     counts,
     hasChanges,
   };
-  if (hasChanges && project.meshConnections.length) {
+  if (
+    hasChanges &&
+    (project.meshConnections.length || project.members.some((m) => m.offsets))
+  ) {
     const candidate = structuredClone(project);
     applyTabularImport(candidate, plan);
     try {
       connectionStations(candidate);
+      const nodes = new Map(candidate.nodes.map((n) => [n.id, n]));
+      for (const m of candidate.members) {
+        const problem = offsetError(
+          m,
+          nodes.get(m.start)!,
+          nodes.get(m.end)!,
+          candidate.mode,
+        );
+        if (problem) throw new Error(problem);
+      }
     } catch (error) {
       return {
         ok: false,
@@ -645,7 +660,7 @@ export function inspectTabularImport(
             table: nodesTsv.trim() ? "nodes" : "members",
             line: 1,
             column: "Lote",
-            value: "Conexões da malha",
+            value: "Geometria das barras e conexões da malha",
             reason: (error as Error).message,
           },
         ],
@@ -687,6 +702,12 @@ export function applyTabularImport(
     if (item.action === "unchanged") continue;
     const existing = memberMap.get(item.id);
     if (existing) {
+      if (
+        existing.offsets &&
+        existing.start === item.end &&
+        existing.end === item.start
+      )
+        reverseMember(project, existing.id);
       existing.name = item.name;
       existing.start = item.start;
       existing.end = item.end;

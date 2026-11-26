@@ -9,6 +9,13 @@ import {
   type RunSummary,
 } from "../solver/desktop";
 import EngineDetails from "./EngineDetails";
+import type { Project } from "../domain/model";
+import type { AnalysisDiagnostic } from "../domain/diagnostics";
+import {
+  diagnosticContextMatches,
+  readDiagnosticContext,
+  type StoredDiagnosticContext,
+} from "../solver/diagnosticHistory";
 
 const date = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
@@ -17,9 +24,13 @@ const date = new Intl.DateTimeFormat("pt-BR", {
 
 export default function RunHistory({
   latest,
+  project,
+  onInspect,
   onClose,
 }: {
   latest: RunLog | null;
+  project: Project;
+  onInspect: (diagnostic: AnalysisDiagnostic) => void;
   onClose: () => void;
 }) {
   const [entries, setEntries] = useState<RunSummary[]>([]);
@@ -30,6 +41,13 @@ export default function RunHistory({
   const [listError, setListError] = useState("");
   const [detailError, setDetailError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [diagnosticContext, setDiagnosticContext] =
+    useState<StoredDiagnosticContext | null>(null);
+
+  useEffect(() => {
+    setDiagnosticContext(null);
+    setDiagnosticContext(selectedId ? readDiagnosticContext(selectedId) : null);
+  }, [selectedId]);
 
   useEffect(() => {
     let active = true;
@@ -164,6 +182,29 @@ export default function RunHistory({
                   {log.summary.engine && (
                     <EngineDetails engine={log.summary.engine} />
                   )}
+                  {diagnosticContext?.diagnostics.map((diagnostic) => (
+                    <article key={diagnostic.id} className="history-diagnostic">
+                      <strong>
+                        {diagnostic.stage} · {diagnostic.severity}
+                      </strong>
+                      <p>{diagnostic.message}</p>
+                      <p>{diagnostic.action}</p>
+                      {diagnostic.objects.length > 0 &&
+                        (diagnosticContextMatches(
+                          diagnosticContext,
+                          project,
+                        ) ? (
+                          <button onClick={() => onInspect(diagnostic)}>
+                            Inspecionar objetos identificados
+                          </button>
+                        ) : (
+                          <small>
+                            O projeto foi alterado; o histórico não pode
+                            selecionar objetos na revisão atual.
+                          </small>
+                        ))}
+                    </article>
+                  ))}
                   {log.logTruncated && (
                     <p>
                       O registro preserva a parte final das mensagens do motor.

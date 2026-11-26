@@ -1,4 +1,15 @@
 import {
+  emptyThermal,
+  rebaseThermal,
+  sameThermal,
+  setThermalField,
+} from "./thermalLoads";
+import { rebaseDistributedLoad } from "./memberDistributedLoads";
+import { pointLoadFrame, rebasePointLoad } from "./memberPointLoads";
+import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
+import { sameStiffness } from "./memberStiffness";
+import { hasSupport } from "./supports";
+import {
   add,
   beamAxes,
   coordinates,
@@ -138,16 +149,23 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     throw new Error(
       `${n.name} tem uma conexão da malha. Remova a conexão antes de alterar a extremidade.`,
     );
-  if (Object.values(n.restraints).some(Boolean))
+  const floor = p.diaphragms?.find((f) => f.nodeIds.includes(n.id));
+  if (floor)
+    throw new Error(
+      `${n.name} participa do diafragma ${floor.name}. Edite o vínculo antes de alterar a extremidade.`,
+    );
+  if (hasSupport(n))
     throw new Error(
       `${n.name} tem apoio. A operação alteraria a posição ou eliminaria o vínculo.`,
     );
-  const pattern = p.loadPatterns.find((pat) =>
-    pat.nodal.some(
-      (l) =>
-        l.nodeId === n.id &&
-        [l.fx, l.fy, l.fz, l.mx, l.my, l.mz].some((v) => v !== 0),
-    ),
+  const pattern = p.loadPatterns.find(
+    (pat) =>
+      pat.wind?.some((w) => w.bottomId === n.id || w.topId === n.id) ||
+      pat.nodal.some(
+        (l) =>
+          l.nodeId === n.id &&
+          [l.fx, l.fy, l.fz, l.mx, l.my, l.mz].some((v) => v !== 0),
+      ),
   );
   if (pattern)
     throw new Error(
@@ -209,7 +227,12 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   const survivor = bars[0],
     a = nodes.get(survivor.start)!,
     b = nodes.get(survivor.end)!;
-  const [axis, , z] = beamAxes(a, b, survivor.roll);
+  const [axis] = beamAxes(a, b, survivor.roll);
+  const line = memberAxis(survivor, a, b);
+  const [, , z] = beamAxes(line.start, line.end, survivor.roll);
+  const previousFrames = new Map(
+    bars.map((m) => [m.id, pointLoadFrame(m, nodes, p.mode)]),
+  );
   const ends = new Set(bars.flatMap((m) => [m.start, m.end]));
   const stations = [...ends]
     .map((id) => {
@@ -229,11 +252,12 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
     intervals.add(Math.min(i, j));
     if (m.sectionId !== survivor.sectionId)
       throw new Error("As barras precisam ter a mesma seção.");
-    const [, , localZ] = beamAxes(
-      nodes.get(m.start)!,
-      nodes.get(m.end)!,
-      m.roll,
-    );
+    if (!sameStiffness(m, survivor, p.mode))
+      throw new Error(
+        "As barras precisam ter os mesmos modificadores de rigidez.",
+      );
+    const segment = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
+    const [, , localZ] = beamAxes(segment.start, segment.end, m.roll);
     if (length(cross(z, localZ)) > 1e-8)
       throw new Error("As barras têm orientações de seção incompatíveis.");
   }
@@ -250,8 +274,7 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   const connectionI = endpointConnection(stations[0].id);
   const connectionJ = endpointConnection(stations.at(-1)!.id);
   const hasNonRigidEnd = (connection: Member["connectionI"]) =>
-    connection &&
-    Object.values(connection).some(({ kind }) => kind !== "rigid");
+    connection && Object.values(connection).some(({ kind }) => kind !== "rigid");
   for (const m of bars) {
     if (
       (interior.has(m.start) && hasNonRigidEnd(m.connectionI)) ||
@@ -283,10 +306,76 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
       (l) => !selected.has(l.memberId) || l.memberId === survivor.id,
     );
   }
+  if (bars.some((m) => m.offsets)) {
+    const first = stations[0],
+      last = stations.at(-1)!;
+    const endsAt = (id: string) =>
+      bars.flatMap((m) => {
+        const e = m.offsets ?? centeredOffsets;
+        if (m.start === id) return [e.i];
+        if (m.end === id) return [e.j];
+        return [];
+      });
+    const [i] = endsAt(first.id),
+      [j] = endsAt(last.id);
+    for (const station of stations.slice(1, -1)) {
+      const t = (station.d - first.d) / (last.d - first.d);
+      const expected = add(
+        i.eccentricity,
+        scale(subtract(j.eccentricity, i.eccentricity), t),
+      );
+      if (
+        endsAt(station.id).some(
+          (e) =>
+            e.rigidLength || distance(e.eccentricity, expected) > tolerance,
+        )
+      )
+        throw new Error(
+          "A união precisa preservar um único eixo de inserção e os trechos rígidos nas pontas externas.",
+        );
+    }
+    setOffsets(survivor, { i, j });
+  }
   survivor.start = stations[0].id;
   survivor.end = stations.at(-1)!.id;
   survivor.connectionI = connectionI;
   survivor.connectionJ = connectionJ;
+  const target = pointLoadFrame(survivor, nodes, p.mode);
+  const section = p.sections.find((s) => s.id === survivor.sectionId)!;
+  for (const pat of p.loadPatterns) {
+    if (!pat.thermal?.some((f) => selected.has(f.memberId))) continue;
+    const fields = bars.map((m) => {
+      const field =
+        pat.thermal!.find((f) => f.memberId === m.id) ?? emptyThermal(m.id);
+      return rebaseThermal(
+        field,
+        previousFrames.get(m.id)!.axes,
+        target.axes,
+        survivor.id,
+        section,
+      );
+    });
+    if (!fields.every((f) => sameThermal(f, fields[0])))
+      throw new Error(
+        `${pat.name}: a união exige a mesma variação de temperatura em todos os trechos.`,
+      );
+    pat.thermal = pat.thermal.filter((f) => !selected.has(f.memberId));
+    setThermalField(pat, fields[0]);
+  }
+  for (const pat of p.loadPatterns)
+    if (pat.points)
+      pat.points = pat.points.map((load) => {
+        const from = previousFrames.get(load.memberId);
+        return from ? rebasePointLoad(load, from, target, survivor.id) : load;
+      });
+  for (const pat of p.loadPatterns)
+    if (pat.distributed)
+      pat.distributed = pat.distributed.map((load) => {
+        const from = previousFrames.get(load.memberId);
+        return from
+          ? rebaseDistributedLoad(load, from, target, survivor.id)
+          : load;
+      });
   p.members = p.members.filter(
     (m) => !selected.has(m.id) || m.id === survivor.id,
   );
@@ -340,6 +429,7 @@ function editEndOrSplit(
           ? "Para aparar, indique uma posição entre as extremidades."
           : "Para prolongar, indique uma posição além da extremidade escolhida.",
       );
+    const previous = pointLoadFrame(m, nodes, p.mode);
     protectJoint(p, old, new Set([m.id]));
     if (
       cmd.kind === "extend" &&
@@ -362,6 +452,19 @@ function editEndOrSplit(
       );
       discardNodes(p, new Set([old.id]), joint.id);
     }
+    const target = pointLoadFrame(m, nodes, p.mode);
+    for (const pat of p.loadPatterns)
+      if (pat.points)
+        pat.points = pat.points.map((l) =>
+          l.memberId === m.id ? rebasePointLoad(l, previous, target, m.id) : l,
+        );
+    for (const pat of p.loadPatterns)
+      if (pat.distributed)
+        pat.distributed = pat.distributed.map((load) =>
+          load.memberId === m.id
+            ? rebaseDistributedLoad(load, previous, target, m.id)
+            : load,
+        );
   }
   // Every physical member passing through the new joint must use the very same node.
   const cuts = new Map<string, string[]>();

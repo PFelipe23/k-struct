@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { beamStations } from "../domain/beamMesh";
+import { beamMeshLayout } from "../domain/beamMesh";
 import { connectMeshJoint } from "../domain/editing";
 import { interiorParameter } from "../domain/geometry";
 import type { Project, SelectedObject } from "../domain/model";
@@ -36,10 +36,22 @@ export default function MeshConnections({
     () => new Map(project.nodes.map((n) => [n.id, n])),
     [project.nodes],
   );
-  const layout = useMemo(() => beamStations(project), [project]);
+  const layout = useMemo(() => beamMeshLayout(project), [project]);
   const member = project.members.find((m) => m.id === memberId);
-  const stations = layout.get(memberId) ?? [];
-  const links = stations.slice(1, -1).filter((s) => s.nodeId);
+  const stations = layout.stations.get(memberId) ?? [];
+  const links = [
+    ...stations
+      .slice(1, -1)
+      .flatMap((s) =>
+        s.nodeId ? [{ nodeId: s.nodeId, location: formatResult(s.t, 5) }] : [],
+      ),
+    ...layout.rigidLinks
+      .filter((l) => l.memberId === memberId)
+      .map((l) => ({
+        nodeId: l.nodeId,
+        location: `Trecho rígido ${l.masterId === member?.start ? "i" : "j"}`,
+      })),
+  ];
   const linkedNodes = new Set(links.map((s) => s.nodeId));
   const candidates =
     kind === "member"
@@ -148,15 +160,19 @@ export default function MeshConnections({
                 <thead>
                   <tr>
                     <th>Nó conectado</th>
-                    <th>x/L desde i</th>
+                    <th>
+                      {member.offsets
+                        ? "Posição no trecho rígido ou x/L deformável"
+                        : "x/L desde i"}
+                    </th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {links.map(({ t, nodeId }) => (
+                  {links.map(({ location, nodeId }) => (
                     <tr key={nodeId}>
                       <td>{nodes.get(nodeId!)!.name}</td>
-                      <td>{formatResult(t)}</td>
+                      <td>{location}</td>
                       <td>
                         <button
                           aria-label={`Desconectar ${nodes.get(nodeId!)!.name} de ${member.name}`}

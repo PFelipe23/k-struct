@@ -15,3 +15,7 @@ Para regenerar a referência espacial na raiz do projeto:
 ```sh
 python tests/fixtures/portal-spatial-reference.py > tests/fixtures/portal-spatial-expected.json
 ```
+
+## Matrizes do MolaStruct
+
+`F01-matriz.csv` e `B16-rotulada-matriz.csv` são cópias das exportações do projeto MolaStruct. Elas preservam BOM, legendas, termos cruzados, aspas e metadados originais. Fonte: [exemplos do MolaStruct, revisão c53e4f7](https://github.com/ricardocorsini/mola-struct/tree/c53e4f70d46f9d6e99135705a2fee27e3edd2dc7/examples). A licença MIT e os créditos de autoria acompanham os dados em `MolaStruct-LICENSE`.

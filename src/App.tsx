@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 import {
+  ArrowDownToLine,
+  ChartNoAxesCombined,
   Box,
   Boxes,
   ChevronDown,
@@ -55,16 +57,33 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, addSlab, inspectNodeCoordinateChanges } from "./domain/editing";
+import {
+  addMember,
+  addSlab,
+  inspectNodeCoordinateChanges,
+} from "./domain/editing";
 import {
   onPlane,
+  dot,
+  subtract,
   origin,
   planeCoordinates,
   type PlaneKind,
   type Point3,
   type WorkPlane,
 } from "./domain/geometry";
+import MemberPointLoadDialog from "./components/MemberPointLoadDialog";
+import MemberDistributedLoadDialog from "./components/MemberDistributedLoadDialog";
+import type { MemberLoadSelection } from "./components/memberLoadInput";
+import { memberAxis } from "./domain/memberOffsets";
 import { historyReducer } from "./domain/history";
+import { hasElasticSupport, hasSupport } from "./domain/supports";
+import { saveDiagnosticContext } from "./solver/diagnosticHistory";
+import {
+  diagnoseModel,
+  diagnoseSolverFailure,
+  type AnalysisDiagnostic,
+} from "./domain/diagnostics";
 import { applyTabularImport } from "./domain/tabularImport";
 import { applyTheme, readTheme, saveTheme, type Theme } from "./theme";
 import { UnitsDialog, useUnits } from "./components/Units";
@@ -87,6 +106,7 @@ import DuplicateDialog from "./components/DuplicateDialog";
 import SectionCatalog from "./components/SectionCatalog";
 import { dimensions, shapeNames } from "./domain/sections";
 import MaterialLibrary from "./components/MaterialLibrary";
+import DiaphragmDialog from "./components/DiaphragmDialog";
 import MeshConnections from "./components/MeshConnections";
 import MemberEditDialog from "./components/MemberEditDialog";
 import type { MemberEdit } from "./domain/memberOperations";
@@ -141,6 +161,17 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v22") ??
+      localStorage.getItem("kstruct.draft.v21") ??
+      localStorage.getItem("kstruct.draft.v20") ??
+      localStorage.getItem("kstruct.draft.v19") ??
+      localStorage.getItem("kstruct.draft.v18") ??
+      localStorage.getItem("kstruct.draft.v17") ??
+      localStorage.getItem("kstruct.draft.v16") ??
+      localStorage.getItem("kstruct.draft.v15") ??
+      localStorage.getItem("kstruct.draft.v14") ??
+      localStorage.getItem("kstruct.draft.v13") ??
+      localStorage.getItem("kstruct.draft.v12") ??
       localStorage.getItem("kstruct.draft.v11") ??
       localStorage.getItem("kstruct.draft.v10") ??
       localStorage.getItem("kstruct.draft.v9") ??
@@ -212,6 +243,7 @@ export default function App() {
   const [launchDialog, setLaunchDialog] = useState<
     | "guides"
     | "replicate"
+    | "diaphragms"
     | "mesh"
     | "materials"
     | "sections"
@@ -222,6 +254,15 @@ export default function App() {
     | "selection"
     | null
   >(null);
+  const [memberLoadDraft, setMemberLoadDraft] =
+    useState<MemberLoadSelection | null>(null);
+  const MemberLoadDialog =
+    memberLoadDraft?.kind === "distributed"
+      ? MemberDistributedLoadDialog
+      : MemberPointLoadDialog;
+  const choosingMemberLoad = tool === "pointLoad" || tool === "distributedLoad";
+  const loadedMember =
+    memberLoadDraft && p.members.find((m) => m.id === memberLoadDraft.memberId);
   const [catalogSectionId, setCatalogSectionId] = useState("");
   const openSections = (id: string) => {
     setCatalogSectionId(id);
@@ -246,6 +287,12 @@ export default function App() {
   const activeRunId = useRef<string | null>(null);
   const running = activeRun !== null;
   const [lastLog, setLastLog] = useState<RunLog | null>(null);
+  const [analysisDiagnostics, setAnalysisDiagnostics] = useState<
+    AnalysisDiagnostic[]
+  >([]);
+  const [diagnosticRevision, setDiagnosticRevision] = useState<number | null>(
+    null,
+  );
   const [showRunHistory, setShowRunHistory] = useState(false);
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque duas extremidades no plano de trabalho.",
@@ -308,6 +355,35 @@ export default function App() {
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
+  const resultPatterns = useMemo(() => {
+    const combinations = envelope
+      ? p.resultCombinations.filter((c) =>
+          envelope.combinationIds.includes(c.id),
+        )
+      : combination
+        ? [combination]
+        : [];
+    const caseIds = new Set(
+      combinations.flatMap((c) =>
+        c.factors.filter((f) => f.factor !== 0).map((f) => f.caseId),
+      ),
+    );
+    const cases =
+      envelope || combination
+        ? p.analysisCases.filter((c) => caseIds.has(c.id))
+        : [analysisCase];
+    return new Set(
+      cases.flatMap((c) =>
+        c.factors.filter((f) => f.factor !== 0).map((f) => f.patternId),
+      ),
+    );
+  }, [
+    p.analysisCases,
+    p.resultCombinations,
+    analysisCase,
+    combination,
+    envelope,
+  ]);
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -401,7 +477,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v11", serialized);
+      localStorage.setItem("kstruct.draft.v22", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -524,11 +600,32 @@ export default function App() {
   };
   const changeTool = (t: Tool) => {
     if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
-    if (t !== "select" && activePanel === "perspective")
+    if (
+      t !== "select" &&
+      t !== "pointLoad" &&
+      t !== "distributedLoad" &&
+      activePanel === "perspective"
+    )
       activatePanel("primary");
     setTool(t);
     setPending(null);
     setDisplay("model");
+  };
+  const pickMemberLoad = (id: string, point: Point3) => {
+    const m = p.members.find((m) => m.id === id)!;
+    const line = memberAxis(
+      m,
+      p.nodes.find((n) => n.id === m.start)!,
+      p.nodes.find((n) => n.id === m.end)!,
+    );
+    const chord = subtract(line.end, line.start);
+    const t = dot(subtract(point, line.start), chord) / dot(chord, chord);
+    selectObject({ kind: "member", id });
+    setMemberLoadDraft({
+      kind: tool === "distributedLoad" ? "distributed" : "point",
+      memberId: id,
+      fraction: Math.max(0, Math.min(1, t)),
+    });
   };
   const showDisplay = (value: Display | SlabDisplay) => {
     if (slab && isSlabDisplay(value)) {
@@ -553,6 +650,7 @@ export default function App() {
     current.current = project;
     dispatch({ type: "reset", project });
     setLaunchDialog(null);
+    setMemberLoadDraft(null);
     setLaunchSection("");
     setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
@@ -621,6 +719,7 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if (
         loadEditor ||
+        memberLoadDraft ||
         launchDialog === "materials" ||
         launchDialog === "sections" ||
         launchDialog === "nodes" ||
@@ -762,12 +861,23 @@ export default function App() {
     if (activeRunId.current) return;
     const snapshot = current.current;
     const revision = modelRevision.current;
+    const modelIssues = diagnoseModel(snapshot);
+    setAnalysisDiagnostics(modelIssues);
+    setDiagnosticRevision(revision);
+    if (modelIssues.length) {
+      setDisplay("model");
+      setMessage(
+        `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.\n${modelIssues[0].message}`,
+      );
+      return;
+    }
     const requestedCase =
       snapshot.analysisCases.find((item) => item.id === caseId) ??
       snapshot.analysisCases[0];
     const id = uid();
     activeRunId.current = id;
     setActiveRun({ id, ready: false, cancelling: false });
+    let executionLogReceived = false;
     setCaseResults((results) => {
       const updated = new Map(results);
       updated.delete(requestedCase.id);
@@ -788,10 +898,24 @@ export default function App() {
         },
       );
       setLastLog(execution.log);
+      executionLogReceived = true;
+      const failedRunDiagnostics =
+        execution.log.summary.status !== "completed" ||
+        execution.output === null
+          ? diagnoseSolverFailure(
+              execution.log.summary.message,
+              execution.log.stdout,
+              execution.log.stderr,
+              input,
+            )
+          : [];
+      if (failedRunDiagnostics.length)
+        saveDiagnosticContext(id, snapshot, failedRunDiagnostics);
       const historyNotice = execution.historyError
         ? `\n${execution.historyError}`
         : "";
       if (modelRevision.current !== revision) {
+        setAnalysisDiagnostics(failedRunDiagnostics);
         setMessage(
           `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
         );
@@ -801,10 +925,12 @@ export default function App() {
         execution.log.summary.status !== "completed" ||
         execution.output === null
       ) {
+        setAnalysisDiagnostics(failedRunDiagnostics);
         setMessage(`${execution.log.summary.message}${historyNotice}`);
         return;
       }
       const completed = parseOofemOutput(execution.output, input);
+      setAnalysisDiagnostics([]);
       setCaseResults((results) =>
         new Map(results).set(completed.caseId, completed),
       );
@@ -813,11 +939,56 @@ export default function App() {
         `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. ${completed.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${historyNotice}`,
       );
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      const failure = e instanceof Error ? e.message : String(e);
+      const diagnostics = diagnoseSolverFailure(failure, "", "");
+      setAnalysisDiagnostics(diagnostics);
+      if (executionLogReceived)
+        saveDiagnosticContext(id, snapshot, diagnostics);
+      setMessage(failure);
     } finally {
       activeRunId.current = null;
       setActiveRun(null);
     }
+  };
+  const inspectDiagnostic = (diagnostic: AnalysisDiagnostic) => {
+    const available = diagnostic.objects.filter((object) =>
+      object.kind === "node"
+        ? p.nodes.some(({ id }) => id === object.id)
+        : object.kind === "member"
+          ? p.members.some(({ id }) => id === object.id)
+          : p.slabs.some(({ id }) => id === object.id),
+    );
+    if (!available.length) {
+      setMessage(
+        "Os objetos deste diagnóstico não existem mais no modelo atual.",
+      );
+      return;
+    }
+    setTab("Modelo");
+    setTool("select");
+    setPending(null);
+    const selectedSlab = available.find(({ kind }) => kind === "slab");
+    if (spatial && selectedSlab) {
+      const item = p.slabs.find(({ id }) => id === selectedSlab.id);
+      if (item)
+        setPlanes((current) => ({
+          ...current,
+          primary: { kind: "XY", guideId: item.levelId },
+        }));
+      setLayout("planes");
+      setActivePanel("primary");
+    } else if (spatial) {
+      setLayout((current) =>
+        current === "planes" || current === "single" ? "dual" : current,
+      );
+      setActivePanel("perspective");
+    } else {
+      setActivePanel("primary");
+    }
+    setDisplay("model");
+    setSelection(available);
+    if (available.length === 1) setRight(true);
+    setMessage(diagnostic.action);
   };
   const cancel = async () => {
     if (!activeRun?.ready || activeRun.cancelling) return;
@@ -979,6 +1150,30 @@ export default function App() {
                   </button>
                 )}
                 <button
+                  className={`tool-button ${tool === "pointLoad" ? "active" : ""}`}
+                  aria-pressed={tool === "pointLoad"}
+                  disabled={!p.members.length}
+                  onClick={() =>
+                    changeTool(tool === "pointLoad" ? "select" : "pointLoad")
+                  }
+                >
+                  <ArrowDownToLine size={21} />
+                  <span>Carga concentrada</span>
+                </button>
+                <button
+                  className={`tool-button ${tool === "distributedLoad" ? "active" : ""}`}
+                  aria-pressed={tool === "distributedLoad"}
+                  disabled={!p.members.length}
+                  onClick={() =>
+                    changeTool(
+                      tool === "distributedLoad" ? "select" : "distributedLoad",
+                    )
+                  }
+                >
+                  <ChartNoAxesCombined size={21} />
+                  <span>Carga por trecho</span>
+                </button>
+                <button
                   className="tool-button"
                   disabled={!selection.length}
                   onClick={remove}
@@ -998,6 +1193,17 @@ export default function App() {
                   <Scissors size={20} />
                   <span>Editar barras</span>
                 </button>
+                {spatial && (
+                  <button
+                    className="tool-button"
+                    disabled={plane.kind !== "XY"}
+                    onClick={() => setLaunchDialog("diaphragms")}
+                    title="Editar os vínculos do pavimento na planta XY"
+                  >
+                    <Layers3 size={20} />
+                    <span>Diafragmas</span>
+                  </button>
+                )}
                 <button
                   className="tool-button"
                   disabled={!p.members.length}
@@ -1190,9 +1396,14 @@ export default function App() {
                   : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
-                {slab
-                  ? "Peso próprio aplicado manualmente como pressão"
-                  : "Peso próprio aplicado manualmente como carga distribuída"}
+                {analysisCase.factors.some(
+                  (f) =>
+                    f.factor !== 0 &&
+                    p.loadPatterns.find((pat) => pat.id === f.patternId)
+                      ?.selfWeight.enabled,
+                )
+                  ? "Peso próprio ativo no caso"
+                  : "Peso próprio automático desativado no caso"}
               </span>
             </div>
           </>
@@ -1373,7 +1584,13 @@ export default function App() {
                     <CircleDot size={12} />
                     {n.name}
                     <small>
-                      {Object.values(n.restraints).some(Boolean) ? "Apoio" : ""}
+                      {n.foundation
+                        ? `Fundação · ${n.foundation.name}`
+                        : hasElasticSupport(n)
+                          ? "Apoio elástico"
+                          : hasSupport(n)
+                            ? "Apoio"
+                            : ""}
                     </small>
                   </button>
                 ))}
@@ -1637,6 +1854,7 @@ export default function App() {
                       ? slabMap
                       : null
                   }
+                  resultPatterns={resultPatterns}
                   patternId={patternId}
                   onWindow={(objects, additive) =>
                     setSelection((previous) =>
@@ -1647,6 +1865,7 @@ export default function App() {
                       ),
                     )
                   }
+                  onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                   onSpan={placeMember}
                   pending={active ? pending : null}
                   onPoint={onPoint}
@@ -1656,6 +1875,7 @@ export default function App() {
             })}
             {perspective && (
               <SpatialView
+                onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                 layers={perspectiveLayers}
                 setLayers={setPerspectiveLayers}
                 savedCamera={perspectiveCamera}
@@ -1692,8 +1912,8 @@ export default function App() {
                 {visibleDisplay === "deformed"
                   ? "Deformada ampliada automaticamente. Valores reais na tabela de deslocamentos."
                   : spatial
-                    ? "x/L vai de i (0) a j (1). Esforços nos eixos locais, na face +x. N positivo em tração."
-                    : "x/L vai de i (0) a j (1). N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
+                    ? "x/L vai da face i (0) à face j (1) do trecho deformável. Esforços nos eixos locais, na face +x. N positivo em tração."
+                    : "x/L vai da face i (0) à face j (1) do trecho deformável. N positivo em tração. M positivo sagente em barras horizontais orientadas +X."}
               </div>
             )
           )}
@@ -1742,6 +1962,11 @@ export default function App() {
               message={message}
               running={running}
               cancelling={activeRun?.cancelling ?? false}
+              diagnostics={analysisDiagnostics}
+              diagnosticsNavigable={
+                diagnosticRevision === modelRevision.current
+              }
+              onInspectDiagnostic={inspectDiagnostic}
               openRunHistory={
                 lastLog ? () => setShowRunHistory(true) : undefined
               }
@@ -1750,6 +1975,8 @@ export default function App() {
         </main>
         {right && (
           <Inspector
+            onMemberLoad={setMemberLoadDraft}
+            onPatternChange={setPatternId}
             onSections={openSections}
             onMaterials={() => setLaunchDialog("materials")}
             project={p}
@@ -1773,21 +2000,25 @@ export default function App() {
                 : "Modelo em edição"}
         </span>
         <span>
-          {tool === "slab"
-            ? pending
-              ? "Marque o canto oposto da laje · Esc para cancelar"
-              : "Marque o primeiro canto da laje na planta XY"
-            : pending
-              ? "Marque a segunda extremidade · Esc para cancelar"
-              : tool === "member"
-                ? memberMode === "span"
-                  ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
-                  : "Marque a primeira extremidade da barra"
-                : tool === "node"
-                  ? "Clique na malha para inserir um nó"
-                  : selection.length > 1
-                    ? `${selection.length} objetos selecionados`
-                    : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+          {tool === "pointLoad"
+            ? "Clique na barra na posição da força ou do momento"
+            : tool === "distributedLoad"
+              ? "Clique na barra para indicar o início da carga por trecho"
+              : tool === "slab"
+                ? pending
+                  ? "Marque o canto oposto da laje · Esc para cancelar"
+                  : "Marque o primeiro canto da laje na planta XY"
+                : pending
+                  ? "Marque a segunda extremidade · Esc para cancelar"
+                  : tool === "member"
+                    ? memberMode === "span"
+                      ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
+                      : "Marque a primeira extremidade da barra"
+                    : tool === "node"
+                      ? "Clique na malha para inserir um nó"
+                      : selection.length > 1
+                        ? `${selection.length} objetos selecionados`
+                        : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           {units.force} · {units.length} · rad <i />{" "}
@@ -1813,6 +2044,20 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {memberLoadDraft && loadedMember && (
+        <MemberLoadDialog
+          key={memberLoadDraft.loadId ?? loadedMember.id}
+          project={p}
+          member={loadedMember}
+          pattern={p.loadPatterns.find((item) => item.id === patternId)!}
+          selection={memberLoadDraft}
+          edit={edit}
+          onClose={() => {
+            setMemberLoadDraft(null);
+            changeTool("select");
+          }}
+        />
+      )}
       {showUnits && <UnitsDialog onClose={() => setShowUnits(false)} />}
       {settings && (
         <SolverSettings
@@ -1831,7 +2076,15 @@ export default function App() {
         />
       )}
       {showRunHistory && (
-        <RunHistory latest={lastLog} onClose={() => setShowRunHistory(false)} />
+        <RunHistory
+          latest={lastLog}
+          project={p}
+          onClose={() => setShowRunHistory(false)}
+          onInspect={(diagnostic) => {
+            setShowRunHistory(false);
+            inspectDiagnostic(diagnostic);
+          }}
+        />
       )}
       {loadEditor && (
         <LoadDefinitions
@@ -1869,6 +2122,15 @@ export default function App() {
             setMessage("Definições de carga aplicadas.");
             return null;
           }}
+        />
+      )}
+      {launchDialog === "diaphragms" && (
+        <DiaphragmDialog
+          project={p}
+          levelId={activeGuide.id}
+          selection={selection}
+          edit={edit}
+          onClose={() => setLaunchDialog(null)}
         />
       )}
       {launchDialog === "selection" && (

@@ -1,3 +1,15 @@
+import { rebaseThermal } from "./thermalLoads";
+import {
+  distributedLoadError,
+  rebaseDistributedLoad,
+} from "./memberDistributedLoads";
+import {
+  actionPoint,
+  pointLoadFrame,
+  positionError,
+  rebasePointLoad,
+} from "./memberPointLoads";
+import { memberAxis, offsetError, splitOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
@@ -41,7 +53,45 @@ export function inspectNodeCoordinateChanges(
       byId.get(member.start)!,
       byId.get(member.end)!,
     );
-    if (message) issues.push({ message, nodeIds: moved });
+    const error =
+      message ??
+      offsetError(
+        member,
+        byId.get(member.start)!,
+        byId.get(member.end)!,
+        project.mode,
+      );
+    if (error) issues.push({ message: error, nodeIds: moved });
+    else {
+      const span = memberAxis(
+        member,
+        byId.get(member.start)!,
+        byId.get(member.end)!,
+      ).span;
+      for (const pat of project.loadPatterns) {
+        for (const load of pat.distributed ?? []) {
+          if (load.memberId !== member.id) continue;
+          const invalid = distributedLoadError(load, span, project.mode);
+          if (invalid)
+            issues.push({
+              message: `${member.name} · ${pat.name}: ${invalid}`,
+              nodeIds: moved,
+            });
+        }
+        for (const load of pat.points ?? []) {
+          if (
+            load.memberId === member.id &&
+            positionError(load.position, span)
+          ) {
+            issues.push({
+              message: `${member.name}: uma carga concentrada de ${pat.name} ficaria fora da barra.`,
+              nodeIds: moved,
+            });
+            break;
+          }
+        }
+      }
+    }
   }
   if (!issues.length && project.meshConnections.length) {
     try {
@@ -81,14 +131,39 @@ export function addMember(
 export function reverseMember(p: Project, id: string) {
   const member = p.members.find((item) => item.id === id);
   if (!member) throw new Error("A barra selecionada não existe.");
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const from = pointLoadFrame(member, nodes, p.mode);
   [member.start, member.end] = [member.end, member.start];
   [member.connectionI, member.connectionJ] = [
     member.connectionJ,
     member.connectionI,
   ];
+  if (member.offsets)
+    member.offsets = { i: member.offsets.j, j: member.offsets.i };
   // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
   // keeps z fixed in global space when x changes sign.
   if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
+  const to = pointLoadFrame(member, nodes, p.mode);
+  for (const pat of p.loadPatterns)
+    if (pat.points)
+      pat.points = pat.points.map((l) =>
+        l.memberId === id ? rebasePointLoad(l, from, to, id) : l,
+      );
+  for (const pat of p.loadPatterns)
+    if (pat.distributed)
+      pat.distributed = pat.distributed.map((load) =>
+        load.memberId === id ? rebaseDistributedLoad(load, from, to, id) : load,
+      );
+  for (const pat of p.loadPatterns) {
+    const field = pat.thermal?.find((f) => f.memberId === id);
+    if (field) {
+      const section = p.sections.find((s) => s.id === member.sectionId)!;
+      Object.assign(
+        field,
+        rebaseThermal(field, from.axes, to.axes, id, section),
+      );
+    }
+  }
   // Mesh connections refer to physical node IDs and derive x/L from i and j.
   // Uniform loads are global, and groups and sections refer to the same ID.
 }
@@ -284,6 +359,7 @@ export function connectIntersections(p: Project) {
 
 // Cut nodes are ordered from i to j. The first span inherits the physical member ID.
 export function splitMembers(p: Project, cuts: Map<string, string[]>) {
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const split = new Map<string, string[]>();
   let barCount = p.members.length;
   const usedNames = [...p.members];
@@ -298,9 +374,32 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       );
     const joints = [m.start, ...interior, m.end];
     const children = joints.slice(0, -1).map((start, i) => {
-      const child = { ...m, start, end: joints[i + 1] };
+      const child = {
+        ...m,
+        start,
+        end: joints[i + 1],
+        ...(m.stiffness ? { stiffness: { ...m.stiffness } } : {}),
+      };
+      splitOffsets(
+        m,
+        nodes.get(m.start)!,
+        nodes.get(m.end)!,
+        child,
+        nodes.get(child.start)!,
+        nodes.get(child.end)!,
+      );
       if (i > 0) delete child.connectionI;
       if (i < joints.length - 2) delete child.connectionJ;
+      const error = offsetError(
+        child,
+        nodes.get(child.start)!,
+        nodes.get(child.end)!,
+        p.mode,
+      );
+      if (error)
+        throw new Error(
+          `O corte precisa ficar no trecho deformável de ${m.name}. ${error}`,
+        );
       if (i > 0) {
         child.id = uid();
         child.name = nextName("B", usedNames);
@@ -308,6 +407,53 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       }
       return child;
     });
+    const from = pointLoadFrame(m, nodes, p.mode);
+    const targets = children.map((child) => ({
+      child,
+      frame: pointLoadFrame(child, nodes, p.mode),
+    }));
+    for (const pat of p.loadPatterns) {
+      const field = pat.thermal?.find((f) => f.memberId === m.id);
+      if (field) {
+        const section = p.sections.find((s) => s.id === m.sectionId)!;
+        pat.thermal = pat
+          .thermal!.filter((f) => f.memberId !== m.id)
+          .concat(
+            targets.map(({ child, frame }) =>
+              rebaseThermal(field, from.axes, frame.axes, child.id, section),
+            ),
+          );
+      }
+    }
+    for (const pat of p.loadPatterns)
+      if (pat.points)
+        pat.points = pat.points.map((load) => {
+          if (load.memberId !== m.id) return load;
+          const point = actionPoint(load, from);
+          // A load right at a physical cut belongs to the i-end of the following child.
+          const dest =
+            targets.find(
+              ({ frame }) =>
+                dot(subtract(point, frame.end), from.axes[0]) < -tolerance,
+            ) ?? targets.at(-1)!;
+          return rebasePointLoad(load, from, dest.frame, dest.child.id);
+        });
+    for (const pat of p.loadPatterns)
+      if (pat.distributed)
+        pat.distributed = pat.distributed.flatMap((load) => {
+          if (load.memberId !== m.id) return [load];
+          const pieces = targets.flatMap(({ child, frame }) => {
+            const part = rebaseDistributedLoad(
+              load,
+              from,
+              frame,
+              child.id,
+              true,
+            );
+            return part ? [part] : [];
+          });
+          return pieces.map((part, i) => (i ? { ...part, id: uid() } : part));
+        });
     split.set(
       m.id,
       children.map((bar) => bar.id),
@@ -322,7 +468,6 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       })),
     );
   }
-  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const byId = new Map(p.members.map((m) => [m.id, m]));
   p.meshConnections = p.meshConnections.flatMap((link) => {
     const children = split.get(link.memberId);

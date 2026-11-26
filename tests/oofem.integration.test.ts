@@ -1,3 +1,4 @@
+import { centeredOffsets } from "../src/domain/memberOffsets";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -68,10 +69,10 @@ it("KS-21 · exporta articulação semirrígida como nó de braço e mola", () =
   p.members[0].connectionI = connection;
 
   const input = exportOofem(p, "EL");
-  const arm = input.nodes.find(({ rigidArm }) => rigidArm);
+  const arm = input.nodes.find(({ connection }) => connection);
   expect(arm).toBeDefined();
-  expect(arm?.rigidArm?.master).toBe(1);
-  expect(arm?.rigidArm?.masterMask).toEqual([1, 1, 0]);
+  expect(arm?.master).toBe(1);
+  expect(arm?.connection?.masterMask).toEqual([1, 1, 0]);
   expect(input.elements[0].start).toBe(arm?.number);
   expect(input.deck).toContain(
     `RigidArmNode ${arm?.number} coords 3 0 0 0 master 1 dofidmask 3 1 3 5 masterMask 3 1 1 0 doftype 3 2 2 0`,
@@ -79,9 +80,7 @@ it("KS-21 · exporta articulação semirrígida como nó de braço e mola", () =
   expect(input.deck).toContain(
     `Spring ${input.elements.length + 1} nodes 2 1 ${arm?.number} crossSect 1 mode 3 k 4200`,
   );
-  expect(input.deck).toContain(
-    "Node 1 coords 3 0 0 0 dofidmask 3 1 3 5",
-  );
+  expect(input.deck).toContain("Node 1 coords 3 0 0 0 dofidmask 3 1 3 5\n");
   expect(input.deck).not.toMatch(/^Spring .*\bset\b/m);
   expect(input.deck).toContain(`nelem ${input.elements.length + 1}`);
 });
@@ -102,8 +101,8 @@ it("KS-21 · exporta uma mola de rotação local em uma barra espacial", () => {
   p.members[0].connectionJ = connection;
 
   const input = exportOofem(p, "EL");
-  const arm = input.nodes.find(({ rigidArm }) => rigidArm)!;
-  expect(arm.rigidArm?.master).toBe(2);
+  const arm = input.nodes.find(({ connection }) => connection)!;
+  expect(arm.master).toBe(2);
   expect(input.elements.at(-1)?.end).toBe(arm.number);
   expect(input.deck).toContain("domain 3dShell");
   expect(input.deck).toContain(
@@ -153,6 +152,59 @@ describe.skipIf(!executable)(
       ).toBeCloseTo(22500, 1);
     });
 
+    it("omite rotações inativas nos nós de lançamento com as duas pontas articuladas", () => {
+      const p = beamExample();
+      const connection: EndConnection = defaultEndConnection();
+      connection.ry = { kind: "free" };
+      p.members[0].connectionI = structuredClone(connection);
+      p.members[0].connectionJ = structuredClone(connection);
+
+      const input = exportOofem(p, "EL");
+      expect(input.deck).toContain("Node 1 coords 3 0 0 0 dofidmask 2 1 3");
+      expect(input.deck).toContain("Node 2 coords 3 6 0 0 dofidmask 2 1 3");
+
+      const result = solve(p);
+      const left = result.members.V1.find(({ t }) => t === 0)!;
+      const right = result.members.V1.find(({ t }) => t === 1)!;
+      const middle = result.members.V1.find(({ t }) => t === 0.5)!;
+      expect(Math.abs(left.my)).toBeLessThan(1);
+      expect(Math.abs(right.my)).toBeLessThan(1);
+      expect(middle.my).toBeCloseTo(45_000, 0);
+      expect(
+        result.reactions.find(({ nodeId }) => nodeId === "A")!.fz,
+      ).toBeCloseTo(30_000, 0);
+      expect(
+        result.reactions.find(({ nodeId }) => nodeId === "B")!.fz,
+      ).toBeCloseTo(30_000, 0);
+    });
+
+    it("mantém a rotação sem rigidez quando ela recebe uma carga nodal", () => {
+      const p = beamExample();
+      const connection: EndConnection = defaultEndConnection();
+      connection.ry = { kind: "free" };
+      p.members[0].connectionI = structuredClone(connection);
+      p.members[0].connectionJ = structuredClone(connection);
+      p.loadPatterns[0].nodal.push({
+        nodeId: "A",
+        fx: 0,
+        fy: 0,
+        fz: 0,
+        mx: 0,
+        my: 100,
+        mz: 0,
+      });
+
+      const input = exportOofem(p, "EL");
+      expect(input.deck).toContain(
+        "Node 1 coords 3 0 0 0 dofidmask 3 1 3 5\n",
+      );
+      expect(input.deck).not.toMatch(
+        /BoundaryCondition \d+ loadTimeFunction 1 dofs 1 5 values 1 0 set 4\n/,
+      );
+      expect(input.deck).toContain("NodalLoad 3 loadTimeFunction 1");
+      expect(input.deck).toContain("Components 3 0 0 100");
+    });
+
     it("valida kθ = 3EI/L em duas malhas e com a barra invertida", () => {
       const { E } = beamExample().materials[0];
       const p0 = beamExample();
@@ -195,6 +247,72 @@ it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", (
   expect(parseProject(serializeProject(project))).toEqual(project);
 });
 
+it.skipIf(!executable)(
+  "KS-28 · peso próprio de barras e painéis fecha as reações no OOFEM",
+  () => {
+    const beam = beamExample();
+    beam.materials[0].density = 2500;
+    Object.assign(beam.sections[0], { width: 0.2, height: 0.4 });
+    beam.loadPatterns[0].uniform = [];
+    Object.assign(beam.loadPatterns[0].selfWeight, {
+      enabled: true,
+      direction: "-Z",
+      gravity: 10,
+      multiplier: 1,
+    });
+
+    const beamResult = solve(beam);
+    expect(
+      beamResult.reactions.find(({ nodeId }) => nodeId === "A")!.fz,
+    ).toBeCloseTo(6000, 0);
+    expect(
+      beamResult.reactions.find(({ nodeId }) => nodeId === "B")!.fz,
+    ).toBeCloseTo(6000, 0);
+
+    const slab = slabBenchmarkProject();
+    const definition = slab.slabs[0];
+    slab.materials.find(({ id }) => id === definition.materialId)!.density =
+      2500;
+    slab.loadPatterns[0].pressure = [];
+    Object.assign(slab.loadPatterns[0].selfWeight, {
+      enabled: true,
+      direction: "-Z",
+      gravity: 10,
+      multiplier: 1,
+    });
+
+    const slabResult = solve(slab).slab!;
+    expect(slabResult.totalLoadZ).toBeCloseTo(-30_000, 0);
+    expect(slabResult.totalReactionZ).toBeCloseTo(30_000, 0);
+    expect(slabResult.center.uz).toBeLessThan(0);
+  },
+);
+
+it.skipIf(!executable)(
+  "KS-28 · conserva massa e braço de alavanca com excentricidade e EI modificado",
+  () => {
+    const p = beamExample(),
+      m = p.members[0];
+    Object.assign(p.sections[0], { width: 0.2, height: 0.4 });
+    p.materials[0].density = 2500;
+    m.stiffness = { eiy: 0.5 };
+    m.offsets = structuredClone(centeredOffsets);
+    m.offsets.i.rigidLength = 0.75;
+    m.offsets.j.eccentricity.x = 0.6;
+    p.loadPatterns[0].uniform = [];
+    Object.assign(p.loadPatterns[0].selfWeight, { enabled: true, gravity: 10 });
+    const automatic = solve(p);
+    expect(automatic.reactions.reduce((sum, r) => sum + r.fz, 0)).toBeCloseTo(
+      13200,
+      1,
+    );
+    p.loadPatterns[0].selfWeight.enabled = false;
+    p.loadPatterns[0].uniform = [{ ...uniformLoad(m.id), qz: -2000 }];
+    const manual = solve(p);
+    expect(automatic.reactions).toEqual(manual.reactions);
+    expect(automatic.members).toEqual(manual.members);
+  },
+);
 describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
   it("KS-20 · rolete XZ transmite somente a reação normal", () => {
     const p = inclinedBeam();
@@ -688,6 +806,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
       nodal: [],
       uniform: [],
       pressure: [{ slabId: slab.id, pz: 500 }],
+      selfWeight: { ...p.loadPatterns[0].selfWeight },
     });
     p.analysisCases.push({
       id: "S",
@@ -1235,6 +1354,7 @@ describe.skipIf(!executable)("OOFEM real · benchmarks analíticos", () => {
         nodal: secondary,
         uniform: [],
         pressure: [],
+        selfWeight: { ...permanent.selfWeight },
       });
       const factors = (g: number, w: number) => [
         { patternId: permanent.id, factor: g },

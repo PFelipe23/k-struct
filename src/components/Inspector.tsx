@@ -1,5 +1,24 @@
+import {
+  emptyThermal,
+  sectionExtents,
+  setThermalField,
+} from "../domain/thermalLoads";
+import MemberOffsetsEditor from "./MemberOffsetsEditor";
+import { memberAxis, setOffsets } from "../domain/memberOffsets";
 import SectionPreview from "./SectionPreview";
-import { dimensions, geometryErrors, shapeNames } from "../domain/sections";
+import {
+  dimensions,
+  geometryErrors,
+  sectionProperties,
+  shapeNames,
+} from "../domain/sections";
+import {
+  activeStiffnessComponents,
+  grossStiffness,
+  memberStiffnessError,
+  setStiffnessFactor,
+  stiffnessLabels,
+} from "../domain/memberStiffness";
 import MaterialProperties from "./MaterialProperties";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -12,11 +31,12 @@ import {
 import {
   beamAxes,
   coordinates,
-  distance,
   localComponents,
   tolerance,
 } from "../domain/geometry";
 import { reverseMember } from "../domain/editing";
+import { setPrescribedMotion } from "../domain/prescribedMotions";
+import { setRigidSupport, setSpring } from "../domain/supports";
 import {
   free,
   defaultEndConnection,
@@ -36,12 +56,21 @@ import {
   formatUnitInput,
   parseUnitInput,
   unitLabel,
-  type UnitQuantity,
+  fromSI,
+  type MeasuredQuantity,
 } from "../units";
 import { useUnits } from "./Units";
+import { pointLoadLabel } from "./PointLoadGlyph";
+import type { MemberLoadSelection } from "./memberLoadInput";
+import { distributedLoadLabel } from "./DistributedLoadGlyph";
+import FoundationDialog from "./FoundationDialog";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
 import { selectionKey } from "../domain/selection";
+
+const stiffnessNumber = new Intl.NumberFormat("pt-BR", {
+  maximumSignificantDigits: 7,
+});
 
 export function NumberField({
   label,
@@ -52,16 +81,18 @@ export function NumberField({
   min,
   max,
   integer = false,
+  disabled = false,
   validate,
 }: {
   label: string;
   value: number;
   unit?: string;
-  quantity?: UnitQuantity;
+  quantity?: MeasuredQuantity;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
   integer?: boolean;
+  disabled?: boolean;
   validate?: (value: number) => string | undefined;
 }) {
   const { units } = useUnits();
@@ -75,7 +106,7 @@ export function NumberField({
     setDraft(displayValue());
     setInvalid(false);
     setDetail(undefined);
-  }, [value, quantity, units]);
+  }, [value, quantity, units, disabled]);
   const commit = () => {
     if (cancelling.current) {
       cancelling.current = false;
@@ -106,6 +137,7 @@ export function NumberField({
         <input
           aria-label={label}
           aria-invalid={invalid}
+          disabled={disabled}
           inputMode={integer ? "numeric" : "decimal"}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -323,8 +355,8 @@ function SlabFields({
         }
       />
       <p className="help">
-        Use pZ negativo para pressão descendente. Inclua o peso próprio na
-        pressão quando aplicável.
+        Use pZ negativo para pressão descendente. O peso próprio pode ser
+        ativado nas definições do padrão.
       </p>
     </>
   );
@@ -334,18 +366,24 @@ export default function Inspector({
   project: p,
   selection,
   patternId,
+  onPatternChange,
   edit,
   onMaterials,
   onSections,
+  onMemberLoad,
 }: {
   project: Project;
   selection: SelectedObject[];
   patternId: string;
+  onPatternChange: (id: string) => void;
   edit: (fn: (p: Project) => void) => string | null | void;
   onMaterials: () => void;
   onSections: (id: string) => void;
+  onMemberLoad: (selection: MemberLoadSelection) => void;
 }) {
   const { units } = useUnits();
+  const [angleUnit, setAngleUnit] = useState("mrad");
+  const [foundationId, setFoundationId] = useState<string>();
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
   const dofs = spatial
@@ -368,8 +406,15 @@ export default function Inspector({
     (s) => s.id === (member?.sectionId ?? p.sections[0].id),
   )!;
   const material = p.materials.find((m) => m.id === section.materialId)!;
+  const geometry = member && sectionProperties(section);
+  const gross = geometry && grossStiffness(geometry, material);
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
+  const temperature =
+    member &&
+    (pattern.thermal?.find((f) => f.memberId === member.id) ??
+      emptyThermal(member.id));
+  const extents = sectionExtents(section);
   const ul = sumUniform(pattern, member?.id ?? "");
   const updateMemberConnection = (
     end: "i" | "j",
@@ -386,12 +431,14 @@ export default function Inspector({
     });
   const start = member && p.nodes.find((n) => n.id === member.start)!;
   const end = member && p.nodes.find((n) => n.id === member.end)!;
-  const span = start && end ? distance(start, end) : 0;
+  const line =
+    member && start && end ? memberAxis(member, start, end) : undefined;
+  const span = line?.span ?? 0;
   const localLoad =
-    member && start && end && span >= tolerance
+    member && line && span >= tolerance
       ? localComponents(
           { x: ul.qx, y: ul.qy, z: ul.qz },
-          beamAxes(start, end, member.roll, p.mode),
+          beamAxes(line.start, line.end, member.roll, p.mode),
         )
       : undefined;
   const nodeLoad = (key: Exclude<keyof NodalLoad, "nodeId">, value: number) =>
@@ -423,6 +470,8 @@ export default function Inspector({
       for (const n of p.nodes) {
         if (!selectedNodes.has(n.id)) continue;
         n.restraints = free();
+        delete n.springs;
+        delete n.foundation;
         for (const k of dofs) n.restraints[k] = fixed;
       }
     });
@@ -525,6 +574,22 @@ export default function Inspector({
               </div>
             )}
             <h4>Apoios e restrições</h4>
+            {spatial && (
+              <button onClick={() => setFoundationId(node.id)}>
+                {node.foundation
+                  ? `Fundação · ${node.foundation.name}`
+                  : "Importar fundação do MolaStruct"}
+              </button>
+            )}
+            {spatial && foundationId === node.id && (
+              <FoundationDialog
+                key={node.id}
+                node={node}
+                edit={edit}
+                onClose={() => setFoundationId(undefined)}
+              />
+            )}
+
             <SupportFrameEditor
               mode={p.mode}
               frame={node.supportFrame}
@@ -546,8 +611,11 @@ export default function Inspector({
                     checked={node.restraints[k]}
                     onChange={(e) =>
                       edit((p) => {
-                        p.nodes.find((n) => n.id === node.id)!.restraints[k] =
-                          e.target.checked;
+                        setRigidSupport(
+                          p.nodes.find((n) => n.id === node.id)!,
+                          k,
+                          e.target.checked,
+                        );
                       })
                     }
                   />
@@ -565,6 +633,102 @@ export default function Inspector({
               ))}
             </div>
             {supportPresets}
+            <details className="nodal-springs">
+              <summary>Molas nodais</summary>
+              <p className="help">
+                As molas seguem o referencial do apoio. Zero deixa a direção
+                livre. Desmarque a restrição rígida da direção para editar sua
+                mola.
+              </p>
+              {dofs.map((key) => (
+                <NumberField
+                  key={key}
+                  label={`Rigidez ${key.toUpperCase()} ${node.supportFrame ? "local" : "global"}`}
+                  quantity={
+                    key[0] === "u"
+                      ? "translationStiffness"
+                      : "rotationStiffness"
+                  }
+                  value={node.springs?.[key] ?? 0}
+                  disabled={node.restraints[key]}
+                  min={0}
+                  onChange={(value) =>
+                    edit((draft) => {
+                      setSpring(
+                        draft.nodes.find(({ id }) => id === node.id)!,
+                        key,
+                        value,
+                      );
+                    })
+                  }
+                />
+              ))}
+            </details>
+            <details className="nodal-springs" key={`motions-${node.id}`}>
+              <summary>
+                Movimentos prescritos
+                {pattern.prescribed?.some((r) => r.nodeId === node.id) &&
+                  ` · ${pattern.name}`}
+              </summary>
+              <p className="help">
+                Informe o movimento conhecido no referencial{" "}
+                {node.supportFrame ? "local do apoio" : "global"}. O sinal segue
+                o sentido positivo do eixo. Zero restabelece a condição imóvel
+                nesse padrão.
+              </p>
+              <label className="stack-field">
+                Padrão do movimento
+                <select
+                  value={patternId}
+                  onChange={(e) => onPatternChange(e.target.value)}
+                >
+                  {p.loadPatterns.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {dofs.some((k) => k[0] === "r" && node.restraints[k]) && (
+                <label className="stack-field">
+                  Unidade de rotação
+                  <select
+                    value={angleUnit}
+                    onChange={(e) => setAngleUnit(e.target.value)}
+                  >
+                    <option value="mrad">mrad</option>
+                    <option value="rad">rad</option>
+                  </select>
+                </label>
+              )}
+              {dofs.map((dof) => {
+                const rotation = dof[0] === "r";
+                const factor = rotation && angleUnit === "mrad" ? 1000 : 1;
+                const motion = pattern.prescribed?.find(
+                  (r) => r.nodeId === node.id && r.dof === dof,
+                );
+                return (
+                  <NumberField
+                    key={`${node.id}-${patternId}-${dof}-${angleUnit}`}
+                    label={`${dof.toUpperCase()} imposto ${node.supportFrame ? "local" : "global"}`}
+                    disabled={!node.restraints[dof]}
+                    quantity={rotation ? undefined : "displacement"}
+                    unit={rotation ? angleUnit : undefined}
+                    value={(motion?.value ?? 0) * factor}
+                    onChange={(value) =>
+                      edit((draft) =>
+                        setPrescribedMotion(
+                          draft.loadPatterns.find(
+                            (item) => item.id === patternId,
+                          )!,
+                          { nodeId: node.id, dof, value: value / factor },
+                        ),
+                      )
+                    }
+                  />
+                );
+              })}
+            </details>
             <h4>
               Carga nodal <span>{pattern.name}</span>
             </h4>
@@ -615,7 +779,7 @@ export default function Inspector({
               </b>
             </div>
             <div className="property-line">
-              <span>Comprimento</span>
+              <span>{member.offsets ? "Eixo de inserção" : "Comprimento"}</span>
               <b>
                 {formatQuantity(span, "length", units)} {units.length}
               </b>
@@ -734,8 +898,154 @@ export default function Inspector({
                 <b>0°</b>
               </div>
             )}
+            {start && end && (
+              <MemberOffsetsEditor
+                member={member}
+                start={start}
+                end={end}
+                mode={p.mode}
+                onApply={(offsets) =>
+                  edit((draft) =>
+                    setOffsets(
+                      draft.members.find((m) => m.id === member.id)!,
+                      offsets,
+                    ),
+                  )
+                }
+              />
+            )}
             <h4>
-              Carga distribuída <span>{pattern.name}</span>
+              Cargas concentradas <span>{pattern.name}</span>
+            </h4>
+            {(pattern.points ?? [])
+              .filter((l) => l.memberId === member.id)
+              .map((load) => (
+                <button
+                  key={load.id}
+                  className="point-load-entry"
+                  onClick={() =>
+                    onMemberLoad({
+                      memberId: member.id,
+                      loadId: load.id,
+                      fraction: 0,
+                    })
+                  }
+                >
+                  {pointLoadLabel(load, span, units)}
+                </button>
+              ))}
+            <button
+              onClick={() =>
+                onMemberLoad({ memberId: member.id, fraction: 0.5 })
+              }
+            >
+              Adicionar carga concentrada
+            </button>
+            <h4>
+              Cargas por trecho <span>{pattern.name}</span>
+            </h4>
+            {(pattern.distributed ?? [])
+              .filter((l) => l.memberId === member.id)
+              .map((load) => (
+                <button
+                  key={load.id}
+                  className="point-load-entry"
+                  onClick={() =>
+                    onMemberLoad({
+                      kind: "distributed",
+                      memberId: member.id,
+                      loadId: load.id,
+                      fraction: 0,
+                    })
+                  }
+                >
+                  {distributedLoadLabel(load, span, units)}
+                </button>
+              ))}
+            <button
+              onClick={() =>
+                onMemberLoad({
+                  kind: "distributed",
+                  memberId: member.id,
+                  fraction: 0,
+                })
+              }
+            >
+              Adicionar carga por trecho
+            </button>
+            {temperature && (
+              <details className="nodal-springs">
+                <summary>Ação térmica</summary>
+                <label className="stack-field">
+                  Padrão da ação térmica
+                  <select
+                    value={patternId}
+                    onChange={(e) => onPatternChange(e.target.value)}
+                  >
+                    {p.loadPatterns.map((pat) => (
+                      <option key={pat.id} value={pat.id}>
+                        {pat.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="help">
+                  {material.name} · α ={" "}
+                  {material.alpha.toLocaleString("pt-BR", {
+                    maximumSignificantDigits: 8,
+                  })}{" "}
+                  1/K.
+                  {material.alpha === 0 &&
+                    " Com α igual a zero, não há deformação térmica."}
+                </p>
+                <p className="help">
+                  A variação uniforme aquece (+) ou resfria (−) toda a seção. A
+                  diferença entre faces é a temperatura da face positiva menos a
+                  da face negativa do eixo local. Uma variação de 1 K equivale a
+                  1 °C.
+                </p>
+                {(
+                  [
+                    "uniform",
+                    "deltaZ",
+                    ...(spatial ? ["deltaY" as const] : []),
+                  ] as const
+                ).map((k) => (
+                  <NumberField
+                    key={`${member.id}-${patternId}-${k}`}
+                    label={
+                      k === "uniform"
+                        ? "ΔT uniforme"
+                        : `ΔT entre faces ${k === "deltaZ" ? "z" : "y"}`
+                    }
+                    unit="K"
+                    value={temperature[k]}
+                    onChange={(value) =>
+                      edit((draft) => {
+                        const target = draft.loadPatterns.find(
+                          (pat) => pat.id === patternId,
+                        )!;
+                        const field =
+                          target.thermal?.find(
+                            (f) => f.memberId === member.id,
+                          ) ?? emptyThermal(member.id);
+                        setThermalField(target, { ...field, [k]: value });
+                      })
+                    }
+                  />
+                ))}
+                <p className="help">
+                  Distância entre faces z:{" "}
+                  {formatQuantity(extents.height, "section", units)}{" "}
+                  {units.section}
+                  {spatial &&
+                    ` · entre faces y: ${formatQuantity(extents.width, "section", units)} ${units.section}`}
+                  .
+                </p>
+              </details>
+            )}
+            <h4>
+              Carga distribuída uniforme <span>{pattern.name}</span>
             </h4>
             {axes.map((k) => (
               <NumberField
@@ -767,8 +1077,8 @@ export default function Inspector({
               </dl>
             )}
             <p className="help">
-              Carga uniforme por metro de barra. Use qZ negativo para cargas
-              verticais descendentes.
+              Carga uniforme por metro do eixo de inserção, incluindo os trechos
+              rígidos. Use qZ negativo para cargas verticais descendentes.
             </p>
           </>
         )}
@@ -812,6 +1122,71 @@ export default function Inspector({
                 />
               ))}
               <SectionPreview geometry={section} roll={member?.roll} />
+              {member && geometry && gross && (
+                <details className="member-stiffness">
+                  <summary>Modificadores de rigidez</summary>
+                  <p className="help">
+                    {spatial
+                      ? "EA axial em x, EIy e EIz em flexão nos eixos locais y e z, GJ em torção em x."
+                      : "EA axial em x local e EIy em flexão em torno de y local."}{" "}
+                    Use fatores adimensionais maiores que zero.
+                  </p>
+                  {activeStiffnessComponents(p.mode).map((key) => (
+                    <NumberField
+                      key={key}
+                      label={`Fator ${stiffnessLabels[key]}`}
+                      value={member.stiffness?.[key] ?? 1}
+                      validate={(value) =>
+                        memberStiffnessError(p.mode, geometry, material, {
+                          ...member.stiffness,
+                          [key]: value,
+                        })
+                      }
+                      onChange={(value) =>
+                        edit((draft) =>
+                          setStiffnessFactor(
+                            draft.members.find(({ id }) => id === member.id)!,
+                            key,
+                            value,
+                          ),
+                        )
+                      }
+                    />
+                  ))}
+                  <table aria-label="Rigidez bruta e efetiva da barra">
+                    <thead>
+                      <tr>
+                        <th scope="col">Rigidez</th>
+                        <th scope="col">Bruta</th>
+                        <th scope="col">Efetiva</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeStiffnessComponents(p.mode).map((key) => {
+                        const unit =
+                          key === "ea" ? units.force : `${units.force}·m²`;
+                        const value = (rigidity: number) =>
+                          stiffnessNumber.format(
+                            fromSI(rigidity, "force", units),
+                          );
+                        return (
+                          <tr key={key}>
+                            <th scope="row">
+                              {stiffnessLabels[key]} <small>{unit}</small>
+                            </th>
+                            <td>{value(gross[key])}</td>
+                            <td>
+                              {value(
+                                gross[key] * (member.stiffness?.[key] ?? 1),
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </details>
+              )}
               <button onClick={() => onSections(section.id)}>
                 Catálogo de seções
               </button>
@@ -830,8 +1205,8 @@ export default function Inspector({
           <div className="scope-note">
             <b>Estática linear · {spatial ? "Espacial" : "Plano XZ"}</b>
             <p>
-              Barras de Euler–Bernoulli, ligações rígidas e cargas globais. Peso
-              próprio deve ser aplicado como carga.
+              Barras de Euler–Bernoulli. Configure o peso próprio nos padrões de
+              carga.
             </p>
           </div>
         )}

@@ -1,7 +1,18 @@
 import { distance, interiorParameter, tolerance } from "./geometry";
-import type { Project } from "./model";
+import { distanceFromI, type MemberPointLoad } from "./memberPointLoads";
+import {
+  loadInterval,
+  zeroCrossings,
+  type DistributedLoad,
+} from "./memberDistributedLoads";
+import { memberAxis } from "./memberOffsets";
+import type { Project, StructuralNode } from "./model";
 
-export type BeamStation = { t: number; nodeId?: string };
+export type BeamStation = {
+  t: number;
+  nodeId?: string;
+  pointLoads?: MemberPointLoad[];
+};
 export type SectionLocation = { t: number; side?: "left" | "right" };
 
 export function connectionStations(p: Project) {
@@ -44,17 +55,111 @@ export function connectionStations(p: Project) {
 }
 
 // Editable nodes take precedence over a regular station within the geometric tolerance.
-export function beamStations(p: Project) {
+export function beamMeshLayout(p: Project) {
+  const rigidLinks: { memberId: string; masterId: string; nodeId: string }[] =
+    [];
   const links = connectionStations(p);
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const layout = new Map<string, BeamStation[]>();
   const count = p.mesh.segmentsPerMember;
+  // All cases share these sections so combinations and envelopes compare both sides.
+  const loadsByMember = new Map<string, MemberPointLoad[]>();
+  for (const pattern of p.loadPatterns)
+    for (const load of pattern.points ?? []) {
+      const list = loadsByMember.get(load.memberId);
+      if (list) list.push(load);
+      else loadsByMember.set(load.memberId, [load]);
+    }
+  const intervalsByMember = new Map<string, DistributedLoad[]>();
+  for (const pattern of p.loadPatterns)
+    for (const load of pattern.distributed ?? []) {
+      const list = intervalsByMember.get(load.memberId);
+      if (list) list.push(load);
+      else intervalsByMember.set(load.memberId, [load]);
+    }
   for (const m of p.members) {
-    const span = distance(nodes.get(m.start)!, nodes.get(m.end)!);
-    const fixed = [...(links.get(m.id) ?? []), { t: 1, nodeId: m.end }];
-    const stations: BeamStation[] = [{ t: 0, nodeId: m.start }];
+    const axis = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
+    const span = axis.clear;
+    const fixed: BeamStation[] = [{ t: 0, nodeId: m.start }];
+    for (const link of links.get(m.id) ?? []) {
+      const t = m.offsets
+        ? (link.t * axis.span - m.offsets.i.rigidLength) / span
+        : link.t;
+      if (t * span <= tolerance || (1 - t) * span <= tolerance) {
+        rigidLinks.push({
+          memberId: m.id,
+          masterId: t < 0.5 ? m.start : m.end,
+          nodeId: link.nodeId,
+        });
+      } else fixed.push({ t, nodeId: link.nodeId });
+    }
+    fixed.push({ t: 1, nodeId: m.end });
+    const extra: BeamStation[] = [];
+    const actions = (loadsByMember.get(m.id) ?? [])
+      .map((load) => ({
+        load,
+        t: Math.max(
+          0,
+          Math.min(
+            1,
+            (distanceFromI(load.position, axis.span) -
+              (m.offsets?.i.rigidLength ?? 0)) /
+              span,
+          ),
+        ),
+      }))
+      .sort((a, b) => a.t - b.t);
+    let nextFixed = 1;
+    for (const { load, t } of actions) {
+      while (nextFixed < fixed.length - 1 && fixed[nextFixed].t < t)
+        nextFixed++;
+      const before = fixed[nextFixed - 1],
+        after = fixed[nextFixed];
+      const nearest = t - before.t <= after.t - t ? before : after;
+      let target = nearest;
+      if (Math.abs(nearest.t - t) * span > tolerance) {
+        const previous = extra.at(-1);
+        if (previous && (t - previous.t) * span <= tolerance) target = previous;
+        else {
+          target = { t };
+          extra.push(target);
+        }
+      }
+      (target.pointLoads ??= []).push(load);
+    }
+    // Changes of distributed intensity have a single, continuous force section.
+    // Keep all physical breakpoints across cases, before adding regular stations.
+    const boundaries: BeamStation[] = [];
+    for (const load of intervalsByMember.get(m.id) ?? []) {
+      const [a, b] = loadInterval(load, axis.span);
+      for (const s of [0, ...zeroCrossings(load.qStart, load.qEnd), 1]) {
+        const t = (a + (b - a) * s - (m.offsets?.i.rigidLength ?? 0)) / span;
+        if (t > 0 && t < 1) boundaries.push({ t });
+      }
+    }
+    let required = extra.length
+      ? fixed.concat(extra).sort((a, b) => a.t - b.t)
+      : fixed;
+    if (boundaries.length) {
+      const unique: BeamStation[] = [];
+      for (const next of [...required, ...boundaries].sort(
+        (a, b) => a.t - b.t,
+      )) {
+        const prev = unique.at(-1);
+        if (
+          !prev ||
+          (next.t - prev.t) * span >
+            32 * Number.EPSILON * Math.max(1, axis.span)
+        )
+          unique.push(next);
+        else if (next.nodeId || next.pointLoads)
+          unique[unique.length - 1] = next;
+      }
+      required = unique;
+    }
+    const stations: BeamStation[] = [required[0]];
     let step = 1;
-    for (const next of fixed) {
+    for (const next of required.slice(1)) {
       while (step < count && step / count <= next.t) {
         const t = step++ / count;
         if (
@@ -67,12 +172,16 @@ export function beamStations(p: Project) {
     }
     layout.set(m.id, stations);
   }
-  return layout;
+  return { stations: layout, rigidLinks };
+}
+
+export function beamStations(p: Project) {
+  return beamMeshLayout(p).stations;
 }
 
 export function sectionLocations(stations: BeamStation[]): SectionLocation[] {
-  return stations.flatMap(({ t, nodeId }): SectionLocation[] =>
-    nodeId && t > 0 && t < 1
+  return stations.flatMap(({ t, nodeId, pointLoads }): SectionLocation[] =>
+    (nodeId || pointLoads?.length) && t > 0 && t < 1
       ? [
           { t, side: "left" },
           { t, side: "right" },
@@ -94,4 +203,45 @@ export function nearestSection(stations: SectionLocation[], t: number) {
       best = i;
   }
   return best;
+}
+
+// A connected rigid zone has one independent motion. Retain a supported node
+// as its reference to keep ordinary loads and reactions on their editable nodes.
+export function rigidGroups(
+  links: { masterId: string; nodeId: string }[],
+  nodes: StructuralNode[],
+) {
+  const adjacency = new Map<string, Set<string>>();
+  for (const { masterId, nodeId } of links) {
+    for (const [a, b] of [
+      [masterId, nodeId],
+      [nodeId, masterId],
+    ]) {
+      const group = adjacency.get(a) ?? new Set<string>();
+      group.add(b);
+      adjacency.set(a, group);
+    }
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const visited = new Set<string>();
+  const masterOf = new Map<string, string>();
+  for (const id of adjacency.keys()) {
+    if (visited.has(id)) continue;
+    const group = [id];
+    visited.add(id);
+    for (const current of group)
+      for (const next of adjacency.get(current)!) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          group.push(next);
+        }
+      }
+    const restraints = (key: string) =>
+      Object.values(byId.get(key)!.restraints).filter(Boolean).length;
+    const master = group.reduce((best, key) =>
+      restraints(key) > restraints(best) ? key : best,
+    );
+    for (const key of group) if (key !== master) masterOf.set(key, master);
+  }
+  return masterOf;
 }
