@@ -1,3 +1,6 @@
+import { coordinates, interpolate } from "../domain/geometry";
+import { memberAxis } from "../domain/memberOffsets";
+import type { Member, Project } from "../domain/model";
 import type { MemberForceComponent } from "../solver/combinations";
 import {
   DEFAULT_UNITS,
@@ -28,6 +31,39 @@ export const forceLabels: Record<
 
 export const sectionSide = (side?: "left" | "right") =>
   side === "left" ? "Lado i" : side === "right" ? "Lado j" : "";
+
+// Moment and force coordinates refer to the cut on the deformable axis.
+export function sectionPositions(
+  project: Project,
+  members: Member[],
+  units: UnitPreferences,
+) {
+  const axes = project.mode === "spatial" ? coordinates : (["x", "z"] as const);
+  const show = members.some((m) => m.offsets);
+  const nodes = new Map(project.nodes.map((n) => [n.id, n]));
+  const lines = new Map(
+    show
+      ? members.map(
+          (m) =>
+            [
+              m.id,
+              memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!),
+            ] as const,
+        )
+      : [],
+  );
+  return {
+    headers: show
+      ? axes.map((k) => `${k.toUpperCase()} da seção (${units.length})`)
+      : [],
+    values(id: string, t: number) {
+      const line = lines.get(id);
+      if (!line) return [];
+      const at = interpolate(line.faceI, line.faceJ, t);
+      return axes.map((k) => fromSI(at[k], "length", units));
+    },
+  };
+}
 
 export function forceQuantity(
   component: MemberForceComponent,

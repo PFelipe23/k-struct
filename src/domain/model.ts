@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { geometrySchemas, geometryErrors, defaultGeometry } from "./sections";
+import { offsetError, setOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import { supportBasis } from "./supports";
@@ -287,10 +288,29 @@ const supportFrameSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
-export const projectSchema = projectV10.extend({
+const projectV11 = projectV10.extend({
   schemaVersion: z.literal(11),
   nodes: z
     .array(nodeSchema.extend({ supportFrame: supportFrameSchema.optional() }))
+    .max(1000),
+});
+const offsetEnd = z.strictObject({
+  eccentricity: directionSchema,
+  rigidLength: finite.nonnegative(),
+});
+export const projectSchema = projectV11.extend({
+  schemaVersion: z.literal(12),
+  members: z
+    .array(
+      memberSchema
+        .extend({
+          offsets: z.strictObject({ i: offsetEnd, j: offsetEnd }).optional(),
+        })
+        .transform((member) => {
+          if (member.offsets) setOffsets(member, member.offsets);
+          return member;
+        }),
+    )
     .max(1000),
 });
 export type Section = z.infer<typeof sectionSchema>;
@@ -358,7 +378,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 11,
+    schemaVersion: 12,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -642,10 +662,19 @@ export function parseProject(source: string): Project {
     const old = projectV10.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 11 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 11
+  ) {
+    const old = projectV11.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 12 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success)
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 11, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 12, com valores numéricos finitos.",
     );
   const errors = referenceErrors(parsed.data);
   if (errors.length) throw new Error(errors.join("\n"));
@@ -725,6 +754,12 @@ export function referenceErrors(p: Project): string[] {
   for (const m of p.members) {
     if (!nodes.has(m.start) || !nodes.has(m.end))
       errors.push(`${m.name}: nó de extremidade inexistente.`);
+    const a = nodes.get(m.start),
+      b = nodes.get(m.end);
+    if (a && b) {
+      const error = offsetError(m, a, b, p.mode);
+      if (error) errors.push(error);
+    }
     if (!p.sections.some((s) => s.id === m.sectionId))
       errors.push(`${m.name}: seção inexistente.`);
   }

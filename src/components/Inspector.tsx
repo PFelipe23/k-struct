@@ -1,3 +1,5 @@
+import MemberOffsetsEditor from "./MemberOffsetsEditor";
+import { memberAxis, setOffsets } from "../domain/memberOffsets";
 import SectionPreview from "./SectionPreview";
 import { dimensions, geometryErrors, shapeNames } from "../domain/sections";
 import MaterialProperties from "./MaterialProperties";
@@ -12,7 +14,6 @@ import {
 import {
   beamAxes,
   coordinates,
-  distance,
   localComponents,
   tolerance,
 } from "../domain/geometry";
@@ -371,12 +372,14 @@ export default function Inspector({
   const ul = sumUniform(pattern, member?.id ?? "");
   const start = member && p.nodes.find((n) => n.id === member.start)!;
   const end = member && p.nodes.find((n) => n.id === member.end)!;
-  const span = start && end ? distance(start, end) : 0;
+  const line =
+    member && start && end ? memberAxis(member, start, end) : undefined;
+  const span = line?.span ?? 0;
   const localLoad =
-    member && start && end && span >= tolerance
+    member && line && span >= tolerance
       ? localComponents(
           { x: ul.qx, y: ul.qy, z: ul.qz },
-          beamAxes(start, end, member.roll, p.mode),
+          beamAxes(line.start, line.end, member.roll, p.mode),
         )
       : undefined;
   const nodeLoad = (key: Exclude<keyof NodalLoad, "nodeId">, value: number) =>
@@ -467,7 +470,14 @@ export default function Inspector({
             </p>
             {selectedNodes.size > 0 && supportPresets}
             <BatchAssignPanel
-              key={JSON.stringify([p.mode, patternId, units.force, units.moment, units.distributedLoad, ...selection.map(selectionKey)])}
+              key={JSON.stringify([
+                p.mode,
+                patternId,
+                units.force,
+                units.moment,
+                units.distributedLoad,
+                ...selection.map(selectionKey),
+              ])}
               project={p}
               selection={selection}
               patternId={patternId}
@@ -593,7 +603,7 @@ export default function Inspector({
               </b>
             </div>
             <div className="property-line">
-              <span>Comprimento</span>
+              <span>{member.offsets ? "Eixo de inserção" : "Comprimento"}</span>
               <b>
                 {formatQuantity(span, "length", units)} {units.length}
               </b>
@@ -645,6 +655,22 @@ export default function Inspector({
                 <b>0°</b>
               </div>
             )}
+            {start && end && (
+              <MemberOffsetsEditor
+                member={member}
+                start={start}
+                end={end}
+                mode={p.mode}
+                onApply={(offsets) =>
+                  edit((draft) =>
+                    setOffsets(
+                      draft.members.find((m) => m.id === member.id)!,
+                      offsets,
+                    ),
+                  )
+                }
+              />
+            )}
             <h4>
               Carga distribuída <span>{pattern.name}</span>
             </h4>
@@ -678,8 +704,8 @@ export default function Inspector({
               </dl>
             )}
             <p className="help">
-              Carga uniforme por metro de barra. Use qZ negativo para cargas
-              verticais descendentes.
+              Carga uniforme por metro do eixo de inserção, incluindo os trechos
+              rígidos. Use qZ negativo para cargas verticais descendentes.
             </p>
           </>
         )}

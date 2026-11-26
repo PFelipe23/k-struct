@@ -16,7 +16,8 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
-- Salvar e reabrir `.kstruct.json` no esquema v11, com migração dos projetos v1 a v10 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
+- Salvar e reabrir `.kstruct.json` no esquema v12, com migração dos projetos v1 a v11 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.

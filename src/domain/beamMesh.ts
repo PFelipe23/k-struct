@@ -1,4 +1,5 @@
 import { distance, interiorParameter, tolerance } from "./geometry";
+import { memberAxis } from "./memberOffsets";
 import type { Project } from "./model";
 
 export type BeamStation = { t: number; nodeId?: string };
@@ -44,14 +45,30 @@ export function connectionStations(p: Project) {
 }
 
 // Editable nodes take precedence over a regular station within the geometric tolerance.
-export function beamStations(p: Project) {
+export function beamMeshLayout(p: Project) {
+  const rigidLinks: { memberId: string; masterId: string; nodeId: string }[] =
+    [];
   const links = connectionStations(p);
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const layout = new Map<string, BeamStation[]>();
   const count = p.mesh.segmentsPerMember;
   for (const m of p.members) {
-    const span = distance(nodes.get(m.start)!, nodes.get(m.end)!);
-    const fixed = [...(links.get(m.id) ?? []), { t: 1, nodeId: m.end }];
+    const axis = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
+    const span = axis.clear;
+    const fixed: { t: number; nodeId: string }[] = [];
+    for (const link of links.get(m.id) ?? []) {
+      const t = m.offsets
+        ? (link.t * axis.span - m.offsets.i.rigidLength) / span
+        : link.t;
+      if (t * span <= tolerance || (1 - t) * span <= tolerance) {
+        rigidLinks.push({
+          memberId: m.id,
+          masterId: t < 0.5 ? m.start : m.end,
+          nodeId: link.nodeId,
+        });
+      } else fixed.push({ t, nodeId: link.nodeId });
+    }
+    fixed.push({ t: 1, nodeId: m.end });
     const stations: BeamStation[] = [{ t: 0, nodeId: m.start }];
     let step = 1;
     for (const next of fixed) {
@@ -67,7 +84,11 @@ export function beamStations(p: Project) {
     }
     layout.set(m.id, stations);
   }
-  return layout;
+  return { stations: layout, rigidLinks };
+}
+
+export function beamStations(p: Project) {
+  return beamMeshLayout(p).stations;
 }
 
 export function sectionLocations(stations: BeamStation[]): SectionLocation[] {

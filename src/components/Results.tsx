@@ -24,6 +24,7 @@ import {
   formatResult,
   resultFractionDigits,
   sectionSide,
+  sectionPositions,
 } from "./resultFormatting";
 
 type ResultView =
@@ -55,6 +56,7 @@ export function buildResultTable(
   units: UnitPreferences = DEFAULT_UNITS,
 ) {
   const spatial = project.mode === "spatial";
+  const modelMembers = new Map(project.members.map((m) => [m.id, m]));
   const nodeNames = new Map(project.nodes.map((n) => [n.id, n.name]));
   const includeMemberIds =
     tab === "forces" && hasAmbiguousMemberNames(project.members);
@@ -131,16 +133,23 @@ export function buildResultTable(
       ]),
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
         stations
-          .slice(1, -1)
-          .filter((s) => s.side !== "right")
+          .filter(
+            (s) =>
+              s.side !== "right" &&
+              ((s.t > 0 && s.t < 1) || modelMembers.get(id)?.offsets),
+          )
           .map((s) => [
-            `${memberNames.get(id) ?? id} · x/L ${s.t}`,
+            `${memberNames.get(id) ?? id} · ${s.t === 0 ? "face i" : s.t === 1 ? "face j" : `x/L ${s.t}`}`,
             ...values(s),
           ]),
       ),
     ];
   } else if (tab === "forces") {
     const components = forceColumns[project.mode];
+    const visible = project.members.filter(
+      (m) => !forceMemberId || m.id === forceMemberId,
+    );
+    const positions = sectionPositions(project, visible, units);
     headers = [
       "Barra",
       "x/L",
@@ -151,6 +160,7 @@ export function buildResultTable(
       ...(project.meshConnections.length
         ? ["Lado da seção", "ID da barra"]
         : []),
+      ...positions.headers,
     ];
     rows = Object.entries(result?.members ?? {})
       .filter(([id]) => !forceMemberId || id === forceMemberId)
@@ -160,6 +170,7 @@ export function buildResultTable(
           s.t,
           ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
           ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
+          ...positions.values(id, s.t),
         ]),
       );
   }
@@ -361,6 +372,15 @@ export default function Results({
           </div>
         ) : (
           <table>
+            {project.members.some((m) => m.offsets) && (
+              <caption>
+                {tab === "forces"
+                  ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
+                  : tab === "reactions"
+                    ? "Reações referidas aos nós de apoio."
+                    : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
+              </caption>
+            )}
             <thead>
               <tr>
                 {headers.map((h) => (

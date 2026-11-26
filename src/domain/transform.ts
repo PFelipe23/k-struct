@@ -1,3 +1,4 @@
+import { memberAxis } from "./memberOffsets";
 import { beamAxes, distance, scale, tolerance, type Point3 } from "./geometry";
 import {
   addPoint,
@@ -211,13 +212,21 @@ export function planTransform(
           source.mode === "spatial" &&
           !(nodeIds.has(m.start) && nodeIds.has(m.end))
         )
-          m.roll = movedRoll(
+        {
+          const oldLine = memberAxis(
+            m,
             original.get(m.start)!,
             original.get(m.end)!,
-            a,
-            b,
+          );
+          const newLine = memberAxis(m, a, b);
+          m.roll = movedRoll(
+            oldLine.start,
+            oldLine.end,
+            newLine.start,
+            newLine.end,
             m.roll,
           );
+        }
       }
       for (const n of nodes) {
         const dest = targets.get(n.id)!;
@@ -256,20 +265,32 @@ export function planTransform(
       const a = targets.get(start)!,
         b = targets.get(end)!;
       assertLength(a, b, m.name);
+      const transformEnd = (e: NonNullable<typeof m.offsets>["i"]) => {
+        const eccentricity = vector(e.eccentricity);
+        if (source.mode === "planar") eccentricity.y = 0;
+        return { eccentricity, rigidLength: e.rigidLength };
+      };
+      const offsets = m.offsets && {
+        i: transformEnd(m.offsets.i),
+        j: transformEnd(m.offsets.j),
+      };
       let roll = m.roll;
       if (source.mode === "spatial" && spec.kind !== "translate") {
-        const [, , z] = beamAxes(
+        const oldLine = memberAxis(
+          m,
           original.get(m.start)!,
           original.get(m.end)!,
-          m.roll,
         );
-        roll = sectionRoll(a, b, vector(z));
+        const [, , z] = beamAxes(oldLine.start, oldLine.end, m.roll);
+        const newLine = memberAxis({ offsets }, a, b);
+        roll = sectionRoll(newLine.start, newLine.end, vector(z));
       }
       const bar = appendMember(project, {
         start,
         end,
         sectionId: m.sectionId,
         roll,
+        ...(offsets ? { offsets } : {}),
       });
       map.members.set(m.id, bar.id);
       plan.selected.push({ kind: "member", id: bar.id });

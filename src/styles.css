@@ -2444,3 +2444,9 @@ button.primary {
   color: var(--danger);
   font-size: 10px;
 }
+
+
+.member-offsets { margin: 0.65rem 0; }
+.member-offsets summary { cursor: pointer; font-weight: 600; }
+.offset-end { min-width: 0; border: 1px solid var(--line); }
+.offset-end legend { padding: 0 0.3rem; font-weight: 600; }
