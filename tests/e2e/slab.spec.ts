@@ -1,3 +1,4 @@
+import { jointedSlabs } from "../fixtures/jointed-slabs";
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { formatResult } from "../../src/components/resultFormatting";
@@ -651,4 +652,143 @@ test("KS-42 · refina a abertura e o apoio e localiza o elemento com alerta na p
   await expect(page.getByRole("status")).toContainText(
     /Malha inválida.*elemento/,
   );
+});
+
+test("KS-43 · lança a segunda laje, conecta a viga e compara os três vínculos pelo editor", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  if (executable) await plateBridge(page);
+  const p = jointedSlabs(6);
+  p.slabs.pop();
+  delete p.slabJoint;
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "primeira-laje-e-viga.kstruct.json",
+    serializeProject(p),
+  );
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const drawing = page.getByRole("application", {
+    name: "Área de lançamento XY",
+  });
+  await page.getByRole("button", { name: /^Laje L$/ }).click();
+  const positions = await drawing.evaluate((svg) => {
+    const g = (axis: string, v: number) =>
+      Number(
+        svg
+          .querySelector(`line[data-axis="${axis}"][data-position="${v}"]`)!
+          .getAttribute(axis + "1"),
+      );
+    return [
+      { x: g("x", 4), y: g("y", 0) },
+      { x: g("x", 8), y: g("y", 0) + (g("y", 4) - g("y", 0)) * 0.75 },
+    ];
+  });
+  for (const position of positions) await drawing.click({ position });
+  await expect(page.locator(".model-count")).toContainText("2 lajes");
+  const label = page.getByLabel("Legenda da borda comum");
+  await expect(label).toContainText("L1 ↔ L2 · Articulada");
+  const d = page.getByRole("dialog", { name: "Vínculo entre lajes" });
+  await drawing.getByRole("button", { name: /Borda L1 ↔ L2/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(d).toContainText("3 m");
+  await d.getByLabel("Apoio da borda comum").selectOption(p.members[0].id);
+  await d.getByLabel("Ligação à flexão").selectOption("elastic");
+  await expect(
+    d.getByRole("button", { name: "Aplicar vínculo" }),
+  ).toBeDisabled();
+  await d.getByLabel("Rigidez rotacional por comprimento").fill("1000");
+  await d.getByRole("button", { name: "Aplicar vínculo" }).click();
+  await expect(label).toContainText("1000 kN·m/(rad·m)");
+  await button("Desfazer").click();
+  await expect(label).toContainText("L1 ↔ L2 · Articulada");
+  await button("Refazer").click();
+  // Editing pressure on the second slab must preserve the first pattern entry.
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "L2", exact: true })
+    .click();
+  const pressure = page.getByLabel("Pressão pZ");
+  await pressure.fill("-1");
+  await pressure.press("Enter");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "L1", exact: true })
+    .click();
+  await expect(pressure).toHaveValue("-5");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "L2", exact: true })
+    .click();
+  await pressure.fill("0");
+  await pressure.press("Enter");
+  const save = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const json = await readFile((await (await save).path())!, "utf8");
+  const saved = parseProject(json);
+  expect(saved.slabJoint).toMatchObject({
+    kind: "elastic",
+    support: "beam",
+    memberId: p.members[0].id,
+    stiffness: 1e6,
+  });
+  expect(saved.loadPatterns[0].pressure).toEqual(p.loadPatterns[0].pressure);
+  await openProjectInBrowser(page, "pavimento.kstruct.json", json);
+  await expect(label).toContainText("Semirrígida");
+  await expect(drawing.locator(".slab-joint-plan")).toHaveAttribute(
+    "data-kind",
+    "elastic",
+  );
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  const table = page.getByRole("table", {
+    name: "Transferência na borda comum",
+  });
+  const solve = async () => {
+    await button("Analisar").click();
+    await page.waitForFunction(
+      () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+    );
+    await page.evaluate(() =>
+      (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+    );
+    await expect(table).toBeVisible();
+  };
+  const values: Record<string, number> = {};
+  for (const kind of ["elastic", "hinged", "continuous"] as const) {
+    if (kind !== "elastic") {
+      await drawing.getByRole("button", { name: /Borda L1 ↔ L2/ }).focus();
+      await page.keyboard.press("Enter");
+      await d.getByLabel("Ligação à flexão").selectOption(kind);
+      await d.getByRole("button", { name: "Aplicar vínculo" }).click();
+      await expect(table).toHaveCount(0);
+    }
+    await solve();
+    const input = structuredClone(saved);
+    input.slabJoint!.kind = kind;
+    if (kind !== "elastic") delete input.slabJoint!.stiffness;
+    const deck = exportOofem(input, "EL"),
+      actual = parseOofemOutput(runDeck(deck.deck, executable), deck).floor!;
+    const cells = table.getByRole("cell");
+    await expect(cells.nth(0)).toHaveText(formatResult(actual.momentA / 1000));
+    await expect(cells.nth(3)).toHaveText(
+      formatResult(actual.beamForce / 1000),
+    );
+    values[kind] = Math.abs(actual.momentA);
+    await page
+      .locator(".explorer")
+      .getByRole("button", { name: "L2", exact: true })
+      .click();
+    await expect(
+      page.getByRole("region", { name: "Resultados da laje" }),
+    ).toContainText("Laje L2");
+    await expect(
+      drawing.getByLabel("Mapa de Flecha UZ da laje L2", { exact: false }),
+    ).toHaveCount(1);
+  }
+  expect(values.hinged).toBeLessThan(values.elastic);
+  expect(values.elastic).toBeLessThan(values.continuous);
 });

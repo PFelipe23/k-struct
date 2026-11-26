@@ -45,6 +45,32 @@ export interface SlabResult {
   centroid: XY;
 }
 
+export function slabPressure(
+  project: Project,
+  analysisCase: AnalysisCase,
+  definition: Slab,
+) {
+  return analysisCase.factors.reduce((sum, { patternId, factor }) => {
+    const pattern = project.loadPatterns.find(({ id }) => id === patternId)!;
+    if (factor === 0) return sum;
+    const manualPressure =
+      pattern.pressure.find(({ slabId }) => slabId === definition.id)?.pz ?? 0;
+    if (
+      pattern.selfWeight.enabled &&
+      !pattern.selfWeight.direction.endsWith("Z")
+    )
+      throw new Error(
+        `O padrão ${pattern.name} direciona o peso próprio fora do eixo Z, que não é suportado pelo painel horizontal ${definition.name}.`,
+      );
+    const automaticPressure = pattern.selfWeight.enabled
+      ? (selfWeightSummary(project, pattern).slabs.find(
+          ({ slabId }) => slabId === definition.id,
+        )?.pz ?? 0)
+      : 0;
+    return sum + (manualPressure + automaticPressure) * factor;
+  }, 0);
+}
+
 export function exportSlab(
   project: Project,
   analysisCase: AnalysisCase,
@@ -66,29 +92,7 @@ export function exportSlab(
       `Malha inválida em ${definition.name}, ${region} (X ${invalid.at.x} m, Y ${invalid.at.y} m). ${invalid.reason}.`,
     );
   }
-  const pressureZ = analysisCase.factors.reduce(
-    (sum, { patternId, factor }) => {
-      const pattern = project.loadPatterns.find(({ id }) => id === patternId)!;
-      if (factor === 0) return sum;
-      const manualPressure =
-        pattern.pressure.find(({ slabId }) => slabId === definition.id)?.pz ??
-        0;
-      if (
-        pattern.selfWeight.enabled &&
-        !pattern.selfWeight.direction.endsWith("Z")
-      )
-        throw new Error(
-          `O padrão ${pattern.name} direciona o peso próprio fora do eixo Z, que não é suportado pelo painel horizontal ${definition.name}.`,
-        );
-      const automaticPressure = pattern.selfWeight.enabled
-        ? (selfWeightSummary(project, pattern).slabs.find(
-            ({ slabId }) => slabId === definition.id,
-          )?.pz ?? 0)
-        : 0;
-      return sum + (manualPressure + automaticPressure) * factor;
-    },
-    0,
-  );
+  const pressureZ = slabPressure(project, analysisCase, definition);
   const { area, centroid } = slabProperties(definition);
   const totalLoadZ = pressureZ * area;
   if (!Number.isFinite(totalLoadZ))
@@ -174,13 +178,19 @@ export function exportSlab(
   };
 }
 
-function gaussMoments(raw: string, count: number) {
+function gaussMoments(
+  raw: string,
+  count: number,
+  offset: number,
+  size?: number,
+) {
   const elements = new Map<number, { mx: number; my: number }[]>();
   for (const element of raw.matchAll(
     /^element[ \t]+(\d+)[ \t]+\([ \t]*\d+\)[ \t]*:([\s\S]*?)(?=^element[ \t]+\d+|(?![\s\S]))/gm,
   )) {
     const points = new Map<number, { mx: number; my: number }>();
-    const number = Number(element[1]);
+    const number = Number(element[1]) - offset;
+    if (size !== undefined && (number < 1 || number > size)) continue;
     for (const match of element[2].matchAll(
       /^[ \t]*GP[ \t]+1\.(\d+)[ \t]*:[^\r\n]*\r?\n[ \t]*stresses[ \t]+([^\r\n]+)/gm,
     )) {
@@ -290,6 +300,7 @@ export function parseSlabOutput(
   input: SlabInput,
   nodeOutput: ReadonlyMap<number, Map<number, number>>,
   reactionMap: ReadonlyMap<string, number>,
+  elementOffset?: number,
 ): SlabResult {
   const { definition, mesh, totalLoadZ } = input;
   const nodes = mesh.nodes.map(({ number, tangent }) => {
@@ -306,7 +317,12 @@ export function parseSlabOutput(
     };
   });
   const quad = definition.formulation === "qdkt";
-  const moments = gaussMoments(raw, quad ? 4 : 3);
+  const moments = gaussMoments(
+    raw,
+    quad ? 4 : 3,
+    elementOffset ?? 0,
+    elementOffset !== undefined ? mesh.elements.length : undefined,
+  );
   const contributions = nodes.map(() => 0);
   const elements = mesh.elements.map(({ number, nodes: indices }) => {
     const gp = moments.get(number);

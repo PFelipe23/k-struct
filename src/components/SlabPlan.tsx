@@ -14,6 +14,7 @@ import { formatResult, formatResultQuantity } from "./resultFormatting";
 
 export default memo(function SlabPlan({
   slab,
+  jointEdge,
   z,
   sx,
   sy,
@@ -24,6 +25,7 @@ export default memo(function SlabPlan({
   onClick,
 }: {
   slab: Slab;
+  jointEdge?: string;
   z: number;
   sx: (x: number) => number;
   sy: (y: number) => number;
@@ -96,18 +98,20 @@ export default memo(function SlabPlan({
         />
       )}
       {rings.flatMap((ring, r) =>
-        ring.map((v, i) => (
-          <polyline
-            key={v.edgeId}
-            points={mesh.edges[v.edgeId].map(pos).join(" ")}
-            className={v.supported ? "slab-supported-edge" : "slab-free-edge"}
-          >
-            <title>
-              {ringName(r)} · borda {i + 1} ·{" "}
-              {v.supported ? "apoio simples" : "livre"}
-            </title>
-          </polyline>
-        )),
+        ring.map((v, i) =>
+          v.edgeId === jointEdge ? null : (
+            <polyline
+              key={v.edgeId}
+              points={mesh.edges[v.edgeId].map(pos).join(" ")}
+              className={v.supported ? "slab-supported-edge" : "slab-free-edge"}
+            >
+              <title>
+                {ringName(r)} · borda {i + 1} ·{" "}
+                {v.supported ? "apoio simples" : "livre"}
+              </title>
+            </polyline>
+          ),
+        ),
       )}
       {active && <path className="slab-selected-outline" d={outline} />}
       {slab.polygon &&

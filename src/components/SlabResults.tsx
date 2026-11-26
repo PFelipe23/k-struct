@@ -1,3 +1,5 @@
+import type { FloorResult } from "../solver/floor";
+import { jointNames } from "../domain/slabJoint";
 import SlabComparison from "./SlabComparison";
 import { CheckCircle2, History, Terminal } from "lucide-react";
 import type { Slab } from "../domain/model";
@@ -10,7 +12,7 @@ import {
   type UnitPreferences,
 } from "../units";
 import { useUnits } from "./Units";
-import { formatResultQuantity } from "./resultFormatting";
+import { formatResult, formatResultQuantity } from "./resultFormatting";
 
 export const slabDisplays = {
   "slab-uz": {
@@ -130,6 +132,9 @@ export function SlabLegend({
 
 export default function SlabResults({
   slab,
+  floor,
+  panelNames,
+  frameReactionZ = 0,
   comparisonKey,
   caseName,
   result,
@@ -140,6 +145,9 @@ export default function SlabResults({
   onExportError,
 }: {
   slab: Slab;
+  floor?: FloorResult;
+  panelNames?: string[];
+  frameReactionZ?: number;
   comparisonKey: string;
   caseName: string;
   result: SlabResult | null;
@@ -252,10 +260,150 @@ export default function SlabResults({
                 </tr>
               </tbody>
             </table>
+            {floor && (
+              <div
+                className="floor-result"
+                aria-label="Resultados da borda comum"
+              >
+                <b>
+                  {panelNames?.join(" ↔ ")} · {jointNames[floor.joint.kind]}
+                </b>
+                <table aria-label="Transferência na borda comum">
+                  <thead>
+                    <tr>
+                      <th>
+                        Momento em {panelNames?.[0]} (
+                        {unitLabel("moment", units)})
+                      </th>
+                      <th>
+                        Momento em {panelNames?.[1]} (
+                        {unitLabel("moment", units)})
+                      </th>
+                      <th>Rotação relativa máx. (mrad)</th>
+                      {floor.joint.support === "beam" && (
+                        <th>
+                          Carga das lajes na viga em Z (
+                          {unitLabel("force", units)})
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        {formatResultQuantity(floor.momentA, "moment", units)}
+                      </td>
+                      <td>
+                        {formatResultQuantity(floor.momentB, "moment", units)}
+                      </td>
+                      <td>{formatResult(floor.deltaMax * 1000)}</td>
+                      {floor.joint.support === "beam" && (
+                        <td>
+                          {formatResultQuantity(
+                            floor.beamForce,
+                            "force",
+                            units,
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  </tbody>
+                </table>
+                <p>
+                  Carga das lajes em Z{" "}
+                  {formatResultQuantity(floor.totalLoadZ, "force", units)}{" "}
+                  {unitLabel("force", units)} · Reações externas do modelo em Z{" "}
+                  {formatResultQuantity(
+                    floor.outerReactionZ + frameReactionZ,
+                    "force",
+                    units,
+                  )}{" "}
+                  {unitLabel("force", units)}
+                </p>
+                <details>
+                  <summary>Estações da borda e convenção de sinal</summary>
+                  <p>
+                    {floor.stations.length} estações comuns ·{" "}
+                    {floor.panels
+                      .map(
+                        (v, i) =>
+                          `${panelNames?.[i]} com ${v.elements.length} elementos`,
+                      )
+                      .join(" · ")}
+                  </p>
+                  <p>
+                    O momento positivo gira em torno da tangente (
+                    {formatResult(floor.tangent.x)},{" "}
+                    {formatResult(floor.tangent.y)}) em XY. A rotação relativa é
+                    a da segunda laje menos a da primeira. Os momentos por metro
+                    usam o comprimento tributário da estação.
+                  </p>
+                  <table aria-label="Estações da borda">
+                    <thead>
+                      <tr>
+                        <th>X ({units.length})</th>
+                        <th>Y ({units.length})</th>
+                        <th>Δθ (mrad)</th>
+                        <th>
+                          m em {panelNames?.[0]} ({unitLabel("moment", units)}
+                          /m)
+                        </th>
+                        <th>
+                          m em {panelNames?.[1]} ({unitLabel("moment", units)}
+                          /m)
+                        </th>
+                        {floor.joint.support === "beam" && (
+                          <th>FZ na viga ({unitLabel("force", units)})</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {floor.stations.map((v, i) => (
+                        <tr key={i}>
+                          <td>
+                            {formatResultQuantity(v.point.x, "length", units)}
+                          </td>
+                          <td>
+                            {formatResultQuantity(v.point.y, "length", units)}
+                          </td>
+                          <td>{formatResult(v.delta * 1000)}</td>
+                          <td>
+                            {formatResultQuantity(
+                              v.momentA / v.length,
+                              "moment",
+                              units,
+                            )}
+                          </td>
+                          <td>
+                            {formatResultQuantity(
+                              v.momentB / v.length,
+                              "moment",
+                              units,
+                            )}
+                          </td>
+                          {floor.joint.support === "beam" && (
+                            <td>
+                              {formatResultQuantity(
+                                v.beamForce,
+                                "force",
+                                units,
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              </div>
+            )}
             <p className="slab-equilibrium">
               Carga em Z{" "}
               {formatResultQuantity(result.totalLoadZ, "force", units)}{" "}
-              {unitLabel("force", units)} · Soma das reações em Z{" "}
+              {unitLabel("force", units)} ·{" "}
+              {floor
+                ? "Reações do painel, incluindo a borda comum, em Z"
+                : "Soma das reações em Z"}{" "}
               {formatResultQuantity(result.totalReactionZ, "force", units)}{" "}
               {unitLabel("force", units)}
               {slab.polygon && (

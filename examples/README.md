@@ -15,3 +15,7 @@ Use o KStruct desktop da branch `master` a partir do commit [`49ee0e3`](https://
 | Menor N (compressão)      | CC · Compressão       |  −15,1 |     −4,98 |
 
 Se salvar uma cópia do projeto, os casos, as combinações e o envelope ficam no arquivo. Ao reabrir a cópia, analise EL e CP novamente para consultar os resultados.
+
+## Duas lajes sobre uma viga comum
+
+Abra o modelo no KStruct com **Abrir projeto** e clique em **Analisar**. A carga de −5 kN/m² atua exclusivamente em L1. A viga B1 ocupa a borda comum. O arquivo traz a ligação semirrígida com 1.000 kN·m/(rad·m). Na malha 16 × 16, a viga recebe −10,614 kN e o momento integrado na face de L1 vale +1,105 kN·m. Para comparar, altere apenas o vínculo para articulado ou contínuo e repita a análise. [Projeto](duas-lajes-viga-comum.kstruct.json) · [Benchmark e tolerâncias](../docs/VALIDATION.md#ks-43--vínculo-entre-duas-lajes-e-viga-comum)

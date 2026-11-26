@@ -21,7 +21,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
 - Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
 - Aplicar temperatura por barra e por padrão no inspetor, em **Ação térmica**. Informe a variação média e a diferença entre faces da seção em K. A vista indica a face mais quente. Para o material, use o coeficiente de dilatação linear α em 1/K.
-- Salvar e reabrir `.kstruct.json` no esquema v26, com migração dos projetos v1 a v25 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v27, com migração dos projetos v1 a v26 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -140,7 +140,7 @@ Para ajustar uma única barra, abra **Modificadores de rigidez** no inspetor. In
 3. Salve o projeto. No desktop, selecione o caso estático e clique em **Analisar**. O seletor de visualização oferece os mapas de **Flecha UZ**, **Momento local Mx** e **Momento local My**. O painel de resultados mostra os valores no centro e a soma de reações em Z.
 4. Para reproduzir a [placa de referência QDKT](docs/VALIDATION.md#placa-retangular-simplesmente-apoiada), use 4 × 3 m, espessura de 10 cm, E = 30 GPa, ν = 0,20, as quatro bordas apoiadas e pZ = −5 kN/m². Repita com 8 × 6, 16 × 12 e 32 × 24 subdivisões.
 
-O fluxo de laje usa um painel isolado por projeto e resultados por caso estático. As propriedades do painel e da malha são guardadas no arquivo. Edições, desfazer e refazer descartam os resultados da revisão anterior.
+O fluxo de laje admite um painel isolado ou duas lajes adjacentes no mesmo pavimento, com resultados por caso estático. As propriedades do painel e da malha são guardadas no arquivo. Edições, desfazer e refazer descartam os resultados da revisão anterior.
 
 ### Laje poligonal com aberturas
 
@@ -157,6 +157,14 @@ Selecione a laje e abra **Configurar malha da laje**. Em **Geração da malha**,
 A prévia mostra os elementos, os nós e as ocorrências de qualidade. Escolha uma ocorrência para localizar o elemento e suas coordenadas. Um alerta permite prosseguir. Um elemento inválido bloqueia a aplicação da malha e a exportação ao OOFEM. O modo por tamanho aceita até 8.192 nós e 8.192 elementos por painel. **Aplicar malha** registra a edição no histórico e no arquivo do projeto.
 
 Após analisar, abra **Comparar malhas**, informe X e Y de um ponto sobre a laje e clique em **Guardar referência desta malha**. Altere a discretização e analise novamente. A tabela mostra UZ, Mx e My no mesmo ponto, a reação vertical total do painel e a diferença em relação à referência. A referência fica na sessão enquanto a geometria, os apoios, o material e o carregamento do caso permanecem os mesmos. [Ensaios de refinamento](docs/VALIDATION.md#ks-42--refinamento-e-qualidade-da-malha)
+
+### Vínculo entre lajes e viga comum
+
+Lance duas lajes na planta XY do mesmo pavimento. Os dois extremos da borda comum devem coincidir. Para apoiar as lajes em uma viga, lance uma barra entre esses extremos e defina os apoios da estrutura que recebe essa viga.
+
+Selecione a borda na planta ou abra **Modelo → Vínculo entre lajes**. Em **Apoio da borda comum**, escolha **Sem apoio externo**, **Apoio vertical de linha** ou a viga coincidente. Em **Ligação à flexão**, escolha **Articulada**, **Semirrígida** ou **Contínua**. A semirrígida recebe a rigidez rotacional por metro de borda, em kN·m/(rad·m) nas unidades padrão. A viga recebe a carga vertical pelas estações comuns. A rotação em torno da borda governa o momento que passa de uma laje à outra.
+
+Ao analisar, os mapas das duas lajes usam a mesma escala. A tabela da borda mostra os momentos nas duas faces, a rotação relativa e a carga vertical transmitida à viga. Abra as estações para consultar momentos por metro. O exemplo abre com 1.000 kN·m/(rad·m) e carga em apenas uma das lajes. [Abrir projeto de exemplo](examples/duas-lajes-viga-comum.kstruct.json) · [Valores de referência](docs/VALIDATION.md#ks-43--vínculo-entre-duas-lajes-e-viga-comum)
 
 ### Padrões, casos, combinações e envelopes
 

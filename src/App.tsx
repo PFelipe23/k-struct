@@ -1,3 +1,5 @@
+import { SlabJointDialog } from "./components/SlabJointDialog";
+import { jointPanels, jointNames, refreshJoint } from "./domain/slabJoint";
 import {
   useCallback,
   useEffect,
@@ -172,6 +174,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v27") ??
       localStorage.getItem("kstruct.draft.v26") ??
       localStorage.getItem("kstruct.draft.v25") ??
       localStorage.getItem("kstruct.draft.v24") ??
@@ -214,9 +217,13 @@ export default function App() {
   }));
   const p = history.current;
   const spatial = p.mode === "spatial";
-  const slab = p.slabs[0];
   const [selection, setSelection] = useState<SelectedObject[]>([]),
     [tool, setTool] = useState<Tool>("select");
+  const slab =
+    p.slabs.find(
+      (s) => s.id === selection.find((o) => o.kind === "slab")?.id,
+    ) ?? p.slabs[0];
+  const [jointOpen, setJointOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>("dual");
   const [showMemberAxes, setShowMemberAxes] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("primary");
@@ -377,13 +384,25 @@ export default function App() {
     p.loadPatterns.find((pattern) => pattern.id === preferredPatternId)?.id ??
     p.loadPatterns[0].id;
   const caseResult = caseResults.get(caseId) ?? null;
-  const slabResult = caseResult?.slab ?? null;
+  const slabResult =
+    caseResult?.floor?.panels.find((v) => v.slabId === slab?.id) ??
+    caseResult?.slab ??
+    null;
+  const floorMaps = useMemo(() => {
+    if (!caseResult?.floor || !isSlabDisplay(display)) return [];
+    const maps = caseResult.floor.panels.map((panel) =>
+      buildSlabMap(panel, display, units),
+    );
+    const scale = Math.max(...maps.map((m) => m.scale));
+    return maps.map((m) => ({ ...m, scale }));
+  }, [caseResult, display, units]);
   const slabMap = useMemo(
     () =>
-      slabResult && isSlabDisplay(display)
+      floorMaps.find((m) => m.result.slabId === slab?.id) ??
+      (slabResult && isSlabDisplay(display)
         ? buildSlabMap(slabResult, display, units)
-        : null,
-    [slabResult, display, units],
+        : null),
+    [floorMaps, slab?.id, slabResult, display, units],
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
@@ -549,7 +568,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v26", serialized);
+      localStorage.setItem("kstruct.draft.v27", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -579,6 +598,7 @@ export default function App() {
       try {
         const next = structuredClone(current.current);
         fn(next);
+        refreshJoint(next);
         if (!projectSchema.safeParse(next).success)
           throw new Error(
             "A alteração contém valores inválidos ou excede os limites do projeto.",
@@ -674,7 +694,7 @@ export default function App() {
   const changeTool = (t: Tool) => {
     if (
       (t === "slab" || t === "slabPolygon") &&
-      (!spatial || plane.kind !== "XY" || slab)
+      (!spatial || plane.kind !== "XY" || p.slabs.length >= 2)
     )
       return;
     if (
@@ -750,7 +770,9 @@ export default function App() {
     setMemberLoadDraft(null);
     setLaunchSection("");
     setRollText("0");
-    setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
+    setSelection(
+      project.slabs.slice(0, 1).map(({ id }) => ({ kind: "slab", id })),
+    );
     clearPlacement();
     setActivePanel("primary");
     setPlanes(initialPlanes(project.slabs[0]?.levelId));
@@ -990,9 +1012,9 @@ export default function App() {
       ...p.members
         .filter((m) => ids.has(m.start) && ids.has(m.end))
         .map((m) => ({ kind: "member" as const, id: m.id })),
-      ...(slab && plane.kind === "XY" && slab.levelId === activeGuide.id
-        ? [{ kind: "slab" as const, id: slab.id }]
-        : []),
+      ...p.slabs
+        .filter((s) => plane.kind === "XY" && s.levelId === activeGuide.id)
+        .map((s) => ({ kind: "slab" as const, id: s.id })),
     ]);
   };
   const applyGeometry = (plan: TransformPlan | MemberEdit) => {
@@ -1381,11 +1403,11 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   <button
                     className={`tool-button ${tool === "slab" ? "active" : ""}`}
                     title={
-                      slab
-                        ? "O projeto já contém uma laje isolada"
+                      p.slabs.length >= 2
+                        ? "O projeto já contém duas lajes"
                         : "Lançar laje retangular na planta XY (L)"
                     }
-                    disabled={plane.kind !== "XY" || Boolean(slab)}
+                    disabled={plane.kind !== "XY" || p.slabs.length >= 2}
                     onClick={() => changeTool("slab")}
                   >
                     <Square size={21} />
@@ -1414,6 +1436,25 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   >
                     <Pentagon size={21} />
                     <span>{slab ? "Abertura na laje" : "Laje poligonal"}</span>
+                  </button>
+                )}
+                {spatial && p.slabs.length === 1 && (
+                  <button
+                    className="tool-button"
+                    disabled={plane.kind !== "XY"}
+                    onClick={() => changeTool("slabPolygon")}
+                  >
+                    <Pentagon size={21} />
+                    <span>Segunda laje poligonal</span>
+                  </button>
+                )}
+                {p.slabs.length === 2 && (
+                  <button
+                    className="tool-button"
+                    onClick={() => setJointOpen(true)}
+                  >
+                    <Square size={21} />
+                    <span>Vínculo entre lajes</span>
                   </button>
                 )}
                 <button
@@ -1652,7 +1693,9 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             <div className="analysis-description">
               <b>
                 {slab
-                  ? "Estática linear · Laje isolada"
+                  ? p.slabs.length === 2
+                    ? "Estática linear · Lajes acopladas"
+                    : "Estática linear · Laje isolada"
                   : spatial
                     ? "Estática linear espacial"
                     : "Estática linear no plano XZ"}
@@ -1926,7 +1969,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   <summary>
                     Lajes <span>{p.slabs.length}</span>
                   </summary>
-                  {slab && (
+                  {p.slabs.map((slab) => (
                     <button
                       key={slab.id}
                       className={isSelected("slab", slab.id) ? "selected" : ""}
@@ -1940,7 +1983,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                     >
                       <Square size={13} /> {slab.name}
                     </button>
-                  )}
+                  ))}
                 </details>
               )}
               <details>
@@ -2005,7 +2048,8 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               </span>
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
-                {slab && " · 1 laje"}
+                {p.slabs.length > 0 &&
+                  ` · ${p.slabs.length} ${p.slabs.length === 1 ? "laje" : "lajes"}`}
               </span>
             </div>
             {!spatial && (
@@ -2168,6 +2212,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   sectionPlot={sectionPlot}
                   onSection={inspectSection}
                   display={visibleDisplay}
+                  floorMaps={floorMaps}
                   slabMap={
                     view.plane.kind === "XY" && view.guide.id === slab?.levelId
                       ? slabMap
@@ -2190,6 +2235,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   pending={active ? pending : null}
                   onPoint={onPoint}
                   onSelect={selectObject}
+                  onJoint={() => setJointOpen(true)}
                 />
               );
             })}
@@ -2211,10 +2257,40 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               />
             )}
           </div>
+          {p.slabJoint && (
+            <div className="joint-legend" aria-label="Legenda da borda comum">
+              <span>○ Articulada</span>
+              <span>⌁ Semirrígida</span>
+              <span>═ Contínua</span>
+              <span className="legend-free-edge">Borda livre</span>
+              <b>
+                {jointPanels(p)
+                  .map((s) => s.name)
+                  .join(" ↔ ")}{" "}
+                · {jointNames[p.slabJoint.kind]}
+                {p.slabJoint.stiffness
+                  ? ` · ${formatQuantity(p.slabJoint.stiffness, "moment", units)} ${units.moment}/(rad·m)`
+                  : ""}{" "}
+                ·{" "}
+                {p.slabJoint.support === "beam"
+                  ? "Viga " +
+                    p.members.find((m) => m.id === p.slabJoint?.memberId)?.name
+                  : p.slabJoint.support === "line"
+                    ? "Apoio vertical"
+                    : "Sem apoio externo"}
+              </b>
+            </div>
+          )}
           {showSlabMap && slab ? (
             <SlabLegend
               map={showSlabMap}
-              name={slab.name}
+              name={
+                floorMaps.length
+                  ? jointPanels(p)
+                      .map((s) => s.name)
+                      .join(" e ")
+                  : slab.name
+              }
               caseName={analysisCase.name}
             />
           ) : showEnvelope ? (
@@ -2242,6 +2318,21 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               comparisonKey={JSON.stringify([
                 p.id,
                 slab.id,
+                ...(p.slabJoint
+                  ? [
+                      p.slabJoint,
+                      p.slabs.map((s) => [
+                        s.id,
+                        slabRings(s),
+                        s.thickness,
+                        s.materialId,
+                      ]),
+                      p.members,
+                      p.nodes,
+                      p.sections,
+                      p.materials,
+                    ]
+                  : []),
                 slab.thickness,
                 slabRings(slab),
                 p.guides.z.find((g) => g.id === slab.levelId),
@@ -2251,10 +2342,16 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   const pat = p.loadPatterns.find(
                     (pat) => pat.id === f.patternId,
                   );
-                  return [pat?.pressure, pat?.selfWeight];
+                  return p.slabJoint ? pat : [pat?.pressure, pat?.selfWeight];
                 }),
               ])}
               slab={slab}
+              floor={caseResult?.floor}
+              frameReactionZ={caseResult?.reactions.reduce(
+                (sum, r) => sum + r.fz,
+                0,
+              )}
+              panelNames={jointPanels(p).map((s) => s.name)}
               caseName={analysisCase.name}
               result={slabResult}
               rawOutput={slabResult ? caseResult?.rawOutput : undefined}
@@ -2318,6 +2415,17 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             />
           )}
         </main>
+        {jointOpen && (
+          <SlabJointDialog
+            project={p}
+            apply={(joint) =>
+              edit((d) => {
+                d.slabJoint = joint;
+              })
+            }
+            close={() => setJointOpen(false)}
+          />
+        )}
         {right && (
           <Inspector
             onMemberLoad={setMemberLoadDraft}
