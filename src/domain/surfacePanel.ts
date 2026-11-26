@@ -11,6 +11,7 @@ import {
   tolerance,
   type Point3,
 } from "./geometry";
+import { panelTrig, panelStiffnessError } from "./panelStiffness";
 import type { PanelEdge, Project, SurfacePanel } from "./model";
 
 export const panelEdges: PanelEdge[] = ["AB", "BC", "CD", "DA"];
@@ -57,7 +58,16 @@ export function panelGeometry(p: SurfacePanel) {
     z = unit(normal);
   const axes: Basis = [x, cross(z, x), z];
   const corners = { A: p.a, B: p.b, C: c, D: p.d };
-  return { u, v, area, axes, corners };
+  const { c: cos, s: sin } = panelTrig(p.angleDeg);
+  const materialAxes: Basis =
+    cos === 1 && sin === 0
+      ? axes
+      : [
+          add(scale(axes[0], cos), scale(axes[1], sin)),
+          add(scale(axes[0], -sin), scale(axes[1], cos)),
+          z,
+        ];
+  return { u, v, area, axes, materialAxes, corners };
 }
 
 export function panelModelErrors(p: Project) {
@@ -66,8 +76,12 @@ export function panelModelErrors(p: Project) {
   if (panels.length && p.mode !== "spatial")
     errors.push("Painéis espaciais exigem um projeto XYZ.");
   for (const panel of panels) {
-    if (!p.materials.some((m) => m.id === panel.materialId))
-      errors.push(`${panel.name} · material inexistente.`);
+    const mat = p.materials.find((m) => m.id === panel.materialId);
+    if (!mat) errors.push(`${panel.name} · material inexistente.`);
+    else {
+      const err = panelStiffnessError(panel, mat);
+      if (err) errors.push(`${panel.name} · ${err}`);
+    }
     if (new Set(panel.fixed).size !== panel.fixed.length)
       errors.push(`${panel.name} · engaste repetido na mesma borda.`);
     try {

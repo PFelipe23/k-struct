@@ -814,11 +814,11 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem("kstruct.draft.v28") ?? "{}")
+          JSON.parse(localStorage.getItem("kstruct.draft.v29") ?? "{}")
             .schemaVersion,
       ),
     )
-    .toBe(28);
+    .toBe(29);
   expect(
     await page.evaluate(
       () =>
@@ -887,4 +887,110 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
   await dialog.getByLabel("q3 local (kN/m)").fill("-2");
   await dialog.getByRole("button", { name: "Aplicar painel" }).click();
   await expect(results.getByRole("table")).toHaveCount(0);
+});
+
+test("KS-45 · gira a cobertura, reabre o modelo e consulta os dois referenciais", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  if (executable) await plateBridge(page);
+  await page.goto("/");
+  const original = await readFile(
+    "examples/cobertura-direcional.kstruct.json",
+    "utf8",
+  );
+  await openProjectInBrowser(page, "cobertura.kstruct.json", original);
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const edit = button("Cobertura · Casca");
+  const dialog = page.getByRole("dialog", { name: "Painel espacial" });
+  const angle = dialog.getByLabel("Ângulo dos eixos resistentes (°)");
+  const m11 = dialog.getByLabel("Fator M11");
+  const apply = dialog.getByRole("button", { name: "Aplicar painel" });
+  await edit.click();
+  await expect(angle).toHaveValue("0");
+  await expect(m11).toHaveValue("4");
+  await expect(dialog.getByLabel("Fator N11")).toHaveValue("1");
+  await m11.fill("0");
+  await apply.click();
+  await expect(dialog.getByRole("alert")).toContainText("M11");
+  await m11.fill("4");
+  await dialog.getByLabel("Formulação").selectOption("plate");
+  await expect(dialog.getByLabel("Fator N11")).toHaveCount(0);
+  await dialog.getByLabel("Formulação").selectOption("shell");
+  await dialog.getByLabel("Subdivisões AB").fill("16");
+  await dialog.getByLabel("Subdivisões AD").fill("8");
+  await angle.fill("90,0");
+  await apply.click();
+  await button("Desfazer").click();
+  await edit.click();
+  await expect(angle).toHaveValue("0");
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await button("Refazer").click();
+
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const saved = await readFile((await (await download).path())!, "utf8");
+  const model = parseProject(saved);
+  expect(model.surfacePanels![0]).toMatchObject({
+    angleDeg: 90,
+    stiffness: { m11: 4 },
+  });
+  expect(model.loadPatterns).toEqual(parseProject(original).loadPatterns);
+  await openProjectInBrowser(page, "cobertura-90.kstruct.json", saved);
+  await button("Exibição").click();
+  await page.getByLabel("Arranjo de vistas").selectOption("dual");
+  const faces = button("Eixos e faces dos painéis");
+  const plus = page.getByLabel("Cobertura · Face +3", { exact: true });
+  const minus = page.getByLabel("Cobertura · Face −3", { exact: true });
+  await expect(plus).toHaveCount(1);
+  await expect(minus).toHaveCount(1);
+  await faces.click();
+  await expect(plus).toHaveCount(0);
+  await expect(minus).toHaveCount(0);
+  await faces.click();
+  await expect(plus).toHaveCount(1);
+  await button("Análise").click();
+  const input = page.waitForEvent("download");
+  await button("Entrada OOFEM").click();
+  expect(await readFile((await (await input).path())!, "utf8")).toBe(
+    exportOofem(model, "EL").deck,
+  );
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  const table = page.getByRole("table", { name: "Extremos locais do painel" });
+  async function solve() {
+    await button("Analisar").click();
+    await page.waitForFunction(
+      () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+    );
+    await page.evaluate(() =>
+      (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+    );
+    await expect(table).toBeVisible();
+  }
+  const extreme = (name: string) =>
+    table
+      .getByRole("cell", { name, exact: true })
+      .locator("..")
+      .getByRole("cell")
+      .nth(1);
+  await solve();
+  const materialMoment = await extreme("M11").innerText();
+  const frame = page.getByLabel("Referencial do painel");
+  await expect(frame).toHaveValue("resistant");
+  await frame.selectOption("geometric");
+  await expect(extreme("M22")).toHaveText(materialMoment);
+  await expect(extreme("M11")).not.toHaveText(materialMoment);
+  const deflection = async () =>
+    Math.abs(Number((await extreme("U3").innerText()).replace(",", ".")));
+  const deflection90 = await deflection();
+  expect(deflection90).toBeCloseTo(0.0613, 3);
+  await edit.click();
+  await angle.fill("0");
+  await apply.click();
+  await expect(table).toHaveCount(0);
+  await solve();
+  expect(await deflection()).toBeCloseTo(0.2034, 3);
 });

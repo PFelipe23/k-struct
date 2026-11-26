@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v28, migração v1 a v27, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v29, migração v1 a v28, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos por estação ou nó, combinação e componentes simultâneas    | `src/solver/envelopes.ts`    |
@@ -226,3 +226,17 @@ O eixo 1 segue AB, o eixo 3 segue o produto vetorial AB × AD e o eixo 2 é 3 ×
 A integração de tração de borda e de carga uniforme de área inclui os pares de momentos nodais conjugados à rotação normal da membrana de Allman. Para um segmento de vetor Δr, normal unitária n, carga vetorial q e comprimento ℓ, o par escalar é ± q · (n × Δr) ℓ/12. Para a integral no triângulo usa-se a contribuição de cada lado com área/24. Essas parcelas decorrem do trabalho virtual da interpolação quadrática e se cancelam como binário externo do par. Sua inclusão permite reproduzir o campo constante de tração.
 
 O pós-processamento transforma os deslocamentos e reações da base nodal para XYZ. Projeta os tensores simétricos globais nos eixos ortonormais físicos do painel em cada ponto de integração. No OOFEM 3.0, as componentes no plano do registro `stresses` de Allman estão em Pa. A multiplicação pela espessura produz N11, N22 e N12 em N/m. Os momentos já têm unidade N·m/m. A conferência do equilíbrio usa as reações dos engastes e a integral independente das ações em relação a A do primeiro painel. [Caso de referência do OOFEM](https://github.com/oofem/oofem/blob/v3.0/tests/sm/trshell02_test.in) · [Interpolação de Allman](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/PlaneStress/trplanestressrotallman.C)
+
+## Orientação e rigidez dos painéis espaciais
+
+A v29 acrescenta `angleDeg` e `stiffness` opcionais a `surfacePanels`. Um painel v28 abre com ângulo zero e fatores unitários. A direção geométrica 1 acompanha AB. A normal +3 acompanha AB × AD e aponta para a face positiva. A direção resistente 1 gira a partir de AB em direção à direção geométrica 2, com ângulo positivo anti-horário visto da face +3. A direção resistente 2 completa o triedro. Apoios, malha e cargas de borda continuam referenciados à geometria. A pressão normal segue +3 e o peso próprio segue a gravidade global.
+
+| Formulação | Fatores adimensionais positivos | Resposta |
+| --- | --- | --- |
+| Membrana | N11, N22, N12 | Extensão nas direções 1 e 2 e cisalhamento no plano |
+| Placa em flexão | M11, M22, M12 | Flexão nas direções 1 e 2 e torção da placa |
+| Casca | As duas famílias acima | Membrana e flexão independentes sobre a mesma superfície média |
+
+Para cada família, sejam $f_1$, $f_2$ e $f_{12}$ os três fatores e $Q_0=E/(1-ν^2)$. No referencial resistente, $Q_{11}=f_1Q_0$, $Q_{22}=f_2Q_0$, $Q_{12}=νQ_0\sqrt{f_1f_2}$ e $Q_{66}=f_{12}E/[2(1+ν)]$. A média geométrica no termo de Poisson preserva a simetria e a energia positiva. A membrana usa $A=hQ$ e a placa usa $D=h^3Q/12$ com seus respectivos fatores. O modelo é linear elástico, com superfície média homogênea, acoplamento membrana–flexão nulo e sem ajuste independente de cisalhamento transversal.
+
+O adaptador conserva a formulação isotrópica original quando todos os fatores valem um. Para membrana direcional usa Allman 3D com `OrthoLE`. Para flexão direcional usa DKT 3D com `AnisoLE` e `LayeredCS` homogênea, com dois pontos de Gauss na espessura. A transformação da rigidez para os eixos de cada triângulo inclui os termos de flexão–torção que surgem fora das direções principais. Na casca modificada, Allman e DKT compartilham os mesmos nós. As cargas e o peso próprio entram uma vez por painel físico. A saída reúne membrana e momentos por triângulo físico e ponto de integração e permite projetá-los nos dois referenciais.

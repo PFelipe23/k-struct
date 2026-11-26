@@ -728,3 +728,17 @@ Na malha 8 × 4, os três planos reproduzem a tração, a flecha e a superposiç
 No [exemplo parede–laje](../examples/parede-laje-em-balanco.kstruct.json), a parede tem 3 m de altura, a laje tem 3 m de balanço e a largura comum é de 1,20 m. A base da parede é o único engaste. O carregamento de −1 kN/m na borda livre da laje totaliza −1,200 kN em Z. Cinco nós compartilhados na borda transmitem os deslocamentos e as rotações. Em relação a A da parede, as reações esperadas são **FZ = +1,200 kN, MX = +0,720 kN·m e MY = −3,600 kN·m**. O teste verifica esses valores, as translações na borda, a compressão no plano da parede e a flecha da laje. O conjunto também é ensaiado após rotação e translação no espaço. A suíte inclui ainda a laje de placa acoplada à parede de casca e um mecanismo ao substituir a parede por uma membrana.
 
 A versão inicial admite um ou dois painéis planos em paralelogramo, espessura uniforme, material isotrópico, uma carga uniforme de borda e uma pressão por painel e padrão. A ligação é contínua em toda a borda, com as mesmas subdivisões nos dois lados. Os engastes são aplicados por borda inteira. O cálculo atende a casos estáticos com fatores de padrão. Os modelos de painéis espaciais e os de pórticos com lajes de pavimento têm rotinas de análise próprias.
+
+## KS-45 · rigidez direcional dos painéis
+
+A cobertura de 6 × 3 m tem espessura de 0,12 m, E = 30 GPa e ν = 0,20. As quatro bordas são engastadas. A pressão de −5 kN/m² produz uma força global de −90 kN em Z. O fator M11 vale 4, os demais valem 1. O eixo geométrico 1 acompanha o vão de 6 m. Abra o modelo, clique em **Analisar**, edite o ângulo em **Cobertura · Casca** e repita a análise. O arquivo usa 32 × 16 subdivisões. [Projeto de exemplo](../examples/cobertura-direcional.kstruct.json)
+
+| Ângulo | U3 central OOFEM (mm) | U3 central Ritz (mm) | M11 geom. OOFEM / Ritz (kN·m/m) | M22 geom. OOFEM / Ritz (kN·m/m) | M12 geom. OOFEM / Ritz (kN·m/m) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0° | −0,20373 | −0,20379 | −1,770 / −1,802 | −1,675 / −1,696 | +0,002 / 0 |
+| 45° | −0,12011 | −0,11974 | −1,105 / −1,118 | −1,787 / −1,809 | −0,702 / −0,710 |
+| 90° | −0,05991 | −0,05943 | −0,185 / −0,188 | −1,876 / −1,903 | −0,001 / 0 |
+
+A solução independente de Ritz usa uma placa de Kirchhoff e 12 funções de Legendre por direção, multiplicadas por uma função que impõe deslocamento e inclinação nulos nas bordas. O OOFEM fornece U3 no nó central. Para comparar momentos no mesmo local, o ensaio tira a média dos 24 pontos de integração dos seis triângulos incidentes ao centro, sempre nos eixos geométricos fixos. Em todas as orientações, a malha 32 × 16 reduz o erro de flecha da malha 8 × 4 em mais de quatro vezes. O teste aceita até 0,9% para a flecha, 2,5% para os momentos ou 0,003 kN·m/m para momentos próximos de zero, e 0,8 N no equilíbrio vertical. [Cálculo de Ritz em Python e NumPy](../tests/fixtures/roof-ritz.py)
+
+A suíte também verifica extensão e flexão independentes em faixas inclinadas, cisalhamento e torção com sinal a 32° em um paralelogramo oblíquo, invariância da resposta isotrópica ao giro e transmissão de carga com peso próprio no encontro parede–laje. Para reproduzir, configure `OOFEM_BIN` e execute `npm test -- tests/panel-stiffness.test.ts`. Para conferir a referência, execute `python tests/fixtures/roof-ritz.py`.
