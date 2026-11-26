@@ -5,6 +5,12 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import {
+  actionVector,
+  pointFraction,
+  type MemberPointLoad,
+} from "../domain/memberPointLoads";
+import { pointLoadLabel } from "./PointLoadGlyph";
 import { memberAxis } from "../domain/memberOffsets";
 import { beamMeshLayout } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
@@ -70,6 +76,7 @@ function createModelMaterials() {
       transparent: true,
       opacity: 0.5,
     }),
+    load: new THREE.LineBasicMaterial(),
     deformed: new THREE.LineBasicMaterial(),
     axisX: new THREE.LineBasicMaterial({ depthTest: false }),
     axisY: new THREE.LineBasicMaterial({ depthTest: false }),
@@ -180,6 +187,43 @@ function drawMemberAxes(
   }
 }
 
+function drawPointAction(
+  group: THREE.Group,
+  material: THREE.LineBasicMaterial,
+  at: THREE.Vector3,
+  vector: Point3,
+  span: number,
+  kind: MemberPointLoad["kind"],
+) {
+  const length = Math.min(Math.max(span * 0.12, 0.18), 1.1);
+  const dir = scenePoint(vector).normalize();
+  const side = dir
+    .clone()
+    .cross(
+      Math.abs(dir.y) < 0.9
+        ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(1, 0, 0),
+    )
+    .normalize();
+  const points = [at.clone().addScaledVector(dir, -length), at];
+  for (const fraction of kind === "moment" ? [0, 0.32] : [0]) {
+    const tip = at.clone().addScaledVector(dir, -length * fraction);
+    const neck = tip.clone().addScaledVector(dir, -length * 0.22);
+    points.push(
+      tip,
+      neck.clone().addScaledVector(side, length * 0.1),
+      tip,
+      neck.clone().addScaledVector(side, -length * 0.1),
+    );
+  }
+  group.add(
+    new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(points),
+      material,
+    ),
+  );
+}
+
 function loadComponents<T>(
   loads: T[],
   keys: (keyof T & string)[],
@@ -209,6 +253,7 @@ export default function SpatialView({
   selection,
   result,
   onSelect,
+  onPickLoad,
 }: LayerControls & {
   active: boolean;
   onActivate: () => void;
@@ -220,12 +265,15 @@ export default function SpatialView({
   selection: SelectedObject[];
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
+  onPickLoad?: (id: string, point: Point3) => void;
 }) {
   const { units } = useUnits();
   const container = useRef<HTMLDivElement>(null),
     state = useRef<SceneState | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const pickLoad = useRef(onPickLoad);
+  pickLoad.current = onPickLoad;
   const [error, setError] = useState(false);
   const deformationScale = useMemo(() => {
     if (!result) return 0;
@@ -297,6 +345,7 @@ export default function SpatialView({
       materials.launchAxis.color.set(color("--geometry-member"));
       materials.member.color.set(color("--geometry-member"));
       materials.selectedMember.color.set(color("--geometry-selected"));
+      materials.load.color.set(color("--geometry-load"));
       materials.deformed.color.set(color("--geometry-deformed"));
       materials.meshStation.color.set(color("--geometry-deformed"));
       materials.node.color.set(color("--scene-node"));
@@ -372,7 +421,20 @@ export default function SpatialView({
       );
       const hit = ray
         .intersectObjects(model.children, true)
-        .find((h) => h.object.userData.selection);
+        .find((h) =>
+          pickLoad.current
+            ? h.object.userData.selection?.kind === "member"
+            : h.object.userData.selection,
+        );
+      if (pickLoad.current) {
+        if (hit)
+          pickLoad.current(hit.object.userData.selection.id, {
+            x: hit.point.x,
+            y: -hit.point.z,
+            z: hit.point.y,
+          });
+        return;
+      }
       select.current(
         hit?.object.userData.selection ?? null,
         additiveSelection(e),
@@ -565,6 +627,32 @@ export default function SpatialView({
         ],
         selectedIds.has(`member:${m.id}`),
       );
+      if (layers.loads) {
+        const axes = beamAxes(axis.start, axis.end, m.roll, project.mode);
+        for (const load of pattern?.points ?? []) {
+          if (load.memberId !== m.id) continue;
+          const at = scenePoint(
+            interpolate(
+              axis.start,
+              axis.end,
+              pointFraction(load.position, axis.span),
+            ),
+          );
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            at,
+            actionVector(load, axes),
+            axis.span,
+            load.kind,
+          );
+          const label = annotate(s.model, at, [
+            pointLoadLabel(load, axis.span, units),
+          ])!;
+          label.element.classList.add("scene-point-load");
+          label.element.dataset.pointLoad = load.id;
+        }
+      }
       const stations = result?.members[m.id];
       if (stations) {
         const positions = stations.map((v) => {

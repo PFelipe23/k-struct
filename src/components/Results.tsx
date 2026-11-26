@@ -28,6 +28,7 @@ import {
   getForceLabel,
   formatResult,
   resultFractionDigits,
+  reportsSectionSides,
   sectionSide,
   sectionPositions,
 } from "./resultFormatting";
@@ -178,6 +179,7 @@ export function buildResultTable(
     const visible = project.members.filter(
       (m) => !forceMemberId || m.id === forceMemberId,
     );
+    const includeSide = reportsSectionSides(project);
     const positions = sectionPositions(project, visible, units);
     headers = [
       "Barra",
@@ -186,9 +188,7 @@ export function buildResultTable(
         const { symbol, unit } = getForceLabel(key, units);
         return `${symbol} (${unit})`;
       }),
-      ...(project.meshConnections.length
-        ? ["Lado da seção", "ID da barra"]
-        : []),
+      ...(includeSide ? ["Lado da seção", "ID da barra"] : []),
       ...positions.headers,
     ];
     rows = Object.entries(result?.members ?? {})
@@ -198,7 +198,7 @@ export function buildResultTable(
           memberNames.get(id) ?? id,
           s.t,
           ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
-          ...(project.meshConnections.length ? [sectionSide(s.side), id] : []),
+          ...(includeSide ? [sectionSide(s.side), id] : []),
           ...positions.values(id, s.t),
         ]),
       );

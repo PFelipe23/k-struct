@@ -1,7 +1,16 @@
+import { actionVector, pointLoadFrame } from "./memberPointLoads";
 import { memberAxis } from "./memberOffsets";
-import { beamAxes, distance, scale, tolerance, type Point3 } from "./geometry";
+import {
+  beamAxes,
+  distance,
+  localComponents,
+  scale,
+  tolerance,
+  type Point3,
+} from "./geometry";
 import {
   addPoint,
+  uid,
   appendMember,
   nodalLoad,
   projectSchema,
@@ -154,6 +163,40 @@ function copyAssignments(
       if (existing) for (const k of components) existing[k] += next[k];
       else dst.nodal.push(next);
       plan.loads++;
+    }
+    if (src.points?.length) {
+      const originalNodes = indexedNodes(plan.source);
+      for (const load of src.points) {
+        const memberId = map.members.get(load.memberId);
+        if (!memberId) continue;
+        const original = plan.source.members.find(
+          (m) => m.id === load.memberId,
+        )!;
+        const copy = plan.project.members.find((m) => m.id === memberId)!;
+        const originalAxes = pointLoadFrame(
+          original,
+          originalNodes,
+          plan.source.mode,
+        ).axes;
+        const newAxes = pointLoadFrame(
+          copy,
+          targetNodes,
+          plan.project.mode,
+        ).axes;
+        const global = scale(
+          vector(actionVector(load, originalAxes)),
+          load.kind === "moment" ? parity : 1,
+        );
+        (dst.points ??= []).push({
+          ...load,
+          id: uid(),
+          memberId,
+          position: { ...load.position },
+          components:
+            load.system === "local" ? localComponents(global, newAxes) : global,
+        });
+        plan.loads++;
+      }
     }
     for (const l of src.uniform) {
       const id = map.members.get(l.memberId);

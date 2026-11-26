@@ -1,8 +1,13 @@
 import { distance, interiorParameter, tolerance } from "./geometry";
+import { distanceFromI, type MemberPointLoad } from "./memberPointLoads";
 import { memberAxis } from "./memberOffsets";
 import type { Project, StructuralNode } from "./model";
 
-export type BeamStation = { t: number; nodeId?: string };
+export type BeamStation = {
+  t: number;
+  nodeId?: string;
+  pointLoads?: MemberPointLoad[];
+};
 export type SectionLocation = { t: number; side?: "left" | "right" };
 
 export function connectionStations(p: Project) {
@@ -52,10 +57,18 @@ export function beamMeshLayout(p: Project) {
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const layout = new Map<string, BeamStation[]>();
   const count = p.mesh.segmentsPerMember;
+  // All cases share these sections so combinations and envelopes compare both sides.
+  const loadsByMember = new Map<string, MemberPointLoad[]>();
+  for (const pattern of p.loadPatterns)
+    for (const load of pattern.points ?? []) {
+      const list = loadsByMember.get(load.memberId);
+      if (list) list.push(load);
+      else loadsByMember.set(load.memberId, [load]);
+    }
   for (const m of p.members) {
     const axis = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
     const span = axis.clear;
-    const fixed: { t: number; nodeId: string }[] = [];
+    const fixed: BeamStation[] = [{ t: 0, nodeId: m.start }];
     for (const link of links.get(m.id) ?? []) {
       const t = m.offsets
         ? (link.t * axis.span - m.offsets.i.rigidLength) / span
@@ -69,9 +82,45 @@ export function beamMeshLayout(p: Project) {
       } else fixed.push({ t, nodeId: link.nodeId });
     }
     fixed.push({ t: 1, nodeId: m.end });
-    const stations: BeamStation[] = [{ t: 0, nodeId: m.start }];
+    const extra: BeamStation[] = [];
+    const actions = (loadsByMember.get(m.id) ?? [])
+      .map((load) => ({
+        load,
+        t: Math.max(
+          0,
+          Math.min(
+            1,
+            (distanceFromI(load.position, axis.span) -
+              (m.offsets?.i.rigidLength ?? 0)) /
+              span,
+          ),
+        ),
+      }))
+      .sort((a, b) => a.t - b.t);
+    let nextFixed = 1;
+    for (const { load, t } of actions) {
+      while (nextFixed < fixed.length - 1 && fixed[nextFixed].t < t)
+        nextFixed++;
+      const before = fixed[nextFixed - 1],
+        after = fixed[nextFixed];
+      const nearest = t - before.t <= after.t - t ? before : after;
+      let target = nearest;
+      if (Math.abs(nearest.t - t) * span > tolerance) {
+        const previous = extra.at(-1);
+        if (previous && (t - previous.t) * span <= tolerance) target = previous;
+        else {
+          target = { t };
+          extra.push(target);
+        }
+      }
+      (target.pointLoads ??= []).push(load);
+    }
+    const required = extra.length
+      ? fixed.concat(extra).sort((a, b) => a.t - b.t)
+      : fixed;
+    const stations: BeamStation[] = [required[0]];
     let step = 1;
-    for (const next of fixed) {
+    for (const next of required.slice(1)) {
       while (step < count && step / count <= next.t) {
         const t = step++ / count;
         if (
@@ -92,8 +141,8 @@ export function beamStations(p: Project) {
 }
 
 export function sectionLocations(stations: BeamStation[]): SectionLocation[] {
-  return stations.flatMap(({ t, nodeId }): SectionLocation[] =>
-    nodeId && t > 0 && t < 1
+  return stations.flatMap(({ t, nodeId, pointLoads }): SectionLocation[] =>
+    (nodeId || pointLoads?.length) && t > 0 && t < 1
       ? [
           { t, side: "left" },
           { t, side: "right" },

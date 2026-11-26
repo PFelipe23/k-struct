@@ -1,4 +1,10 @@
-import { offsetError, splitOffsets } from "./memberOffsets";
+import {
+  actionPoint,
+  pointLoadFrame,
+  positionError,
+  rebasePointLoad,
+} from "./memberPointLoads";
+import { memberAxis, offsetError, splitOffsets } from "./memberOffsets";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import {
@@ -51,6 +57,26 @@ export function inspectNodeCoordinateChanges(
         project.mode,
       );
     if (error) issues.push({ message: error, nodeIds: moved });
+    else {
+      const span = memberAxis(
+        member,
+        byId.get(member.start)!,
+        byId.get(member.end)!,
+      ).span;
+      for (const pat of project.loadPatterns)
+        for (const load of pat.points ?? []) {
+          if (
+            load.memberId === member.id &&
+            positionError(load.position, span)
+          ) {
+            issues.push({
+              message: `${member.name}: uma carga concentrada de ${pat.name} ficaria fora da barra.`,
+              nodeIds: moved,
+            });
+            break;
+          }
+        }
+    }
   }
   if (!issues.length && project.meshConnections.length) {
     try {
@@ -90,12 +116,20 @@ export function addMember(
 export function reverseMember(p: Project, id: string) {
   const member = p.members.find((item) => item.id === id);
   if (!member) throw new Error("A barra selecionada não existe.");
+  const nodes = new Map(p.nodes.map((n) => [n.id, n]));
+  const from = pointLoadFrame(member, nodes, p.mode);
   [member.start, member.end] = [member.end, member.start];
   if (member.offsets)
     member.offsets = { i: member.offsets.j, j: member.offsets.i };
   // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
   // keeps z fixed in global space when x changes sign.
   if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
+  const to = pointLoadFrame(member, nodes, p.mode);
+  for (const pat of p.loadPatterns)
+    if (pat.points)
+      pat.points = pat.points.map((l) =>
+        l.memberId === id ? rebasePointLoad(l, from, to, id) : l,
+      );
   // Mesh connections refer to physical node IDs and derive x/L from i and j.
   // Uniform loads are global, and groups and sections refer to the same ID.
 }
@@ -337,6 +371,24 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       }
       return child;
     });
+    const from = pointLoadFrame(m, nodes, p.mode);
+    const targets = children.map((child) => ({
+      child,
+      frame: pointLoadFrame(child, nodes, p.mode),
+    }));
+    for (const pat of p.loadPatterns)
+      if (pat.points)
+        pat.points = pat.points.map((load) => {
+          if (load.memberId !== m.id) return load;
+          const point = actionPoint(load, from);
+          // A load right at a physical cut belongs to the i-end of the following child.
+          const dest =
+            targets.find(
+              ({ frame }) =>
+                dot(subtract(point, frame.end), from.axes[0]) < -tolerance,
+            ) ?? targets.at(-1)!;
+          return rebasePointLoad(load, from, dest.frame, dest.child.id);
+        });
     split.set(
       m.id,
       children.map((bar) => bar.id),

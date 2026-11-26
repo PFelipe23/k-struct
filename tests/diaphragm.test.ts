@@ -17,7 +17,7 @@ describe("KS-27 · vínculos do pavimento", () => {
     const old = { ...p, schemaVersion: 14 };
     delete old.diaphragms;
     const migrated = parseProject(JSON.stringify(old));
-    expect(migrated.schemaVersion).toBe(16);
+    expect(migrated.schemaVersion).toBe(17);
     expect(migrated.nodes).toEqual(p.nodes);
     expect(migrated.selectionGroups).toEqual(p.selectionGroups);
     expect(migrated.diaphragms).toBeUndefined();

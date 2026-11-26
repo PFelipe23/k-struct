@@ -648,7 +648,13 @@ button.primary {
   background: transparent;
   max-width: 195px;
 }
-.drawing-span { cursor: crosshair; }
+.drawing-point-load, .drawing-span { cursor: crosshair; }
+.point-load-dialog .stack-field { display: grid; gap: 4px; min-width: 0; }
+.point-load-dialog .stack-field :is(input, select) { width: 100%; }
+.point-load-components { display: grid; grid-template-columns: repeat(auto-fit,minmax(90px,1fr)); margin-top: 12px; gap: 8px; }
+.point-load-entry { text-align: left; }
+.member-point-glyph, .scene-label.scene-point-load { color: var(--geometry-load); }
+.member-point-glyph text { font-size: 11px; paint-order: stroke; stroke: var(--surface-view); stroke-width: 3px; }
 .elevation:has(.drawing-span, .drawing-member) .empty-canvas { display: none; }
 .ribbon:has(.member-launch) { overflow-x: auto; }
 .member-launch {
@@ -2253,6 +2259,9 @@ button.primary {
   pointer-events: none;
 }
 
+.ribbon:has(.loads-group) { overflow-x: auto; }
+.ribbon .loads-group { flex-shrink: 0; }
+.ribbon .definition-shortcuts { flex-wrap: nowrap; white-space: nowrap; }
 .definition-shortcuts, .material-actions {
   display: flex;
   flex-wrap: wrap;

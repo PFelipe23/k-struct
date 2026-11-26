@@ -13,6 +13,8 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import {
   coordinates,
+  beamAxes,
+  interpolate,
   distance,
   normalizeCoord,
   onPlane,
@@ -35,6 +37,8 @@ import type {
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
 import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
+import { actionVector, pointFraction } from "../domain/memberPointLoads";
+import PointLoadGlyph, { pointLoadLabel } from "./PointLoadGlyph";
 import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
@@ -59,7 +63,7 @@ export type PlaneCamera = {
   scale: number;
 };
 
-export type Tool = "select" | "node" | "member" | "slab";
+export type Tool = "select" | "node" | "member" | "slab" | "pointLoad";
 export type Display = "model" | "deformed" | MemberForceComponent;
 interface Props {
   project: Project;
@@ -70,6 +74,7 @@ interface Props {
   tool: Tool;
   quick: boolean;
   onWindow: (objects: SelectedObject[], additive: boolean) => void;
+  onPickLoad?: (id: string, point: Point3) => void;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
   envelope: {
@@ -109,6 +114,7 @@ export default function WorkPlaneView({
   quick,
   onWindow,
   onSpan,
+  onPickLoad,
   result,
   envelope,
   display,
@@ -139,7 +145,7 @@ export default function WorkPlaneView({
     y: number;
   } | null>(null);
   // The span picker handles its own hits and does not request point placement.
-  const tool = quick ? "select" : activeTool;
+  const tool = quick || activeTool === "pointLoad" ? "select" : activeTool;
   useEffect(() => {
     setSpanPointer(null);
     if (quick) setCursor(null);
@@ -523,7 +529,7 @@ export default function WorkPlaneView({
       </div>
       <svg
         ref={ref}
-        className={`drawing drawing-${quick ? "span" : tool}`}
+        className={`drawing drawing-${onPickLoad ? "point-load" : quick ? "span" : tool}`}
         aria-label={`Área de lançamento ${plane.kind}`}
         role="application"
         tabIndex={0}
@@ -542,6 +548,43 @@ export default function WorkPlaneView({
             setSpanPointer(null);
         }}
         onClickCapture={(event) => {
+          if (onPickLoad) {
+            event.stopPropagation();
+            const pointer = pointerPosition(event);
+            let best: { id: string; point: Point3; gap: number } | undefined;
+            for (const m of bars) {
+              const line = memberAxis(
+                m,
+                nodeMap.get(m.start)!,
+                nodeMap.get(m.end)!,
+              );
+              const x = sx(line.start[axisU]),
+                y = sy(line.start[axisV]);
+              const du = sx(line.end[axisU]) - x,
+                dv = sy(line.end[axisV]) - y;
+              const squared = du * du + dv * dv;
+              if (!squared) continue;
+              const t = Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((pointer.x - x) * du + (pointer.y - y) * dv) / squared,
+                ),
+              );
+              const gap = Math.hypot(
+                pointer.x - x - t * du,
+                pointer.y - y - t * dv,
+              );
+              if (gap <= 8 && (!best || gap < best.gap))
+                best = {
+                  id: m.id,
+                  point: interpolate(line.start, line.end, t),
+                  gap,
+                };
+            }
+            if (best) onPickLoad(best.id, best.point);
+            return;
+          }
           if (!quick) return;
           event.stopPropagation();
           const point = pointerPosition(event);
@@ -869,6 +912,32 @@ export default function WorkPlaneView({
                     );
                 }}
               />
+              {layers.loads &&
+                display === "model" &&
+                (patterns.points ?? [])
+                  .filter((l) => l.memberId === m.id)
+                  .map((load) => {
+                    const point = interpolate(
+                      line.start,
+                      line.end,
+                      pointFraction(load.position, line.span),
+                    );
+                    return (
+                      <PointLoadGlyph
+                        key={load.id}
+                        x={sx(point[axisU])}
+                        y={sy(point[axisV])}
+                        axes={[axisU, axisV, normal]}
+                        vector={actionVector(
+                          load,
+                          beamAxes(line.start, line.end, m.roll, project.mode),
+                        )}
+                        kind={load.kind}
+                        marker={markerId}
+                        label={pointLoadLabel(load, line.span, units)}
+                      />
+                    );
+                  })}
               {mesh?.rigidLinks
                 .filter((l) => l.memberId === m.id)
                 .map(({ nodeId }) => {

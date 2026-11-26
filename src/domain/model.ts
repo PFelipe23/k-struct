@@ -10,12 +10,13 @@ import {
   stiffnessFactorError,
   stiffnessLabels,
 } from "./memberStiffness";
-import { offsetError, setOffsets } from "./memberOffsets";
+import { memberAxis, offsetError, setOffsets } from "./memberOffsets";
 import {
   diaphragmErrors,
   remapDiaphragmNodes,
   diaphragmStability,
 } from "./diaphragms";
+import { componentError, positionError } from "./memberPointLoads";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
 import { foundationConstraintRows, globalFoundationMatrix } from "./foundation";
@@ -394,13 +395,35 @@ const foundationSchema = z.strictObject({
   reference: z.enum(["node", "offset"]),
   reflected: z.literal(true).optional(),
 });
-export const projectSchema = projectV15.extend({
+const projectV16 = projectV15.extend({
   schemaVersion: z.literal(16),
   nodes: z
     .array(
       elasticNodeSchema.extend({ foundation: foundationSchema.optional() }),
     )
     .max(1000),
+});
+const pointLoadSchema = z.strictObject({
+  id,
+  memberId: id,
+  kind: z.enum(["force", "moment"]),
+  system: z.enum(["global", "local"]),
+  position: z.strictObject({
+    kind: z.enum(["distance", "relative"]),
+    value: finite,
+  }),
+  components: directionSchema,
+});
+export const projectSchema = projectV16.extend({
+  schemaVersion: z.literal(17),
+  loadPatterns: z
+    .array(
+      projectV16.shape.loadPatterns.element.extend({
+        points: z.array(pointLoadSchema).max(patternLoadLimit).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
 });
 export type Diaphragm = NonNullable<Project["diaphragms"]>[number];
 export type Section = z.infer<typeof sectionSchema>;
@@ -468,7 +491,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 16,
+    schemaVersion: 17,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -797,6 +820,15 @@ export function parseProject(source: string): Project {
     const old = projectV15.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 16 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 16
+  ) {
+    const old = projectV16.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 17 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1003,7 +1035,26 @@ export function referenceErrors(p: Project): string[] {
       }
     }
   }
+  const membersById = new Map(p.members.map((m) => [m.id, m]));
   for (const pat of p.loadPatterns) {
+    const seen = new Set<string>();
+    for (const load of pat.points ?? []) {
+      const m = membersById.get(load.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: carga concentrada em barra inexistente.`);
+        continue;
+      }
+      if (seen.has(load.id))
+        errors.push(`${pat.name}: carga concentrada com ID repetido.`);
+      seen.add(load.id);
+      const a = nodes.get(m.start),
+        b = nodes.get(m.end);
+      if (!a || !b) continue;
+      const error =
+        positionError(load.position, memberAxis(m, a, b).span) ??
+        componentError(load, p.mode);
+      if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+    }
     if (pat.nodal.some((l) => !nodes.has(l.nodeId)))
       errors.push(`${pat.name}: carga em nó inexistente.`);
     if (pat.uniform.some((l) => !p.members.some((m) => m.id === l.memberId)))
@@ -1287,6 +1338,8 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
     group.objects = group.objects.filter((o) => !removed[o.kind].has(o.id));
   for (const pat of p.loadPatterns) {
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
+    if (pat.points)
+      pat.points = pat.points.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
     pat.pressure = pat.pressure.filter((load) => !slabs.has(load.slabId));
   }

@@ -16,6 +16,7 @@ import {
   getForceLabel,
   formatResult,
   formatResultQuantity,
+  reportsSectionSides,
   sectionSide,
   sectionPositions,
 } from "./resultFormatting";
@@ -33,6 +34,7 @@ export function buildEnvelopeCsv(
   units: UnitPreferences = DEFAULT_UNITS,
 ) {
   const columns = forceColumns[project.mode];
+  const includeSide = reportsSectionSides(project);
   const positions = sectionPositions(project, project.members, units);
   const included = JSON.stringify(envelope.combinationIds);
   const combinations = new Map(
@@ -58,9 +60,7 @@ export function buildEnvelopeCsv(
             fromSI(forces[key], forceQuantity(key), units),
           ),
           JSON.stringify(combination.factors),
-          ...(project.meshConnections.length
-            ? [sectionSide(station.side)]
-            : []),
+          ...(includeSide ? [sectionSide(station.side)] : []),
           ...positions.values(member.id, station.t),
         ];
       }),
@@ -83,7 +83,7 @@ export function buildEnvelopeCsv(
         return `${symbol} (${unit})`;
       }),
       "Parcelas (ID do caso e fator)",
-      ...(project.meshConnections.length ? ["Lado da seção"] : []),
+      ...(includeSide ? ["Lado da seção"] : []),
       ...positions.headers,
     ],
     ...rows,

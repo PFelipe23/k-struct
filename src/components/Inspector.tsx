@@ -52,6 +52,8 @@ import {
   type MeasuredQuantity,
 } from "../units";
 import { useUnits } from "./Units";
+import { pointLoadLabel } from "./PointLoadGlyph";
+import type { PointLoadSelection } from "./MemberPointLoadDialog";
 import FoundationDialog from "./FoundationDialog";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
@@ -358,6 +360,7 @@ export default function Inspector({
   edit,
   onMaterials,
   onSections,
+  onPointLoad,
 }: {
   project: Project;
   selection: SelectedObject[];
@@ -365,6 +368,7 @@ export default function Inspector({
   edit: (fn: (p: Project) => void) => string | null | void;
   onMaterials: () => void;
   onSections: (id: string) => void;
+  onPointLoad: (selection: PointLoadSelection) => void;
 }) {
   const { units } = useUnits();
   const [foundationId, setFoundationId] = useState<string>();
@@ -748,6 +752,33 @@ export default function Inspector({
                 }
               />
             )}
+            <h4>
+              Cargas concentradas <span>{pattern.name}</span>
+            </h4>
+            {(pattern.points ?? [])
+              .filter((l) => l.memberId === member.id)
+              .map((load) => (
+                <button
+                  key={load.id}
+                  className="point-load-entry"
+                  onClick={() =>
+                    onPointLoad({
+                      memberId: member.id,
+                      loadId: load.id,
+                      fraction: 0,
+                    })
+                  }
+                >
+                  {pointLoadLabel(load, span, units)}
+                </button>
+              ))}
+            <button
+              onClick={() =>
+                onPointLoad({ memberId: member.id, fraction: 0.5 })
+              }
+            >
+              Adicionar carga concentrada
+            </button>
             <h4>
               Carga distribuída <span>{pattern.name}</span>
             </h4>
