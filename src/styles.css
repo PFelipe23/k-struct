@@ -1810,6 +1810,12 @@ button.primary {
 .scene-axis-label.member-axis-y { margin: 4px 0 0 5px; }
 .scene-axis-label.member-axis-z { margin: -4px 0 0 -11px; }
 .scene-member-end { margin-top: -4px; }
+.scene-connection-release {
+  color: var(--geometry-support);
+  font: 700 22px/18px system-ui, sans-serif;
+  text-shadow: 0 0 3px var(--scene-background), 0 0 3px var(--scene-background);
+  transform: translate(-50%, -50%);
+}
 @media (max-height: 800px) {
   .work-area:has(.viewports.triple) .results { height: 110px; }
   .viewports.triple .view-foot { height: 19px; min-height: 19px; }
@@ -2244,6 +2250,12 @@ button.primary {
   border: 2px solid var(--geometry-support);
   border-radius: 50%;
   pointer-events: none;
+}
+.connection-release-marker circle {
+  fill: var(--surface-view);
+  stroke: var(--geometry-support);
+  stroke-width: 2;
+  stroke-dasharray: 2 1;
 }
 
 .definition-shortcuts, .material-actions {

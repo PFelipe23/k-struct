@@ -243,6 +243,24 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   )
     throw new Error("A cadeia tem lacuna ou nós coincidentes sem ligação.");
   const interior = new Set(stations.slice(1, -1).map((s) => s.id));
+  const endpointConnection = (id: string) => {
+    const member = bars.find((item) => item.start === id || item.end === id)!;
+    return member.start === id ? member.connectionI : member.connectionJ;
+  };
+  const connectionI = endpointConnection(stations[0].id);
+  const connectionJ = endpointConnection(stations.at(-1)!.id);
+  const hasNonRigidEnd = (connection: Member["connectionI"]) =>
+    connection &&
+    Object.values(connection).some(({ kind }) => kind !== "rigid");
+  for (const m of bars) {
+    if (
+      (interior.has(m.start) && hasNonRigidEnd(m.connectionI)) ||
+      (interior.has(m.end) && hasNonRigidEnd(m.connectionJ))
+    )
+      throw new Error(
+        "Não é possível unir barras com ligações não rígidas em um nó intermediário.",
+      );
+  }
   for (const id of interior) protectJoint(p, nodes.get(id)!, selected);
   for (const pat of p.loadPatterns) {
     const q = memberIntensity(pat, survivor.id);
@@ -267,6 +285,8 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   }
   survivor.start = stations[0].id;
   survivor.end = stations.at(-1)!.id;
+  survivor.connectionI = connectionI;
+  survivor.connectionJ = connectionJ;
   p.members = p.members.filter(
     (m) => !selected.has(m.id) || m.id === survivor.id,
   );

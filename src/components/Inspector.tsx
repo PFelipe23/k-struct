@@ -19,12 +19,14 @@ import {
 import { reverseMember } from "../domain/editing";
 import {
   free,
+  defaultEndConnection,
   nodalLoad,
   slabDivisionLimit,
   uniformLoad,
   type NodalLoad,
   type UniformLoad,
   type Project,
+  type EndConnection,
   type SelectedObject,
   type Slab,
 } from "../domain/model";
@@ -369,6 +371,19 @@ export default function Inspector({
   const pattern = p.loadPatterns.find((l) => l.id === patternId)!;
   const nl = sumNodal(pattern, node?.id ?? "");
   const ul = sumUniform(pattern, member?.id ?? "");
+  const updateMemberConnection = (
+    end: "i" | "j",
+    dof: keyof EndConnection,
+    kind: "rigid" | "free" | "elastic",
+    stiffness = 0,
+  ) =>
+    edit((draft) => {
+      const target = draft.members.find((item) => item.id === member?.id)!;
+      const key = end === "i" ? "connectionI" : "connectionJ";
+      const connection = target[key] ?? defaultEndConnection();
+      connection[dof] = kind === "elastic" ? { kind, stiffness } : { kind };
+      target[key] = connection;
+    });
   const start = member && p.nodes.find((n) => n.id === member.start)!;
   const end = member && p.nodes.find((n) => n.id === member.end)!;
   const span = start && end ? distance(start, end) : 0;
@@ -467,7 +482,14 @@ export default function Inspector({
             </p>
             {selectedNodes.size > 0 && supportPresets}
             <BatchAssignPanel
-              key={JSON.stringify([p.mode, patternId, units.force, units.moment, units.distributedLoad, ...selection.map(selectionKey)])}
+              key={JSON.stringify([
+                p.mode,
+                patternId,
+                units.force,
+                units.moment,
+                units.distributedLoad,
+                ...selection.map(selectionKey),
+              ])}
               project={p}
               selection={selection}
               patternId={patternId}
@@ -607,6 +629,73 @@ export default function Inspector({
               A inversão conserva a orientação física da seção e as cargas
               globais.
             </p>
+            <h4>Ligações nas extremidades</h4>
+            <p className="help">
+              Componentes nos eixos locais. Rigidez translacional em N/m e
+              rotacional em N·m/rad. O padrão é rígido.
+            </p>
+            {(
+              [
+                ["ux", "Ux"],
+                ...(spatial ? [["uy", "Uy"]] : []),
+                ["uz", "Uz"],
+                ...(spatial ? [["rx", "Rx"]] : []),
+                ["ry", "Ry"],
+                ...(spatial ? [["rz", "Rz"]] : []),
+              ] as [keyof EndConnection, string][]
+            ).map(([dof, label]) =>
+              (["i", "j"] as const).map((end) => {
+                const value = member[
+                  end === "i" ? "connectionI" : "connectionJ"
+                ]?.[dof] ?? { kind: "rigid" as const };
+                const component = value.kind === "elastic" ? value : null;
+                return (
+                  <div className="connection-editor" key={`${end}-${dof}`}>
+                    <label className="stack-field">
+                      Ligação {end} · {label}
+                      <select
+                        aria-label={`Ligação ${end} · ${label}`}
+                        value={value.kind}
+                        onChange={(event) =>
+                          updateMemberConnection(
+                            end,
+                            dof,
+                            event.target.value as "rigid" | "free" | "elastic",
+                            component?.stiffness ?? 1,
+                          )
+                        }
+                      >
+                        <option value="rigid">Rígida</option>
+                        <option value="free">Livre</option>
+                        <option value="elastic">Elástica</option>
+                      </select>
+                    </label>
+                    {component && (
+                      <label className="stack-field">
+                        Rigidez {label} (
+                        {dof.startsWith("r") ? "N·m/rad" : "N/m"})
+                        <input
+                          type="number"
+                          min="0.000000001"
+                          step="any"
+                          value={component.stiffness}
+                          onChange={(event) => {
+                            const stiffness = Number(event.target.value);
+                            if (Number.isFinite(stiffness) && stiffness >= 0)
+                              updateMemberConnection(
+                                end,
+                                dof,
+                                "elastic",
+                                stiffness,
+                              );
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                );
+              }),
+            )}
             <label className="stack-field">
               Seção
               <select

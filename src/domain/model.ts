@@ -61,7 +61,30 @@ const legacySection = z
 const legacyMember = z
   .object({ id, name: text, start: id, end: id, sectionId: id })
   .strict();
-const memberSchema = legacyMember.extend({ roll: finite.min(-360).max(360) });
+export const connectionComponentSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("rigid") }).strict(),
+  z.object({ kind: z.literal("free") }).strict(),
+  z
+    .object({ kind: z.literal("elastic"), stiffness: finite.positive() })
+    .strict(),
+]);
+export const endConnectionSchema = z
+  .object({
+    ux: connectionComponentSchema,
+    uy: connectionComponentSchema,
+    uz: connectionComponentSchema,
+    rx: connectionComponentSchema,
+    ry: connectionComponentSchema,
+    rz: connectionComponentSchema,
+  })
+  .strict();
+export type ConnectionComponent = z.infer<typeof connectionComponentSchema>;
+export type EndConnection = z.infer<typeof endConnectionSchema>;
+const memberSchema = legacyMember.extend({
+  roll: finite.min(-360).max(360),
+  connectionI: endConnectionSchema.optional(),
+  connectionJ: endConnectionSchema.optional(),
+});
 const legacyNodal = z
   .object({ nodeId: id, fx: finite, fz: finite, my: finite })
   .strict();
@@ -321,6 +344,15 @@ export const free = () => ({
   rx: false,
   ry: false,
   rz: false,
+});
+export const rigidConnectionComponent = () => ({ kind: "rigid" as const });
+export const defaultEndConnection = () => ({
+  ux: rigidConnectionComponent(),
+  uy: rigidConnectionComponent(),
+  uz: rigidConnectionComponent(),
+  rx: rigidConnectionComponent(),
+  ry: rigidConnectionComponent(),
+  rz: rigidConnectionComponent(),
 });
 export const nodalLoad = (nodeId: string): NodalLoad => ({
   nodeId,

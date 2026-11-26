@@ -4,14 +4,16 @@ import {
   addPoint,
   beamExample,
   createProject,
+  defaultEndConnection,
   free,
   nodalLoad,
   parseProject,
   serializeProject,
   uniformLoad,
   type Project,
+  type EndConnection,
 } from "../src/domain/model";
-import { defaultGeometry } from "../src/domain/sections";
+import { defaultGeometry, sectionProperties } from "../src/domain/sections";
 import { noRepairs, planRepair } from "../src/domain/duplicateRepair";
 import { stagedMembers } from "../src/domain/duplicateGeometry";
 import { planMemberEdit } from "../src/domain/memberOperations";
@@ -57,6 +59,135 @@ function solve(p: Project, caseId = "EL") {
 const envelopeExample = readFileSync(
   new URL("../examples/portico-em-l-envelopes.kstruct.json", import.meta.url),
   "utf8",
+);
+
+it("KS-21 · exporta articulação semirrígida como nó de braço e mola", () => {
+  const p = beamExample();
+  const connection: EndConnection = defaultEndConnection();
+  connection.ry = { kind: "elastic", stiffness: 4200 };
+  p.members[0].connectionI = connection;
+
+  const input = exportOofem(p, "EL");
+  const arm = input.nodes.find(({ rigidArm }) => rigidArm);
+  expect(arm).toBeDefined();
+  expect(arm?.rigidArm?.master).toBe(1);
+  expect(arm?.rigidArm?.masterMask).toEqual([1, 1, 0]);
+  expect(input.elements[0].start).toBe(arm?.number);
+  expect(input.deck).toContain(
+    `RigidArmNode ${arm?.number} coords 3 0 0 0 master 1 dofidmask 3 1 3 5 masterMask 3 1 1 0 doftype 3 2 2 0`,
+  );
+  expect(input.deck).toContain(
+    `Spring ${input.elements.length + 1} nodes 2 1 ${arm?.number} crossSect 1 mode 3 k 4200`,
+  );
+  expect(input.deck).toContain(
+    "Node 1 coords 3 0 0 0 dofidmask 3 1 3 5",
+  );
+  expect(input.deck).not.toMatch(/^Spring .*\bset\b/m);
+  expect(input.deck).toContain(`nelem ${input.elements.length + 1}`);
+});
+
+it("KS-21 · exporta uma mola de rotação local em uma barra espacial", () => {
+  const p = beamExample();
+  p.mode = "spatial";
+  p.nodes[0].restraints = {
+    ux: true,
+    uy: true,
+    uz: true,
+    rx: true,
+    ry: true,
+    rz: true,
+  };
+  const connection: EndConnection = defaultEndConnection();
+  connection.rz = { kind: "elastic", stiffness: 3500 };
+  p.members[0].connectionJ = connection;
+
+  const input = exportOofem(p, "EL");
+  const arm = input.nodes.find(({ rigidArm }) => rigidArm)!;
+  expect(arm.rigidArm?.master).toBe(2);
+  expect(input.elements.at(-1)?.end).toBe(arm.number);
+  expect(input.deck).toContain("domain 3dShell");
+  expect(input.deck).toContain(
+    `Spring ${input.elements.length + 1} nodes 2 2 ${arm.number} crossSect 1 mode 5 k 3500 orientation 3`,
+  );
+});
+
+describe.skipIf(!executable)(
+  "OOFEM real · KS-21 ligações de extremidade",
+  () => {
+    const connectionBeam = (
+      kind: "rigid" | "free" | "elastic",
+      segments = 8,
+      reversed = false,
+      stiffness = 1,
+    ) => {
+      const p = beamExample();
+      p.mesh.segmentsPerMember = segments;
+      p.nodes[0].restraints = { ...free(), ux: true, uz: true, ry: true };
+      p.nodes[1].restraints = { ...free(), uz: true };
+      const connection: EndConnection = defaultEndConnection();
+      connection.ry = kind === "elastic" ? { kind, stiffness } : { kind };
+      p.members[0].connectionI = connection;
+      if (reversed) reverseMember(p, "V1");
+      return { p, result: solve(p) };
+    };
+
+    it("compara ponta i articulada e rígida com as reações e momentos de referência", () => {
+      const { result: hinged } = connectionBeam("free");
+      const hingedA = hinged.members.V1.find(({ t }) => t === 0)!;
+      expect(Math.abs(hingedA.my)).toBeLessThan(1);
+      expect(
+        hinged.reactions.find(({ nodeId }) => nodeId === "A")!.fz,
+      ).toBeCloseTo(30000, 1);
+      expect(
+        hinged.reactions.find(({ nodeId }) => nodeId === "B")!.fz,
+      ).toBeCloseTo(30000, 1);
+
+      const { result: rigid } = connectionBeam("rigid");
+      const rigidA = rigid.members.V1.find(({ t }) => t === 0)!;
+      expect(Math.abs(rigidA.my)).toBeCloseTo(45000, 0);
+      expect(
+        rigid.reactions.find(({ nodeId }) => nodeId === "A")!.fz,
+      ).toBeCloseTo(37500, 1);
+      expect(
+        rigid.reactions.find(({ nodeId }) => nodeId === "B")!.fz,
+      ).toBeCloseTo(22500, 1);
+    });
+
+    it("valida kθ = 3EI/L em duas malhas e com a barra invertida", () => {
+      const { E } = beamExample().materials[0];
+      const p0 = beamExample();
+      const kTheta =
+        (3 * E * sectionProperties(p0.sections[0]).Iy) /
+        (p0.nodes[1].x - p0.nodes[0].x);
+      for (const segments of [6, 12]) {
+        for (const reversed of [false, true]) {
+          const { result } = connectionBeam(
+            "elastic",
+            segments,
+            reversed,
+            kTheta,
+          );
+          const t = reversed ? 1 : 0;
+          const station = result.members.V1.find((entry) => entry.t === t)!;
+          const reactionA = result.reactions.find(
+            ({ nodeId }) => nodeId === "A",
+          )!;
+          const reactionB = result.reactions.find(
+            ({ nodeId }) => nodeId === "B",
+          )!;
+          expect(Math.abs(station.my)).toBeCloseTo(22500, 0);
+          expect(
+            Math.abs(Math.abs(station.my / station.ry) - kTheta) / kTheta,
+          ).toBeLessThan(0.01);
+          expect(reactionA.fz + reactionB.fz).toBeCloseTo(60000, 0);
+          expect(Math.abs(reactionB.fz * 6 - 10000 * 6 * 3)).toBeCloseTo(
+            Math.abs(station.my),
+            0,
+          );
+        }
+      }
+    });
+  },
 );
 
 it("abre o exemplo de pórtico em L e preserva o projeto ao salvar e reabrir", () => {

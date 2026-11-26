@@ -82,6 +82,10 @@ export function reverseMember(p: Project, id: string) {
   const member = p.members.find((item) => item.id === id);
   if (!member) throw new Error("A barra selecionada não existe.");
   [member.start, member.end] = [member.end, member.start];
+  [member.connectionI, member.connectionJ] = [
+    member.connectionJ,
+    member.connectionI,
+  ];
   // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
   // keeps z fixed in global space when x changes sign.
   if (p.mode === "spatial" && member.roll) member.roll = -member.roll;
@@ -295,6 +299,8 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
     const joints = [m.start, ...interior, m.end];
     const children = joints.slice(0, -1).map((start, i) => {
       const child = { ...m, start, end: joints[i + 1] };
+      if (i > 0) delete child.connectionI;
+      if (i < joints.length - 2) delete child.connectionJ;
       if (i > 0) {
         child.id = uid();
         child.name = nextName("B", usedNames);

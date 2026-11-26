@@ -188,10 +188,10 @@ O teste de interface `tests/e2e/mesh-connections.spec.ts` conecta C, inspeciona 
 
 Dois balanços XZ independentes de 3 m têm seções de 20 × 30 cm e carga de ponta de −10,5 kN. As duas seções começam vinculadas ao mesmo aço, com E = 210 GPa, ν = 0,30, ρ = 7.850 kg/m³ e α = 0,000012/K. A referência de Euler–Bernoulli fornece $I_y=bh^3/12=0{,}00045\,\mathrm{m}^4$ e $u_z=-PL^3/(3EI_y)$, com $P$ em módulo.
 
-| Configuração | Flecha na ponta A | Flecha na ponta B |
-| --- | ---: | ---: |
-| Duas seções com E = 210 GPa | −1,000 mm | −1,000 mm |
-| Cópia com E = 420 GPa atribuída apenas à seção B | −1,000 mm | −0,500 mm |
+| Configuração                                     | Flecha na ponta A | Flecha na ponta B |
+| ------------------------------------------------ | ----------------: | ----------------: |
+| Duas seções com E = 210 GPa                      |         −1,000 mm |         −1,000 mm |
+| Cópia com E = 420 GPa atribuída apenas à seção B |         −1,000 mm |         −0,500 mm |
 
 Em ambas as configurações cada engaste deve fornecer +10,5 kN em Z e −31,5 kN·m em Y. O teste verifica os IDs de material nos registros `SimpleCS`, as propriedades em `IsoLE`, as flechas com tolerância absoluta de 5 × 10⁻¹¹ m e as reações com 0,05 N ou N·m. Outro ensaio abre a viga biapoiada no formato v8 e confere α = 0, a flecha de −8,4375 mm e o momento de +45 kN·m no meio do vão.
 
@@ -199,17 +199,31 @@ Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check`. O fluxo de interface 
 
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+
+## KS-21 · liberações e ligações semirrígidas
+
+O projeto mantém `connectionI` e `connectionJ` opcionais por barra. A ausência dos campos equivale a ligação rígida em todos os componentes e preserva arquivos anteriores sem alterar o esquema v11. O inspetor edita os componentes ativos em XZ ou XYZ nas unidades N/m e N·m/rad. A vista marca as pontas com componentes livres ou elásticos. Inverter i/j e dividir a barra transferem os vínculos pelas extremidades físicas; unir barras com vínculo não rígido no nó intermediário é rejeitado.
+
+O adaptador cria um `RigidArmNode` coincidente com a ponta física da barra e uma `Spring` para cada componente elástico. A rotação do extremo do elemento é recuperada no referencial local dessa ponta e transformada para global; o nó estrutural conserva seu próprio deslocamento. O teste de exportação `KS-21 · exporta articulação semirrígida como nó de braço e mola` confere a ligação à rotação no plano XZ. A regressão de interface em `tests/e2e/member-connections.spec.ts` cobre a edição, a marca visual e salvar/reabrir.
+
+O benchmark real está em `tests/oofem.integration.test.ts`, dentro de `OOFEM real · KS-21 ligações de extremidade`. Ele compara a viga biapoiada de 6 m com carga de 10 kN/m para ponta i articulada, rígida e elástica com `kθ = 3EI/L`, em duas malhas e após inverter i/j. Execute com o binário OOFEM 3.0 fixado pelo projeto:
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/oofem.integration.test.ts -t KS-21
+```
+
+Com OOFEM 3.0 AMD64 configurado, `npm run check` passou com 216 testes, incluindo ligações rígida, livre e elástica, duas malhas e inversão i/j. `npm run build` passou. O E2E de edição, vistas 2D/3D, marcas e salvamento havia passado em Chromium; a repetição com o comando Playwright do projeto não iniciou porque a porta 1420 já estava ocupada.
 
 ## KS-18 · seções de barras e balanço espacial
 
 O catálogo recebe dimensões em cm e o domínio trabalha em metros. A largura acompanha y local, a altura acompanha z local e x vai de i para j. A rotação positiva segue a regra da mão direita em torno de x. A tabela usa mm para permitir a conferência direta com as dimensões de referência.
 
-| Forma e dimensões (mm) | A (mm²) | Iy (mm⁴) | Iz (mm⁴) | J (mm⁴) |
-| --- | ---: | ---: | ---: | ---: |
-| Círculo, d = 100 | 7 853,982 | 4 908 738,521 | 4 908 738,521 | 9 817 477,042 |
-| Tubo, D = 100, t = 10, di = 80 | 2 827,433 | 2 898 119,223 | 2 898 119,223 | 5 796 238,446 |
-| I, h = 200, b = 100, tf = 10, tw = 6 | 3 080,000 | 20 982 666,667 | 1 669 906,667 | 80 346,667 |
+| Forma e dimensões (mm)               |   A (mm²) |       Iy (mm⁴) |      Iz (mm⁴) |       J (mm⁴) |
+| ------------------------------------ | --------: | -------------: | ------------: | ------------: |
+| Círculo, d = 100                     | 7 853,982 |  4 908 738,521 | 4 908 738,521 | 9 817 477,042 |
+| Tubo, D = 100, t = 10, di = 80       | 2 827,433 |  2 898 119,223 | 2 898 119,223 | 5 796 238,446 |
+| I, h = 200, b = 100, tf = 10, tw = 6 | 3 080,000 | 20 982 666,667 | 1 669 906,667 |    80 346,667 |
 
 No círculo maciço, A = πd²/4, Iy = Iz = πd⁴/64 e J = πd⁴/32. No anel, a referência subtrai o círculo interno do externo. A parede deve satisfazer 0 < t < D/2. O retângulo conserva os 60 termos ímpares da série de Saint-Venant usada nas versões anteriores.
 
@@ -218,17 +232,17 @@ O I tem duas mesas iguais, alma centrada e cantos vivos. Com a altura livre hw =
 - A = 2b·tf + hw·tw.
 - Iy = [b·h³ − (b − tw)·hw³]/12.
 - Iz = [2tf·b³ + hw·tw³]/12.
-- Para torção uniforme de Saint-Venant em chapas finas, J ≈ [2b·tf³ + (h − tf)·tw³]/3. A altura h − tf vai do centro de uma mesa ao centro da outra. Raios de concordância, cordões de solda e rigidez de empenamento restringido ficam fora do modelo. Iy + Iz é o momento polar geométrico. O exemplo publicado W610×125 (612 × 229 × 19,6 × 11,9 mm) resulta em 1,4823 × 10⁶ mm⁴, compatível com os 1,48 × 10⁶ mm⁴ da fonte. [CISC, *Torsional Section Properties of Steel Shapes*, p. 6, equações 6 e 8](https://www.labciv.eng.uerj.br/pgeciv/files/Torsion%20Properties.pdf)
+- Para torção uniforme de Saint-Venant em chapas finas, J ≈ [2b·tf³ + (h − tf)·tw³]/3. A altura h − tf vai do centro de uma mesa ao centro da outra. Raios de concordância, cordões de solda e rigidez de empenamento restringido ficam fora do modelo. Iy + Iz é o momento polar geométrico. O exemplo publicado W610×125 (612 × 229 × 19,6 × 11,9 mm) resulta em 1,4823 × 10⁶ mm⁴, compatível com os 1,48 × 10⁶ mm⁴ da fonte. [CISC, _Torsional Section Properties of Steel Shapes_, p. 6, equações 6 e 8](https://www.labciv.eng.uerj.br/pgeciv/files/Torsion%20Properties.pdf)
 
 O KStruct limita a aproximação de J a b/tf ≥ 10 e hw/tw ≥ 10 e exige tw < b. Esses limites são um critério de aplicação adotado pelo projeto. O formulário identifica a dimensão a corrigir e impede salvar. O esquema do arquivo também verifica esses limites.
 
 **Balanço espacial.** Uma barra de 2 m em +X tem os seis graus de liberdade impedidos em i. Em j atuam Fy = +300 N, Fz = −900 N e Mx = +15 N·m. O material tem E = 210 GPa, ν = 0,30 e G = E/[2(1 + ν)]. Com rotação da seção igual a zero, a referência de Euler–Bernoulli fornece uy = Fy·L³/(3E·Iz), uz = Fz·L³/(3E·Iy) e rx = Mx·L/(GJ).
 
-| Seção | uy (mm) | uz (mm) | rx (mrad) |
-| --- | ---: | ---: | ---: |
+| Seção    |   uy (mm) |   uz (mm) |  rx (mrad) |
+| -------- | --------: | --------: | ---------: |
 | Circular | +0,776070 | −2,328209 | +0,0378334 |
-| Tubular | +1,314481 | −3,943444 | +0,0640810 |
-| I | +2,281279 | −0,544667 | +4,622825 |
+| Tubular  | +1,314481 | −3,943444 | +0,0640810 |
+| I        | +2,281279 | −0,544667 |  +4,622825 |
 
 O teste roda o OOFEM 3.0 com oito elementos Beam3d para cada seção, primeiro a 0° e depois a 90°. Um quarto de volta troca Iy e Iz nas duas referências de flexão. A tolerância relativa para cada deslocamento e rotação é 2 × 10⁻⁶. O balanço retangular da v9 passa pela migração antes de verificar a flexão biaxial, a força normal, a torção e as reações. Os testes estão em `tests/sections.test.ts` e `tests/oofem.integration.test.ts`.
 
@@ -239,9 +253,9 @@ No pórtico espacial de referência, a diagonal B5 tem seção de 15 × 20 cm, �
 Um balanço espacial horizontal de 6 m, com E = 200 GPa e a mesma seção, recebe Fy = +1,2 kN e Fz = −2,4 kN na ponta. Use $I_y = bh^3/12$, $I_z = hb^3/12$ e a referência de Euler–Bernoulli $u = P L^3/(3 E I)$. A rotação a 90° troca as inércias usadas em cada direção. Os deslocamentos conferem com tolerância de 5 × 10⁻⁹ m.
 
 | Orientação da seção | UY na ponta | UZ na ponta |
-| --- | ---: | ---: |
-| 0° | +7,68 mm | −8,64 mm |
-| 90° | +4,32 mm | −15,36 mm |
+| ------------------- | ----------: | ----------: |
+| 0°                  |    +7,68 mm |    −8,64 mm |
+| 90°                 |    +4,32 mm |   −15,36 mm |
 
 Depois de inverter i/j com a seção já a 90°, os deslocamentos continuam iguais aos da última linha. Ensaios adicionais conferem N = +1,8 kN nas duas orientações em XZ e XYZ e a troca dos lados de uma seção interna carregada.
 
@@ -267,10 +281,10 @@ As entradas abaixo são referências independentes do exportador do KStruct. Usa
 
 Em [pinned-truss.in](../tests/fixtures/pinned-truss.in), os nós A=(0, 0), B=(6, 0) e C=(3, 4) estão no plano XZ. A restringe UX e UZ, e B restringe UZ. Os três membros têm E = 200 GPa, A = 1.000 mm² e Iy = 2,5 × 10⁻⁵ m⁴. O banzo AB tem dois elementos contínuos no meio do vão. A articulação fica nas pontas físicas.
 
-| Carregamento | Reações verticais em A e B | Esforços e deslocamentos de referência |
-| --- | --- | --- |
-| Força de 10 kN para baixo em C | 5 kN em cada apoio | Tração de 3,75 kN em AB e compressão de 6,25 kN em AC e BC. Cortantes e momentos nulos. UZ de C = −0,2375 mm. |
-| Carga uniforme de 10 kN/m para baixo ao longo de AB | 30 kN em cada apoio | Momento nulo nas pontas e sagente de 45 kN·m no meio do vão. Cortante de +30 kN junto a A e −30 kN junto a B na convenção de seção do KStruct. Flecha central de −33,75 mm. |
+| Carregamento                                        | Reações verticais em A e B | Esforços e deslocamentos de referência                                                                                                                                      |
+| --------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Força de 10 kN para baixo em C                      | 5 kN em cada apoio         | Tração de 3,75 kN em AB e compressão de 6,25 kN em AC e BC. Cortantes e momentos nulos. UZ de C = −0,2375 mm.                                                               |
+| Carga uniforme de 10 kN/m para baixo ao longo de AB | 30 kN em cada apoio        | Momento nulo nas pontas e sagente de 45 kN·m no meio do vão. Cortante de +30 kN junto a A e −30 kN junto a B na convenção de seção do KStruct. Flecha central de −33,75 mm. |
 
 No primeiro caso, as diagonais medem 5 m e a componente vertical da força em cada uma vale 4/5 do seu módulo. O deslocamento segue do trabalho virtual, somando as contribuições axiais das três barras. No segundo, para o módulo da carga uniforme q, o momento central vale qL²/8 e a flecha central em módulo vale 5qL⁴/(384EIy). As tolerâncias absolutas são 10⁻⁷ N ou N·m nos esforços, 10⁻¹⁰ m no deslocamento de C e 10⁻⁹ m na flecha de AB.
 

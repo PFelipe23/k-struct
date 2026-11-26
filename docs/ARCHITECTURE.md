@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v11, migração v1 a v10, geometria, validação e histórico     | `src/domain`                 |
+| Domínio           | Formato v11, migração v1 a v10, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -73,6 +73,7 @@ Na laje, a pressão pZ é armazenada em N/m² em cada padrão de carga. A interf
 
 - O formato v7 guarda os grupos nomeados como conjuntos explícitos de pares tipo/ID. Ao migrar um arquivo anterior, mantém as associações válidas de grupos existentes ou cria uma lista vazia. A seleção transitória pertence à interface. Excluir uma peça limpa suas associações no mesmo passo do histórico.
 - Um objeto de projeto validado é a única fonte de verdade das vistas e propriedades.
+- Cada barra pode guardar ligações locais independentes em i e j. Campos omitidos representam vínculos rígidos, mantendo a compatibilidade dos projetos v11. A malha e o adaptador de análise derivam nós de ponta e molas, sem transformar esses nós em objetos do modelo. Dividir transfere as ligações para as pontas externas dos trechos; inverter conserva o estado na mesma ponta física.
 - Os resultados de casos estáticos ficam em memória por ID do caso durante a revisão atual. A combinação usa esses resultados, alinhando apoios e nós por ID e esforços por barra e posição na malha. Parcelas com fator zero dispensam uma análise do caso correspondente.
 - O envelope compara as combinações escolhidas em cada estação e preserva o vetor inteiro de esforços da combinação que gera cada mínimo ou máximo. Empates usam a ordem de seleção das combinações. A interface cancela o cálculo do envelope quando muda a revisão ou a definição consultada.
 - O CSV registra os IDs e nomes de origem. Para combinações e envelopes, registra também os casos e fatores da composição governante. Os arquivos de projeto armazenam as definições de carga, combinação e envelope.

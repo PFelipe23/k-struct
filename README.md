@@ -12,7 +12,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
-- Editar coordenadas, apoios em referenciais globais ou inclinados, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
+- Editar coordenadas, apoios em referenciais globais ou inclinados, ligações rígidas, livres ou elásticas nas pontas das barras, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.

@@ -184,13 +184,15 @@ export default function WorkPlaneView({
   useLayoutEffect(() => {
     const svg = ref.current!;
     const measure = ({ width, height }: DOMRectReadOnly) =>
-      setSize(previous =>
+      setSize((previous) =>
         previous.width === width && previous.height === height
           ? previous
           : { width, height },
       );
     measure(svg.getBoundingClientRect());
-    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect));
+    const observer = new ResizeObserver(([entry]) =>
+      measure(entry.contentRect),
+    );
     observer.observe(svg);
     return () => observer.disconnect();
   }, [tool, plane.kind, plane.offset, units.length, relativeError]);
@@ -295,11 +297,13 @@ export default function WorkPlaneView({
       uGuides,
       vGuides,
     });
-    if (candidate.kind === "grid") candidate.label = `Malha ${displayLength(0.5)} ${units.length}`;
+    if (candidate.kind === "grid")
+      candidate.label = `Malha ${displayLength(0.5)} ${units.length}`;
     return candidate;
   };
 
-  const displayLength = (si: number) => fromSI(si, "length", units).toFixed(2).replace(".", ",");
+  const displayLength = (si: number) =>
+    fromSI(si, "length", units).toFixed(2).replace(".", ",");
   const parsedDeltaU = toSI(parseDecimalInput(deltaU), "length", units);
   const parsedDeltaV = toSI(parseDecimalInput(deltaV), "length", units);
   const hasRelativeBoth =
@@ -323,7 +327,12 @@ export default function WorkPlaneView({
             parsedDeltaV,
             plane,
           );
-          if (!Number.isFinite(target[axisU]) || !Number.isFinite(target[axisV]) || !Number.isFinite(relativeDistance)) return null;
+          if (
+            !Number.isFinite(target[axisU]) ||
+            !Number.isFinite(target[axisV]) ||
+            !Number.isFinite(relativeDistance)
+          )
+            return null;
           return {
             u: target[axisU],
             v: target[axisV],
@@ -776,6 +785,40 @@ export default function WorkPlaneView({
                 }
                 strokeWidth={active ? 4 : 2.5}
               />
+              {display === "model" &&
+                (["i", "j"] as const).flatMap((end) => {
+                  const connection =
+                    end === "i" ? m.connectionI : m.connectionJ;
+                  if (!connection) return [];
+                  const activeDofs =
+                    project.mode === "spatial"
+                      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+                      : (["ux", "uz", "ry"] as const);
+                  const released = activeDofs.filter(
+                    (dof) => connection[dof].kind !== "rigid",
+                  );
+                  if (!released.length) return [];
+                  const t = end === "i" ? 0 : 1;
+                  const x = sx(u + du * t);
+                  const y = sy(v + dv * t);
+                  return [
+                    <g
+                      key={`connection-${end}`}
+                      className="connection-release-marker"
+                      data-member-connection-end={end}
+                      aria-label={`Ligação ${end} liberada: ${released.join(", ")}`}
+                      pointerEvents="none"
+                    >
+                      <circle cx={x} cy={y} r="5.5" />
+                      <title>{`Ligação ${end}: ${released
+                        .map(
+                          (dof) =>
+                            `${dof.toUpperCase()} ${connection[dof].kind === "free" ? "livre" : "elástica"}`,
+                        )
+                        .join(", ")}`}</title>
+                    </g>,
+                  ];
+                })}
               <line
                 x1={sx(u)}
                 y1={sy(v)}
@@ -1234,7 +1277,9 @@ export default function WorkPlaneView({
             {displayLength(relativeAnchor[axisV])}) {units.length}
           </span>
           <label>
-            <span>Δ{axisU.toUpperCase()} ({units.length})</span>
+            <span>
+              Δ{axisU.toUpperCase()} ({units.length})
+            </span>
             <input
               aria-label={`Δ${axisU.toUpperCase()} (${units.length})`}
               aria-invalid={relativeInvalid.u}
@@ -1257,7 +1302,9 @@ export default function WorkPlaneView({
             />
           </label>
           <label>
-            <span>Δ{axisV.toUpperCase()} ({units.length})</span>
+            <span>
+              Δ{axisV.toUpperCase()} ({units.length})
+            </span>
             <input
               aria-label={`Δ${axisV.toUpperCase()} (${units.length})`}
               aria-invalid={relativeInvalid.v}
@@ -1305,9 +1352,9 @@ export default function WorkPlaneView({
               }`
             : cursor && !quick
               ? `${axisU.toUpperCase()} ${fromSI(cursor.u, "length", units).toFixed(2)} · ${axisV.toUpperCase()} ${fromSI(cursor.v, "length", units).toFixed(2)} ${units.length}`
-            : display === "deformed"
-              ? `Deformada ×${deformationScale.toFixed(1)}`
-              : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
+              : display === "deformed"
+                ? `Deformada ×${deformationScale.toFixed(1)}`
+                : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
         </span>
       </div>
     </section>

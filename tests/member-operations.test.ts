@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMember } from "../src/domain/editing";
+import { addMember, reverseMember } from "../src/domain/editing";
 import { distance, origin } from "../src/domain/geometry";
 import {
   planMemberEdit,
@@ -10,6 +10,7 @@ import {
   addPoint,
   beamExample,
   createProject,
+  defaultEndConnection,
   free,
   nodalLoad,
   parseProject,
@@ -49,6 +50,22 @@ function totalZ(p: Project, pattern = 0) {
   );
 }
 describe("edição de barras físicas", () => {
+  it("preserva as ligações físicas externas ao dividir e inverter i/j", () => {
+    const project = beamExample();
+    project.members[0].connectionI = defaultEndConnection();
+    project.members[0].connectionI.ry = { kind: "elastic", stiffness: 4200 };
+    project.members[0].connectionJ = defaultEndConnection();
+    project.members[0].connectionJ.ry = { kind: "free" };
+    const plan = planMemberEdit(project, split);
+    const [first, second] = plan.project.members;
+    expect(first.connectionI?.ry).toEqual({ kind: "elastic", stiffness: 4200 });
+    expect(first.connectionJ).toBeUndefined();
+    expect(second.connectionI).toBeUndefined();
+    expect(second.connectionJ?.ry).toEqual({ kind: "free" });
+
+    reverseMember(plan.project, first.id);
+    expect(first.connectionJ?.ry).toEqual({ kind: "elastic", stiffness: 4200 });
+  });
   it("divide em 2 e 4 m, reaproveita o nó e redistribui todos os padrões e grupos", () => {
     const p = beamExample(),
       existing = addPoint(p, { ...origin, x: 2 });
