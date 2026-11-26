@@ -199,7 +199,20 @@ Execute `OOFEM_BIN=/caminho/absoluto/oofem npm run check`. O fluxo de interface 
 
 ## Ainda não validado nesta etapa
 
-Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberações, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, offsets, molas acopladas, dimensionamento e desempenho em grandes modelos.
+
+## KS-21 · liberações e ligações semirrígidas
+
+O formato v25 registra a ligação por componente nos eixos locais de cada extremidade. Uma barra de arquivos anteriores mantém todas as direções rígidas, salvo se o arquivo experimental já informar a ligação. O adaptador usa um `RigidArmNode` coincidente com a face e uma `Spring` por direção elástica. A saída da face é transformada para eixos globais. Os deslocamentos do nó de lançamento e da face da barra podem ser consultados separadamente. [Transformação do nó na versão fixada](https://github.com/oofem/oofem/blob/v3.0/src/core/rigidarmnode.C)
+
+Na viga de 6 m com −10 kN/m, a ligação articulada dá 30/30 kN e momento de ponta nulo. A ligação rígida em A dá 37,5/22,5 kN e |M_A| = 45 kN·m. Com kθ = 3EI/L, |M_A| = 22,5 kN·m e M/Δθ reproduz a rigidez com erro inferior a 1%, inclusive invertendo a barra e alterando as subdivisões.
+
+Ao liberar RY em ambas as extremidades, verifique 30 kN em cada apoio e |M| = 45 kN·m no meio do vão, em XZ e XYZ. Os ensaios admitem 1 N·m nas pontas e 0,5 N·m no meio do vão. Uma rotação desconectada e descarregada recebe um valor de referência nulo. Um momento efetivo nessa direção identifica o mecanismo antes de executar o solver. Um padrão fora do caso, um fator zero e momentos de padrões distintos que se anulam preservam o resultado. Uma mola nodal de 20.000 N·m/rad submetida a 100 N·m gira 0,005 rad e preserva o momento nulo na ponta articulada. As regressões incluem a rotação do sistema espacial e a leitura independente da rotação da face.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/oofem.integration.test.ts -t KS-21
+npm run test:e2e -- member-connections.spec.ts
+```
 
 ## KS-18 · seções de barras e balanço espacial
 

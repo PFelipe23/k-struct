@@ -40,12 +40,14 @@ import { setPrescribedMotion } from "../domain/prescribedMotions";
 import { setRigidSupport, setSpring } from "../domain/supports";
 import {
   free,
+  defaultEndConnection,
   nodalLoad,
   slabDivisionLimit,
   uniformLoad,
   type NodalLoad,
   type UniformLoad,
   type Project,
+  type EndConnection,
   type SelectedObject,
   type Slab,
 } from "../domain/model";
@@ -449,6 +451,19 @@ export default function Inspector({
       emptyThermal(member.id));
   const extents = sectionExtents(section);
   const ul = sumUniform(pattern, member?.id ?? "");
+  const updateMemberConnection = (
+    end: "i" | "j",
+    dof: keyof EndConnection,
+    kind: "rigid" | "free" | "elastic",
+    stiffness = 0,
+  ) =>
+    edit((draft) => {
+      const target = draft.members.find((item) => item.id === member?.id)!;
+      const key = end === "i" ? "connectionI" : "connectionJ";
+      const connection = target[key] ?? defaultEndConnection();
+      connection[dof] = kind === "elastic" ? { kind, stiffness } : { kind };
+      target[key] = connection;
+    });
   const start = member && p.nodes.find((n) => n.id === member.start)!;
   const end = member && p.nodes.find((n) => n.id === member.end)!;
   const line =
@@ -813,6 +828,67 @@ export default function Inspector({
               A inversão conserva a orientação física da seção e as cargas
               globais.
             </p>
+            <h4>Ligações nas extremidades</h4>
+            <p className="help">
+              Escolha o vínculo de cada componente nos eixos locais da barra.
+            </p>
+            {(
+              [
+                ["ux", "Ux"],
+                ...(spatial ? [["uy", "Uy"]] : []),
+                ["uz", "Uz"],
+                ...(spatial ? [["rx", "Rx"]] : []),
+                ["ry", "Ry"],
+                ...(spatial ? [["rz", "Rz"]] : []),
+              ] as [keyof EndConnection, string][]
+            ).map(([dof, label]) =>
+              (["i", "j"] as const).map((end) => {
+                const value = member[
+                  end === "i" ? "connectionI" : "connectionJ"
+                ]?.[dof] ?? { kind: "rigid" as const };
+                const component = value.kind === "elastic" ? value : null;
+                return (
+                  <div className="connection-editor" key={`${end}-${dof}`}>
+                    <label className="stack-field">
+                      Ligação {end} · {label}
+                      <select
+                        aria-label={`Ligação ${end} · ${label}`}
+                        value={value.kind}
+                        onChange={(event) =>
+                          updateMemberConnection(
+                            end,
+                            dof,
+                            event.target.value as "rigid" | "free" | "elastic",
+                            component?.stiffness ?? 1,
+                          )
+                        }
+                      >
+                        <option value="rigid">Rígida</option>
+                        <option value="free">Livre</option>
+                        <option value="elastic">Elástica</option>
+                      </select>
+                    </label>
+                    {component && (
+                      <NumberField
+                        label={`Rigidez ${end} · ${label}`}
+                        quantity={
+                          dof.startsWith("r")
+                            ? "rotationStiffness"
+                            : "translationStiffness"
+                        }
+                        value={component.stiffness}
+                        validate={(v) =>
+                          v > 0 ? undefined : "Informe uma rigidez positiva."
+                        }
+                        onChange={(value) =>
+                          updateMemberConnection(end, dof, "elastic", value)
+                        }
+                      />
+                    )}
+                  </div>
+                );
+              }),
+            )}
             <label className="stack-field">
               Seção
               <select

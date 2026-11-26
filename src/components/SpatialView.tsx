@@ -604,6 +604,36 @@ export default function SpatialView({
       );
       line.userData.selection = { kind: "member", id: m.id };
       s.model.add(line);
+      const activeDofs =
+        project.mode === "spatial"
+          ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+          : (["ux", "uz", "ry"] as const);
+      for (const [end, connection, point] of [
+        ["i", m.connectionI, a],
+        ["j", m.connectionJ, b],
+      ] as const) {
+        if (!connection) continue;
+        const released = activeDofs.filter(
+          (dof) => connection[dof].kind !== "rigid",
+        );
+        if (!released.length) continue;
+        const element = document.createElement("span");
+        const details = released.map(
+          (dof) =>
+            `${dof.toUpperCase()} ${connection[dof].kind === "free" ? "livre" : "elástica"}`,
+        );
+        element.className = "scene-connection-release";
+        element.dataset.memberConnectionEnd = end;
+        element.setAttribute(
+          "aria-label",
+          `Ligação ${end} liberada: ${details.join(", ")}`,
+        );
+        element.title = `Ligação ${end}: ${details.join(", ")}`;
+        element.textContent = "○";
+        const marker = new CSS2DObject(element);
+        marker.position.copy(scenePoint(point));
+        s.model.add(marker);
+      }
       if (m.offsets) {
         if (distance(a, axis.start) || distance(b, axis.end)) {
           const launch = new THREE.Line(

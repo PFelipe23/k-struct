@@ -91,7 +91,30 @@ const legacySection = z
 const legacyMember = z
   .object({ id, name: text, start: id, end: id, sectionId: id })
   .strict();
-const memberSchema = legacyMember.extend({ roll: finite.min(-360).max(360) });
+export const connectionComponentSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("rigid") }).strict(),
+  z.object({ kind: z.literal("free") }).strict(),
+  z
+    .object({ kind: z.literal("elastic"), stiffness: finite.positive() })
+    .strict(),
+]);
+export const endConnectionSchema = z
+  .object({
+    ux: connectionComponentSchema,
+    uy: connectionComponentSchema,
+    uz: connectionComponentSchema,
+    rx: connectionComponentSchema,
+    ry: connectionComponentSchema,
+    rz: connectionComponentSchema,
+  })
+  .strict();
+export type ConnectionComponent = z.infer<typeof connectionComponentSchema>;
+export type EndConnection = z.infer<typeof endConnectionSchema>;
+const memberSchema = legacyMember.extend({
+  roll: finite.min(-360).max(360),
+  connectionI: endConnectionSchema.optional(),
+  connectionJ: endConnectionSchema.optional(),
+});
 const legacyNodal = z
   .object({ nodeId: id, fx: finite, fz: finite, my: finite })
   .strict();
@@ -628,9 +651,12 @@ const polygonSlab = slabSchema
         .max(maxSlabRings),
     }),
   });
-export const projectSchema = projectV23.extend({
+const projectV24 = projectV23.extend({
   schemaVersion: z.literal(24),
   slabs: z.array(z.union([rectangleSlab, polygonSlab])).max(1),
+});
+export const projectSchema = projectV24.extend({
+  schemaVersion: z.literal(25),
 });
 export function defaultSelfWeight() {
   return {
@@ -672,6 +698,15 @@ export const free = () => ({
   ry: false,
   rz: false,
 });
+export const rigidConnectionComponent = () => ({ kind: "rigid" as const });
+export const defaultEndConnection = () => ({
+  ux: rigidConnectionComponent(),
+  uy: rigidConnectionComponent(),
+  uz: rigidConnectionComponent(),
+  rx: rigidConnectionComponent(),
+  ry: rigidConnectionComponent(),
+  rz: rigidConnectionComponent(),
+});
 export const nodalLoad = (nodeId: string): NodalLoad => ({
   nodeId,
   fx: 0,
@@ -708,7 +743,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 24,
+    schemaVersion: 25,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1120,6 +1155,15 @@ export function parseProject(source: string): Project {
     const old = projectV23.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 24 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 24
+  ) {
+    const old = projectV24.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 25 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1163,7 +1207,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 24, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 25, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)

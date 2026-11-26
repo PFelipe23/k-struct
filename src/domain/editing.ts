@@ -141,6 +141,10 @@ export function reverseMember(p: Project, id: string) {
   const nodes = new Map(p.nodes.map((n) => [n.id, n]));
   const from = pointLoadFrame(member, nodes, p.mode);
   [member.start, member.end] = [member.end, member.start];
+  [member.connectionI, member.connectionJ] = [
+    member.connectionJ,
+    member.connectionI,
+  ];
   if (member.offsets)
     member.offsets = { i: member.offsets.j, j: member.offsets.i };
   // In Beam3d, z at zero roll is even in x and y is odd. Negating roll
@@ -439,6 +443,8 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
         nodes.get(child.start)!,
         nodes.get(child.end)!,
       );
+      if (i > 0) delete child.connectionI;
+      if (i < joints.length - 2) delete child.connectionJ;
       const error = offsetError(
         child,
         nodes.get(child.start)!,

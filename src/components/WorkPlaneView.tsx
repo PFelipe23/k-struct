@@ -982,6 +982,40 @@ export default function WorkPlaneView({
                 }
                 strokeWidth={active ? 4 : 2.5}
               />
+              {display === "model" &&
+                (["i", "j"] as const).flatMap((end) => {
+                  const connection =
+                    end === "i" ? m.connectionI : m.connectionJ;
+                  if (!connection) return [];
+                  const activeDofs =
+                    project.mode === "spatial"
+                      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+                      : (["ux", "uz", "ry"] as const);
+                  const released = activeDofs.filter(
+                    (dof) => connection[dof].kind !== "rigid",
+                  );
+                  if (!released.length) return [];
+                  const t = end === "i" ? 0 : 1;
+                  const x = sx(u + du * t);
+                  const y = sy(v + dv * t);
+                  return [
+                    <g
+                      key={`connection-${end}`}
+                      className="connection-release-marker"
+                      data-member-connection-end={end}
+                      aria-label={`Ligação ${end} liberada: ${released.join(", ")}`}
+                      pointerEvents="none"
+                    >
+                      <circle cx={x} cy={y} r="5.5" />
+                      <title>{`Ligação ${end}: ${released
+                        .map(
+                          (dof) =>
+                            `${dof.toUpperCase()} ${connection[dof].kind === "free" ? "livre" : "elástica"}`,
+                        )
+                        .join(", ")}`}</title>
+                    </g>,
+                  ];
+                })}
               <line
                 x1={sx(u)}
                 y1={sy(v)}
