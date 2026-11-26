@@ -10,6 +10,10 @@ import { runDeck } from "../fixtures/solve-oofem";
 import { openProjectInBrowser } from "../fixtures/open-project";
 import { familyBeam } from "../fixtures/combination-families";
 import { twoSpanBeam } from "../fixtures/two-span-beam";
+import {
+  planarNodalEnvelope,
+  spatialNodalEnvelope,
+} from "../fixtures/nodal-envelopes";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
 // OOFEM benchmark, not an alternative solver or a fallback in the application.
@@ -1350,4 +1354,213 @@ test("gera ELU/ELS, revisa exclusões e edições, salva e usa a combinação na
       ),
     ).toEqual(["G", "Q1", "Q2"]);
   }
+});
+
+async function downloadNodalCsv(page: Page) {
+  await page.evaluate(() => Object.assign(window, { isTauri: false }));
+  const pending = page.waitForEvent("download");
+  await page
+    .getByRole("region", { name: "Resultados do envelope" })
+    .getByRole("button", { name: "CSV", exact: true })
+    .click();
+  const csv = await readFile((await (await pending).path())!, "utf8");
+  const [headers, ...lines] = csv
+    .trim()
+    .split("\n")
+    .map((line) =>
+      Array.from(
+        line.matchAll(/("(?:[^"]|"")*"|[^;]+)(?:;|$)/g),
+        ([, field]) =>
+          field.startsWith('"')
+            ? field.slice(1, -1).replaceAll('""', '"')
+            : field,
+      ),
+    );
+  return lines.map((line) =>
+    Object.fromEntries(headers.map((key, i) => [key, line[i]])),
+  );
+}
+
+test("envelope nodal XZ consulta as componentes ativas e retira tabela e CSV após edição", async ({
+  page,
+}) => {
+  const executable = process.env.OOFEM_BIN;
+  if (executable)
+    await page.exposeFunction("solveQueueDeck", (deck: string) =>
+      runDeck(deck, executable),
+    );
+  await bridge(page, { realSolver: !!executable });
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "viga.kstruct.json",
+    serializeProject(planarNodalEnvelope()),
+  );
+  await page
+    .getByLabel("Caso, combinação ou envelope")
+    .selectOption("envelope:E");
+  const region = page.getByRole("region", { name: "Resultados do envelope" });
+  await region.getByRole("button", { name: "Reações de apoio" }).click();
+  await page
+    .getByRole("button", { name: "Analisar casos necessários" })
+    .click();
+  const component = region.getByLabel("Componente nodal");
+  await expect(component.locator("option")).toHaveText(["Fx", "Fz", "My"]);
+  await component.selectOption("fz");
+  const reaction = region.getByRole("table", {
+    name: "Reações simultâneas do envelope",
+  });
+  await expect(reaction.getByRole("row", { name: /Mínimo/ })).toContainText(
+    "Invertida [B]",
+  );
+  await expect(
+    reaction.getByRole("row", { name: /Máximo/ }).locator(".governing-force"),
+  ).toHaveText("30");
+  const reactions = await downloadNodalCsv(page);
+  expect(reactions).toHaveLength(2);
+  expect(reactions[0]).toMatchObject({
+    "ID do nó": "A",
+    "ID da combinação": "B",
+    "Fz (kN)": "-60",
+  });
+  await region.getByRole("button", { name: "Deslocamentos nodais" }).click();
+  await expect(component.locator("option")).toHaveText(["Ux", "Uz", "Ry"]);
+  await region.getByLabel("Nó do envelope").selectOption("B");
+  await component.selectOption("ry");
+  const displacements = await downloadNodalCsv(page);
+  expect(displacements[1]).toMatchObject({
+    "ID do nó": "B",
+    "ID da combinação": "B",
+  });
+  expect(Number(displacements[1]["Ry (mrad)"])).toBeCloseTo(9, 6);
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  await page.getByLabel("qZ global", { exact: true }).fill("-20");
+  await page.getByLabel("qZ global", { exact: true }).press("Enter");
+  await expect(region.getByRole("status")).toContainText(
+    "Analise os casos pendentes",
+  );
+  await expect(region.getByRole("table")).toHaveCount(0);
+  await expect(
+    region.getByRole("button", { name: "CSV", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("envelope nodal XYZ exporta as seis componentes simultâneas e a origem de cada apoio após troca de base e unidades", async ({
+  page,
+}) => {
+  const executable = process.env.OOFEM_BIN;
+  test.skip(!executable, "Configure OOFEM_BIN para o pórtico espacial.");
+  await page.exposeFunction("solveQueueDeck", (deck: string) =>
+    runDeck(deck, executable!),
+  );
+  await bridge(page, { realSolver: true });
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "portico-nodal.kstruct.json",
+    serializeProject(spatialNodalEnvelope()),
+  );
+  await page
+    .getByLabel("Caso, combinação ou envelope")
+    .selectOption("envelope:E");
+  await page
+    .getByRole("button", { name: "Analisar casos necessários" })
+    .click();
+  const region = page.getByRole("region", { name: "Resultados do envelope" });
+  await region.getByRole("button", { name: "Reações de apoio" }).click();
+  const component = region.getByLabel("Componente nodal");
+  await expect(component.locator("option")).toHaveText([
+    "Fx",
+    "Fy",
+    "Fz",
+    "Mx",
+    "My",
+    "Mz",
+  ]);
+  await region.getByLabel("Apoio do envelope").selectOption("N7");
+  await component.selectOption("fy");
+  const maximum = region.getByRole("row", { name: /Máximo/ });
+  await expect(maximum).toContainText("Combinação B [B]");
+  await region.getByLabel("Referencial do envelope").selectOption("local");
+  await expect(maximum).toContainText("Combinação A [A]");
+  await expect(maximum.locator(".governing-force")).toHaveText("3,46889");
+  await component.selectOption("fx");
+  await region.getByLabel("Apoio do envelope").selectOption("");
+  const first = await downloadNodalCsv(page);
+  expect(first).toHaveLength(6);
+  const maxima = first.filter((r) => r.Extremo === "Máximo");
+  expect(
+    maxima.map((r) => [r["ID do nó"], r.Referencial, r["ID da combinação"]]),
+  ).toEqual([
+    ["N7", "Local do apoio", "B"],
+    ["N8", "Global", "B"],
+    ["N9", "Global", "A"],
+  ]);
+  expect(maxima[0]["Tipo da origem"]).toBe("Combinação linear");
+  expect(JSON.parse(maxima[0]["Parcelas (ID, nome do caso e fator)"])).toEqual([
+    { caseId: "G", name: "Carga permanente", factor: 0.7 },
+    { caseId: "W", name: "Carga na cobertura", factor: -1.1 },
+  ]);
+  const axes = JSON.parse(
+    maxima[0]["Eixos do referencial em coordenadas globais"],
+  );
+  expect(axes.x.x).toBeCloseTo(0.6, 12);
+  expect(axes.x.y).toBeCloseTo(0.8, 12);
+  await region.getByRole("button", { name: "Deslocamentos nodais" }).click();
+  await region.getByLabel("Nó do envelope").selectOption("N5");
+  await expect(component.locator("option")).toHaveText([
+    "Ux",
+    "Uy",
+    "Uz",
+    "Rx",
+    "Ry",
+    "Rz",
+  ]);
+  await component.selectOption("uz");
+  const before = await downloadNodalCsv(page);
+  expect(Number(before[1]["Uz (mm)"])).toBeCloseTo(-0.001739746, 8);
+  expect(before[1]["ID da combinação"]).toBe("B");
+  await page.getByRole("button", { name: "Exibição", exact: true }).click();
+  await page.getByRole("button", { name: "Unidades", exact: true }).click();
+  const units = page.getByRole("dialog", { name: "Unidades", exact: true });
+  for (const [name, unit] of [
+    ["Deslocamentos", "m"],
+    ["Forças", "N"],
+    ["Momentos", "N·m"],
+  ])
+    await units.getByRole("combobox", { name, exact: true }).selectOption(unit);
+  await units.getByRole("button", { name: "Aplicar unidades" }).click();
+  const after = await downloadNodalCsv(page);
+  for (const [i, row] of after.entries()) {
+    expect(row["ID da combinação"]).toBe(before[i]["ID da combinação"]);
+    for (const key of ["Ux", "Uy", "Uz"])
+      expect(Number(row[`${key} (m)`])).toBeCloseTo(
+        Number(before[i][`${key} (mm)`]) / 1000,
+        12,
+      );
+    for (const key of ["Rx", "Ry", "Rz"])
+      expect(row[`${key} (mrad)`]).toBe(before[i][`${key} (mrad)`]);
+  }
+  await region.getByRole("button", { name: "Reações de apoio" }).click();
+  await region.getByLabel("Apoio do envelope").selectOption("");
+  await region.getByLabel("Referencial do envelope").selectOption("local");
+  const inSI = await downloadNodalCsv(page);
+  for (const [i, row] of inSI.entries()) {
+    expect(row["ID da combinação"]).toBe(first[i]["ID da combinação"]);
+    for (const key of ["Fx", "Fy", "Fz", "Mx", "My", "Mz"]) {
+      const unit = key[0] === "F" ? "N" : "N·m";
+      expect(Number(row[`${key} (${unit})`])).toBeCloseTo(
+        1000 * Number(first[i][`${key} (k${unit})`]),
+        8,
+      );
+    }
+  }
+  expect(
+    await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("e2e-case-starts") ?? "[]"),
+    ),
+  ).toHaveLength(2);
 });

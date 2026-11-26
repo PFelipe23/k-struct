@@ -4,11 +4,13 @@ import {
   type BeamStation,
 } from "../domain/beamMesh";
 import type { Project, ResultCombination } from "../domain/model";
-import { hasSupport } from "../domain/supports";
+import {
+  hasSupport,
+  supportDofs as displacementComponents,
+} from "../domain/supports";
+import { reactionComponents } from "./nodalResults";
 import type { AnalysisResult, Station, StructuralResult } from "./oofem";
 
-const displacementComponents = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
-const reactionComponents = ["fx", "fy", "fz", "mx", "my", "mz"] as const;
 export const memberForceComponents = [
   "n",
   "v",
@@ -86,7 +88,7 @@ export function requireAvailableCases(
   }
 }
 
-function weightedCases(
+export function weightedCases(
   project: Project,
   combination: ResultCombination,
   caseResults: ReadonlyMap<string, AnalysisResult>,
@@ -135,6 +137,39 @@ export function prepareMemberForces(
     sumStations(memberForceComponents, cases, layout, memberId);
 }
 
+export function prepareNodalCombination(
+  project: Project,
+  cases: WeightedCase[],
+) {
+  const supportCount = project.nodes.filter(hasSupport).length;
+  const indexed = cases.map((term) => {
+    const reactions = new Map(
+      term.result.reactions.map((item) => [item.nodeId, item]),
+    );
+    if (
+      reactions.size !== supportCount ||
+      reactions.size !== term.result.reactions.length ||
+      Object.keys(term.result.displacements).length !== project.nodes.length
+    )
+      throw new Error(
+        "Os nós ou apoios do resultado são incompatíveis com esta revisão.",
+      );
+    return { ...term, reactions };
+  });
+  return {
+    displacement: (id: string) =>
+      sumComponents(
+        displacementComponents,
+        indexed,
+        ({ result }) => result.displacements[id],
+      ),
+    reaction: (id: string) =>
+      sumComponents(reactionComponents, indexed, ({ reactions }) =>
+        reactions.get(id),
+      ),
+  };
+}
+
 // The caller supplies parsed linear-static results from the current model revision.
 export function combineLinearResults(
   project: Project,
@@ -142,29 +177,13 @@ export function combineLinearResults(
   caseResults: ReadonlyMap<string, AnalysisResult>,
 ): StructuralResult {
   const cases = weightedCases(project, combination, caseResults);
-  const reactionCases = cases.map((term) => ({
-    ...term,
-    reactions: new Map(
-      term.result.reactions.map((item) => [item.nodeId, item]),
-    ),
-  }));
-
+  const nodal = prepareNodalCombination(project, cases);
   const displacements = Object.fromEntries(
-    project.nodes.map(({ id }) => [
-      id,
-      sumComponents(
-        displacementComponents,
-        cases,
-        ({ result }) => result.displacements[id],
-      ),
-    ]),
+    project.nodes.map(({ id }) => [id, nodal.displacement(id)]),
   );
-  const reactions = project.nodes.filter(hasSupport).map(({ id }) => ({
-    nodeId: id,
-    ...sumComponents(reactionComponents, reactionCases, (term) =>
-      term.reactions.get(id),
-    ),
-  }));
+  const reactions = project.nodes
+    .filter(hasSupport)
+    .map(({ id }) => ({ nodeId: id, ...nodal.reaction(id) }));
   const layout = beamStations(project);
   const members = Object.fromEntries(
     project.members.map(({ id }) => [

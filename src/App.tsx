@@ -121,7 +121,9 @@ import SlabResults, {
   slabDisplays,
   type SlabDisplay,
 } from "./components/SlabResults";
-import EnvelopeResults from "./components/EnvelopeResults";
+import EnvelopeResults, {
+  type EnvelopeView,
+} from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
 import LoadDefinitions, {
@@ -131,9 +133,9 @@ import { version } from "../package.json";
 import { combineLinearResults, requiredCaseIds } from "./solver/combinations";
 import {
   envelopeCombinations,
-  evaluateMemberEnvelope,
+  evaluateEnvelope,
   type EnvelopeSection,
-  type MemberEnvelopeResult,
+  type EnvelopeResult,
 } from "./solver/envelopes";
 import {
   exportOofem,
@@ -326,6 +328,7 @@ export default function App() {
     kind: "combination" | "envelope";
     id: string;
   } | null>(null);
+  const [envelopeView, setEnvelopeView] = useState<EnvelopeView>("members");
   const [preferredSection, setPreferredSection] =
     useState<EnvelopeSection | null>(null);
   const [forceMemberId, setForceMemberId] = useState("");
@@ -335,7 +338,7 @@ export default function App() {
     project: Project;
     envelope: ResultEnvelope;
     cases: ReadonlyMap<string, AnalysisResult>;
-    result: MemberEnvelopeResult | null;
+    result: EnvelopeResult | null;
     problem: string;
   } | null>(null);
   const analysisCase =
@@ -415,7 +418,7 @@ export default function App() {
     }
     const controller = new AbortController();
     const context = { project: p, envelope, cases: caseResults };
-    void evaluateMemberEnvelope(
+    void evaluateEnvelope(
       p,
       envelope,
       caseResults,
@@ -465,7 +468,8 @@ export default function App() {
         ? "my"
         : "m"
       : beamDisplay;
-  const showEnvelope = Boolean(envelopeResult) && tool === "select";
+  const showEnvelope =
+    Boolean(envelopeResult) && envelopeView === "members" && tool === "select";
   const result = envelope ? null : combined ? combined.result : caseResult;
   const visibleDisplay = showEnvelope
     ? envelopeComponent
@@ -542,6 +546,7 @@ export default function App() {
       (item) => `envelope:${item.id}` === value,
     );
     if (selectedEnvelope) {
+      setEnvelopeView("members");
       setDerivedChoice({ kind: "envelope", id: selectedEnvelope.id });
       setTool("select");
       setPending(null);
@@ -1967,7 +1972,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   envelope={
                     showEnvelope && envelopeResult && section
                       ? {
-                          result: envelopeResult,
+                          result: envelopeResult.members,
                           section,
                           onSection: inspectSection,
                         }
@@ -2057,6 +2062,8 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             />
           ) : envelope ? (
             <EnvelopeResults
+              view={envelopeView}
+              onView={setEnvelopeView}
               key={envelope.id}
               project={p}
               envelope={envelope}
@@ -2242,6 +2249,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   : null,
             );
             if (next.envelopeId) {
+              setEnvelopeView("members");
               setTool("select");
               setPending(null);
             }

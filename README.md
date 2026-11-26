@@ -162,6 +162,8 @@ Na prévia, confira a expressão por caso, edite os coeficientes ou dispense lin
 
 Em **Cargas e casos** → **Envelopes**, dê um nome ao envelope e marque as combinações que participam. Depois de analisar seus casos, selecione o envelope e o componente de esforço. As curvas indicam o mínimo e o máximo com sinal nas estações da malha. Clique no diagrama ou escolha **Barra** e **Estação x/L** para consultar a combinação governante de cada extremo e todos os esforços que atuam simultaneamente naquela seção. O CSV inclui as estações de todas as barras para o componente em exibição, com IDs e fatores para rastrear cada extremo. Uma edição do projeto ou das definições descarta os resultados em memória.
 
+Para consultar um extremo nodal, selecione o envelope e abra **Reações de apoio** ou **Deslocamentos nodais**. Escolha o apoio ou nó, a componente e, em um apoio inclinado, o referencial. Cada linha mostra o mínimo ou máximo com sinal, a combinação que o produziu e as componentes simultâneas. **CSV** exporta a seleção nas unidades em uso. **Todos os apoios** inclui duas linhas por apoio, com a origem e os eixos de cada vetor. As reações são forças e momentos do apoio sobre a estrutura, aplicados no nó indicado. Para obter a ação da estrutura sobre a fundação, inverta o sinal das forças e dos momentos no mesmo ponto e referencial. [Ensaio dos envelopes nodais](docs/VALIDATION.md#ks-36--envelopes-nodais)
+
 Use `V` para selecionar, `N` para criar nó, `B` para criar barra, `L` para lançar laje, `Esc` para cancelar lançamento, `Delete` para excluir seleção, `Ctrl+Z` para desfazer, `Ctrl+Shift+Z` para refazer e `Ctrl+S` para salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
 
 ## Verificação

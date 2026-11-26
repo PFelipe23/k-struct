@@ -2,20 +2,20 @@ import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import { caseMotions, combinationMotions } from "../domain/prescribedMotions";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
-import {
-  hasElasticSupport,
-  supportBasis,
-  supportsDof,
-  supportToLocal,
-} from "../domain/supports";
+import { hasElasticSupport, supportBasis } from "../domain/supports";
 import type { AnalysisDiagnostic } from "../domain/diagnostics";
 import type {
   AnalysisResult,
   Displacement,
-  Reaction,
   StructuralResult,
 } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
+import {
+  localReaction,
+  localDisplacement,
+  reactionColumns,
+  displacementColumns,
+} from "../solver/nodalResults";
 import {
   DEFAULT_UNITS,
   fromSI,
@@ -78,9 +78,7 @@ export function buildResultTable(
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
-    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
-      ? ["fx", "fy", "fz", "mx", "my", "mz"]
-      : ["fx", "fz", "my"];
+    const keys = reactionColumns[project.mode];
     const hasLocal = (result?.reactions ?? []).some(
       ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
     );
@@ -101,18 +99,9 @@ export function buildResultTable(
       ];
       if (hasLocal) {
         const node = nodes.get(r.nodeId)!;
-        const basis = supportBasis(node.supportFrame);
-        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
-        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
-        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
+        const local = localReaction(r, node);
         row.push(
-          ...keys.map((key) => {
-            const axis = key[1] as "x" | "y" | "z";
-            return node.foundation ||
-              supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
-              ? fromSI(local[key], quantity(key), units)
-              : 0;
-          }),
+          ...keys.map((key) => fromSI(local[key], quantity(key), units)),
           node.supportFrame ? "Local" : "Global",
         );
       }
@@ -127,9 +116,7 @@ export function buildResultTable(
           ? caseMotions(project, view.definition)
           : combinationMotions(project, view.definition)
         : undefined;
-    const keys = spatial
-      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
-      : (["ux", "uz", "ry"] as const);
+    const keys = displacementColumns[project.mode];
     const hasLocal = project.nodes.some(
       (node) => node.supportFrame && (showImposed || hasElasticSupport(node)),
     );
@@ -172,11 +159,8 @@ export function buildResultTable(
         const row: (string | number)[] = [node?.name ?? id, ...values(d)];
         if (hasLocal) {
           const frame = node?.supportFrame;
-          const basis = supportBasis(frame);
-          const u = supportToLocal({ x: d.ux, y: d.uy, z: d.uz }, basis);
-          const r = supportToLocal({ x: d.rx, y: d.ry, z: d.rz }, basis);
           row.push(
-            ...values({ ux: u.x, uy: u.y, uz: u.z, rx: r.x, ry: r.y, rz: r.z }),
+            ...values(localDisplacement(d, supportBasis(frame))),
             frame ? "Local" : "Global",
           );
         }

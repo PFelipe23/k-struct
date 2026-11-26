@@ -1257,6 +1257,12 @@ button.primary {
   gap: 8px;
   padding-left: 10px;
 }
+.envelope-toolbar {
+  flex: none;
+  flex-wrap: wrap;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--line);
+}
 .envelope-title {
   overflow: hidden;
   text-overflow: ellipsis;
