@@ -1,3 +1,4 @@
+import { slabProperties } from "./slabPolygon";
 import type { Project } from "./model";
 import { memberAxis } from "./memberOffsets";
 import { globalIntensity } from "./memberDistributedLoads";
@@ -92,7 +93,7 @@ export function selfWeightSummary(
       slabId: slab.id,
       slabName: slab.name,
       pz,
-      totalZ: pz * slab.lengthX * slab.lengthY,
+      totalZ: pz * slabProperties(slab).area,
     };
   });
 

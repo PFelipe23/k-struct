@@ -1,4 +1,11 @@
-import type { AnalysisCase, Project, Slab } from "../domain/model";
+import { materialSample } from "../domain/polygonMesh";
+import { cross2, slabProperties, type XY } from "../domain/slabPolygon";
+import type {
+  AnalysisCase,
+  Project,
+  Slab,
+  RectangleSlab,
+} from "../domain/model";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { meshSlab, type SlabDof, type SlabMesh } from "../domain/slab";
 import { selfWeightSummary } from "../domain/selfWeight";
@@ -8,6 +15,7 @@ interface SlabInput {
   definition: Slab;
   mesh: SlabMesh;
   totalLoadZ: number;
+  centroid: XY;
 }
 
 export interface SlabSample {
@@ -34,9 +42,11 @@ export interface SlabResult {
   nodes: SlabDisplacement[];
   elements: SlabSample[];
   center: SlabSample;
+  samplePoint: XY & { relocated: boolean };
   reactions: SlabReaction[];
   totalReactionZ: number;
   totalLoadZ: number;
+  centroid: XY;
 }
 
 export function exportSlab(
@@ -72,7 +82,8 @@ export function exportSlab(
     },
     0,
   );
-  const totalLoadZ = pressureZ * (definition.lengthX * definition.lengthY);
+  const { area, centroid } = slabProperties(definition);
+  const totalLoadZ = pressureZ * area;
   if (!Number.isFinite(totalLoadZ))
     throw new Error(
       `A pressão do caso ${analysisCase.name} gera uma carga total fora do intervalo numérico.`,
@@ -106,10 +117,12 @@ export function exportSlab(
     );
   } else if (totalLoadZ !== 0) {
     // DKT uses the linear transverse shape functions for loads: integral(Ni * qZ) = qZ * A / 3.
-    const perVertex = totalLoadZ / elements.length / 3;
     const nodalForces = nodes.map(() => 0);
-    for (const element of elements)
+    for (const element of elements) {
+      const [a, b, c] = element.nodes.map((i) => nodes[i - 1]);
+      const perVertex = (pressureZ * cross2(a, b, c)) / 6;
       for (const node of element.nodes) nodalForces[node - 1] += perVertex;
+    }
     for (const node of nodes)
       conditions.push(
         `NodalLoad ${conditions.length + 1} loadTimeFunction 1 dofs 1 3 Components 1 ${nodalForces[node.number - 1]} set ${nodeSet([node.number])}`,
@@ -122,14 +135,19 @@ export function exportSlab(
     "domain 2dMindlinPlate",
     "OutputManager tstep_all dofman_all element_all",
     `ndofman ${nodes.length} nelem ${elements.length} ncrosssect 1 nmat 1 nbc ${conditions.length} nic 0 nltf 1 nset ${sets.length}`,
-    ...nodes.map(({ number, x, y, z }) => {
+    ...nodes.map(({ number, x, y, z, tangent }) => {
       // QDKT uses panel-local coordinates. Global mesh positions remain available for the maps.
       if (quad) {
         const i = (number - 1) % (definition.divisionsX + 1);
         const j = Math.floor((number - 1) / (definition.divisionsX + 1));
         return `Node ${number} coords 3 ${(i / definition.divisionsX) * definition.lengthX} ${(j / definition.divisionsY) * definition.lengthY} 0`;
       }
-      return `Node ${number} coords 3 ${x} ${y} ${z}`;
+      const axes = tangent
+        ? ` lcs 6 ${tangent.x} ${tangent.y} 0 ${-tangent.y} ${tangent.x} 0`
+        : "";
+      if (definition.polygon)
+        return `Node ${number} coords 3 ${x - nodes[0].x} ${y - nodes[0].y} 0${axes}`;
+      return `Node ${number} coords 3 ${x} ${y} ${z}${axes}`;
     }),
     ...elements.map(
       ({ number, nodes }) =>
@@ -142,7 +160,10 @@ export function exportSlab(
     ...sets,
     "",
   ].join("\n");
-  return { deck, slab: { definition, mesh, totalLoadZ } satisfies SlabInput };
+  return {
+    deck,
+    slab: { definition, mesh, totalLoadZ, centroid } satisfies SlabInput,
+  };
 }
 
 function gaussMoments(raw: string, count: number) {
@@ -184,11 +205,15 @@ function slabReactions(
   input: SlabInput,
   reactionMap: ReadonlyMap<string, number>,
 ) {
-  const { definition, totalLoadZ, mesh } = input;
+  const { totalLoadZ, mesh, centroid } = input;
   const reactions: SlabReaction[] = [];
-  const loadMx = totalLoadZ * (definition.lengthY / 2);
-  const loadMy = -totalLoadZ * (definition.lengthX / 2);
-  const sum = [totalLoadZ, loadMx, loadMy];
+  // Take moments about the first mesh node to avoid sensitivity to the world origin.
+  const origin = mesh.nodes[0];
+  const sum = [
+    totalLoadZ,
+    totalLoadZ * (centroid.y - origin.y),
+    -totalLoadZ * (centroid.x - origin.x),
+  ];
   const magnitudes = sum.map((value) => 1 + Math.abs(value));
   for (const node of mesh.nodes) {
     if (!node.restraints.length) continue;
@@ -201,10 +226,11 @@ function slabReactions(
         );
       return value;
     };
-    const [fz, mx, my] = slabDofs.map(get);
+    const [fz, localX, localY] = slabDofs.map(get);
+    const [mx, my] = globalPair(localX, localY, node.tangent);
     reactions.push({ node: node.number, fz, mx, my });
-    const momentX = (node.y - definition.y) * fz;
-    const momentY = -(node.x - definition.x) * fz;
+    const momentX = (node.y - origin.y) * fz;
+    const momentY = -(node.x - origin.x) * fz;
     sum[0] += fz;
     sum[1] += mx + momentX;
     sum[2] += my + momentY;
@@ -245,6 +271,12 @@ const quadCornerWeights = [
   ),
 );
 
+function globalPair(x: number, y: number, tangent?: XY) {
+  return tangent
+    ? [tangent.x * x - tangent.y * y, tangent.y * x + tangent.x * y]
+    : [x, y];
+}
+
 export function parseSlabOutput(
   raw: string,
   input: SlabInput,
@@ -252,14 +284,15 @@ export function parseSlabOutput(
   reactionMap: ReadonlyMap<string, number>,
 ): SlabResult {
   const { definition, mesh, totalLoadZ } = input;
-  const nodes = mesh.nodes.map(({ number }) => {
+  const nodes = mesh.nodes.map(({ number, tangent }) => {
     const dofs = nodeOutput.get(number);
     if (!dofs || !slabDofs.every((dof) => dofs.has(dof)))
       throw new Error(`Deslocamentos ausentes no nó ${number} da laje.`);
+    const [rx, ry] = globalPair(dofs.get(4)!, dofs.get(5)!, tangent);
     return {
       uz: dofs.get(3)!,
-      rx: dofs.get(4)!,
-      ry: dofs.get(5)!,
+      rx,
+      ry,
       mx: 0,
       my: 0,
     };
@@ -306,22 +339,16 @@ export function parseSlabOutput(
         `Momentos fora do intervalo numérico no nó ${i + 1} da laje.`,
       );
   }
-  const { divisionsX: nx, divisionsY: ny } = definition;
-  const at = (i: number, j: number) => nodes[j * (nx + 1) + i];
-  const left = Math.floor(nx / 2),
-    right = Math.ceil(nx / 2);
-  const bottom = Math.floor(ny / 2),
-    top = Math.ceil(ny / 2);
-  // The center lies on the DKT diagonal. In QDKT use bilinear interpolation.
-  const near = quad
-    ? [at(left, bottom), at(right, bottom), at(left, top), at(right, top)]
-    : [at(left, bottom), at(right, top)];
-  const center = { uz: 0, mx: 0, my: 0 };
-  for (const point of near) {
-    center.uz += point.uz / near.length;
-    center.mx += point.mx / near.length;
-    center.my += point.my / near.length;
-  }
+  let center: SlabSample;
+  let samplePoint = { ...input.centroid, relocated: false };
+  if (definition.polygon) {
+    const sample = materialSample(mesh, input.centroid);
+    samplePoint = { ...sample.point, relocated: sample.relocated };
+    center = { uz: 0, mx: 0, my: 0 };
+    for (const [i, id] of sample.face.entries())
+      for (const key of ["uz", "mx", "my"] as const)
+        center[key] += nodes[id - 1][key] * sample.weights[i];
+  } else center = rectangleCenter(definition, nodes);
   const reactions = slabReactions(input, reactionMap);
   return {
     slabId: definition.id,
@@ -329,8 +356,31 @@ export function parseSlabOutput(
     nodes,
     elements,
     center,
+    centroid: input.centroid,
+    samplePoint,
     reactions,
     totalReactionZ: reactions.reduce((sum, reaction) => sum + reaction.fz, 0),
     totalLoadZ,
   };
+}
+
+function rectangleCenter(definition: RectangleSlab, nodes: SlabDisplacement[]) {
+  const { divisionsX: nx, divisionsY: ny } = definition;
+  const at = (i: number, j: number) => nodes[j * (nx + 1) + i];
+  const left = Math.floor(nx / 2),
+    right = Math.ceil(nx / 2);
+  const bottom = Math.floor(ny / 2),
+    top = Math.ceil(ny / 2);
+  // The center lies on the DKT diagonal. In QDKT use bilinear interpolation.
+  const near =
+    definition.formulation === "qdkt"
+      ? [at(left, bottom), at(right, bottom), at(left, top), at(right, top)]
+      : [at(left, bottom), at(right, top)];
+  const center = { uz: 0, mx: 0, my: 0 };
+  for (const point of near) {
+    center.uz += point.uz / near.length;
+    center.mx += point.mx / near.length;
+    center.my += point.my / near.length;
+  }
+  return center;
 }

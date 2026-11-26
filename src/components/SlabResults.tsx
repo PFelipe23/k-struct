@@ -191,7 +191,13 @@ export default function SlabResults({
       <div className="results-body">
         {result && (
           <>
-            <table aria-label="Flecha e momentos no centro da laje">
+            <table
+              aria-label={
+                slab.polygon
+                  ? "Flecha e momentos no ponto de consulta"
+                  : "Flecha e momentos no centro da laje"
+              }
+            >
               <thead>
                 <tr>
                   <th>Local</th>
@@ -202,7 +208,30 @@ export default function SlabResults({
               </thead>
               <tbody>
                 <tr>
-                  <td>Centro do painel</td>
+                  <td>
+                    {slab.polygon ? (
+                      <>
+                        {result.samplePoint.relocated
+                          ? "Ponto material próximo ao centroide"
+                          : "Centroide da área líquida"}{" "}
+                        · X{" "}
+                        {formatResultQuantity(
+                          result.samplePoint.x,
+                          "length",
+                          units,
+                        )}{" "}
+                        · Y{" "}
+                        {formatResultQuantity(
+                          result.samplePoint.y,
+                          "length",
+                          units,
+                        )}{" "}
+                        {units.length}
+                      </>
+                    ) : (
+                      "Centro do painel"
+                    )}
+                  </td>
                   <td>
                     {formatResultQuantity(
                       result.center.uz,
@@ -225,6 +254,15 @@ export default function SlabResults({
               {unitLabel("force", units)} · Soma das reações em Z{" "}
               {formatResultQuantity(result.totalReactionZ, "force", units)}{" "}
               {unitLabel("force", units)}
+              {slab.polygon && (
+                <>
+                  {" "}
+                  · Posição da resultante em X{" "}
+                  {formatResultQuantity(result.centroid.x, "length", units)} e Y{" "}
+                  {formatResultQuantity(result.centroid.y, "length", units)}{" "}
+                  {units.length}
+                </>
+              )}
             </p>
           </>
         )}

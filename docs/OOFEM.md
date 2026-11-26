@@ -51,3 +51,9 @@ A distribuição compila a mecânica estrutural sem MPI, VTK ou bindings Python.
 O QDKT usa coordenadas locais no plano da placa e quatro bordas simplesmente apoiadas. O parser extrapola os quatro pontos de Gauss para os vértices e faz a média entre elementos adjacentes. [Implementação QDKT na versão fixada](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/qdkt.C)
 
 Veja o [caso de validação](VALIDATION.md#laje-retangular-isolada) e a [implementação DKT na versão fixada](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/dkt.C).
+
+## Painel poligonal DKT
+
+O exportador usa o domínio `2dMindlinPlate` e elementos `DKTPlate`. As coordenadas da entrada são relativas ao primeiro vértice, com os eixos paralelos a XYZ. Cada triângulo de área `A` transfere `pz A/3` a cada vértice no GL 3. Os nós compartilhados acumulam as contribuições dos elementos incidentes.
+
+Nas bordas oblíquas simplesmente apoiadas, o registro `Node … lcs 6 tx ty 0 -ty tx 0` coloca x local ao longo da borda e z local em +Z. O adaptador restringe UZ e a rotação em torno da normal à borda no plano. O encontro de duas bordas apoiadas não colineares restringe as duas rotações. A leitura da saída transforma as rotações e reações nodais nos eixos globais antes de conferir os momentos. [Referencial do nó no OOFEM 3.0](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/core/node.C) · [Verificação com a placa girada](VALIDATION.md#ks-41--painel-poligonal-com-abertura)

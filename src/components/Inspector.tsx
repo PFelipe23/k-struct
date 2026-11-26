@@ -3,6 +3,7 @@ import {
   sectionExtents,
   setThermalField,
 } from "../domain/thermalLoads";
+import SlabContourFields from "./SlabContourFields";
 import MemberOffsetsEditor from "./MemberOffsetsEditor";
 import { memberAxis, setOffsets } from "../domain/memberOffsets";
 import SectionPreview from "./SectionPreview";
@@ -233,23 +234,32 @@ function SlabFields({
         </select>
       </label>
       <h4>Geometria da laje</h4>
-      {(
-        [
-          ["x", "X inicial"],
-          ["y", "Y inicial"],
-          ["lengthX", "Lado X"],
-          ["lengthY", "Lado Y"],
-        ] as const
-      ).map(([key, label]) => (
-        <NumberField
-          key={key}
-          label={label}
-          value={slab[key]}
-          quantity="length"
-          min={key === "lengthX" || key === "lengthY" ? tolerance : undefined}
-          onChange={(value) => updateSlab({ [key]: value })}
+      {slab.polygon ? (
+        <SlabContourFields
+          slab={slab}
+          update={(rings) =>
+            updateSlab({ polygon: { ...slab.polygon, rings } })
+          }
         />
-      ))}
+      ) : (
+        (
+          [
+            ["x", "X inicial"],
+            ["y", "Y inicial"],
+            ["lengthX", "Lado X"],
+            ["lengthY", "Lado Y"],
+          ] as const
+        ).map(([key, label]) => (
+          <NumberField
+            key={key}
+            label={label}
+            value={slab[key]}
+            quantity="length"
+            min={key === "lengthX" || key === "lengthY" ? tolerance : undefined}
+            onChange={(value) => updateSlab({ [key]: value })}
+          />
+        ))
+      )}
       <NumberField
         label="Espessura"
         quantity="section"
@@ -273,71 +283,96 @@ function SlabFields({
       </label>
       <MaterialProperties material={material} />
       <button onClick={onMaterials}>Abrir material na biblioteca</button>
-      <h4>Apoios de borda</h4>
-      <p className="help">
-        Marque as bordas com apoio simples. Bordas desmarcadas ficam livres. Use
-        pelo menos duas bordas apoiadas.
-      </p>
-      <div className="restraints">
-        {(
-          [
-            ["xMin", "X mín."],
-            ["xMax", "X máx."],
-            ["yMin", "Y mín."],
-            ["yMax", "Y máx."],
-          ] as const
-        ).map(([edge, label]) => (
-          <label key={edge}>
-            <input
-              type="checkbox"
-              checked={slab.supports[edge]}
-              aria-label={`Apoio simples na borda ${label}`}
+      {slab.polygon ? (
+        <>
+          <h4>Malha de análise</h4>
+          <label className="stack-field">
+            Refinamento DKT
+            <select
+              value={slab.polygon.refinements}
               onChange={(e) =>
                 updateSlab({
-                  supports: { ...slab.supports, [edge]: e.target.checked },
+                  polygon: { ...slab.polygon, refinements: +e.target.value },
                 })
               }
-            />
-            Borda {label}
+            >
+              {[1, 2, 3].map((i) => (
+                <option key={i} value={i}>
+                  {2 ** i} divisões por lado do triângulo inicial
+                </option>
+              ))}
+            </select>
           </label>
-        ))}
-      </div>
-      <h4>Malha de análise</h4>
-      <label className="stack-field">
-        Elemento de placa
-        <select
-          value={slab.formulation}
-          onChange={(e) =>
-            updateSlab({
-              formulation: e.target.value === "dkt" ? "dkt" : "qdkt",
-            })
-          }
-        >
-          <option value="qdkt">Quadrilateral QDKT</option>
-          <option value="dkt">Triangular DKT</option>
-        </select>
-      </label>
-      {(
-        [
-          ["divisionsX", "Subdivisões em X"],
-          ["divisionsY", "Subdivisões em Y"],
-        ] as const
-      ).map(([key, label]) => (
-        <NumberField
-          key={key}
-          label={label}
-          value={slab[key]}
-          min={2}
-          max={slabDivisionLimit}
-          integer
-          onChange={(value) => updateSlab({ [key]: value })}
-        />
-      ))}
-      <p className="help">
-        {slab.formulation === "qdkt"
-          ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
-          : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
-      </p>
+        </>
+      ) : (
+        <>
+          <h4>Apoios de borda</h4>
+          <p className="help">
+            Marque as bordas com apoio simples. Bordas desmarcadas ficam livres.
+            Use pelo menos duas bordas apoiadas.
+          </p>
+          <div className="restraints">
+            {(
+              [
+                ["xMin", "X mín."],
+                ["xMax", "X máx."],
+                ["yMin", "Y mín."],
+                ["yMax", "Y máx."],
+              ] as const
+            ).map(([edge, label]) => (
+              <label key={edge}>
+                <input
+                  type="checkbox"
+                  checked={slab.supports[edge]}
+                  aria-label={`Apoio simples na borda ${label}`}
+                  onChange={(e) =>
+                    updateSlab({
+                      supports: { ...slab.supports, [edge]: e.target.checked },
+                    })
+                  }
+                />
+                Borda {label}
+              </label>
+            ))}
+          </div>
+          <h4>Malha de análise</h4>
+          <label className="stack-field">
+            Elemento de placa
+            <select
+              value={slab.formulation}
+              onChange={(e) =>
+                updateSlab({
+                  formulation: e.target.value === "dkt" ? "dkt" : "qdkt",
+                })
+              }
+            >
+              <option value="qdkt">Quadrilateral QDKT</option>
+              <option value="dkt">Triangular DKT</option>
+            </select>
+          </label>
+          {(
+            [
+              ["divisionsX", "Subdivisões em X"],
+              ["divisionsY", "Subdivisões em Y"],
+            ] as const
+          ).map(([key, label]) => (
+            <NumberField
+              key={key}
+              label={label}
+              value={slab[key]}
+              min={2}
+              max={slabDivisionLimit}
+              integer
+              onChange={(value) => updateSlab({ [key]: value })}
+            />
+          ))}
+          <p className="help">
+            {slab.formulation === "qdkt"
+              ? `${slab.divisionsX * slab.divisionsY} quadriláteros QDKT · apoio simples nas quatro bordas`
+              : `${2 * slab.divisionsX * slab.divisionsY} triângulos DKT`}
+          </p>
+        </>
+      )}
       <h4>
         Pressão uniforme <span>{pattern.name}</span>
       </h4>

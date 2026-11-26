@@ -1,3 +1,4 @@
+import { slabSurface } from "./slabSurface";
 import { patternWind } from "../domain/wind";
 import { thermalLabel } from "../domain/thermalLoads";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -532,20 +533,13 @@ export default function SpatialView({
       const z = project.guides.z.find(
         ({ id }) => id === slab.levelId,
       )!.position;
-      const surface = new THREE.Mesh(
-        new THREE.BoxGeometry(slab.lengthX, slab.thickness, slab.lengthY),
+      const surface = slabSurface(
+        slab,
+        z,
         selectedIds.has(`slab:${slab.id}`)
           ? s.materials.selectedSlab
           : s.materials.slab,
       );
-      surface.position.copy(
-        scenePoint({
-          x: slab.x + slab.lengthX / 2,
-          y: slab.y + slab.lengthY / 2,
-          z,
-        }),
-      );
-      surface.userData.selection = { kind: "slab", id: slab.id };
       s.model.add(surface);
       const pressure =
         layers.loads &&

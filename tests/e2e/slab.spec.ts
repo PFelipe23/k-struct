@@ -257,3 +257,174 @@ for (const formulation of ["qdkt", "dkt"] as const) {
     await expect(table).toHaveCount(0);
   });
 }
+
+test("KS-41 · desenha, edita e reabre uma laje em L com abertura na planta", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  if (executable) await plateBridge(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Novo pórtico espacial" }).click();
+  await page.getByLabel("Pavimento ativo").selectOption("level1");
+  const drawing = page.getByRole("application", {
+    name: "Área de lançamento XY",
+  });
+  const clickAt = async (x: number, y: number) => {
+    const position = await drawing.evaluate(
+      (svg, [x, y]) => {
+        const coord = (axis: "x" | "y", v: number) =>
+          Number(
+            svg
+              .querySelector(`line[data-axis="${axis}"][data-position="${v}"]`)!
+              .getAttribute(`${axis}1`),
+          );
+        return {
+          x: coord("x", 0) + ((coord("x", 4) - coord("x", 0)) * x) / 4,
+          y: coord("y", 0) + ((coord("y", 4) - coord("y", 0)) * y) / 4,
+        };
+      },
+      [x, y],
+    );
+    await drawing.click({ position });
+  };
+  const trace = async (points: number[][]) => {
+    for (const [x, y] of points) await clickAt(x, y);
+  };
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Laje poligonal").click();
+  await trace([
+    [0, 0],
+    [1, 0],
+  ]);
+  await expect(drawing.locator(".slab-trace circle")).toHaveCount(2);
+  await button("Desfazer vértice").click();
+  await expect(drawing.locator(".slab-trace circle")).toHaveCount(1);
+  await button("Cancelar traçado").click();
+  await expect(drawing.locator(".slab-plan")).toHaveCount(0);
+  await button("Laje poligonal").click();
+  await trace([
+    [0, 0],
+    [6, 0],
+    [6, 2],
+    [3, 2],
+    [3, 4],
+    [0, 4],
+    [0, 0],
+  ]);
+  await expect(drawing.locator(".slab-supported-edge")).toHaveCount(6);
+  await button("Abertura na laje").click();
+  await trace([
+    [4, 2.5],
+    [5, 2.5],
+    [5, 3.5],
+  ]);
+  await button("Fechar contorno").click();
+  await expect(page.getByRole("alert")).toContainText(/fora do contorno/);
+  await button("Cancelar traçado").click();
+  await button("Abertura na laje").click();
+  await trace([
+    [1, 0.5],
+    [2, 0.5],
+    [2, 1.5],
+    [1, 1.5],
+  ]);
+  await button("Fechar contorno").click();
+  await expect(drawing.locator(".slab-free-edge")).toHaveCount(4);
+  await expect(page.locator(".slab-contour-fields")).toContainText("17 m²");
+  const pressure = page.getByLabel("Pressão pZ", { exact: true });
+  await pressure.fill("-5");
+  await pressure.press("Enter");
+  const save = async () => {
+    const download = page.waitForEvent("download");
+    await button("Salvar projeto").click();
+    return await readFile((await (await download).path())!, "utf8");
+  };
+  const before = await save();
+  const original = parseProject(before);
+  const selectSlab = () =>
+    page
+      .locator(".explorer")
+      .getByRole("button", { name: "L1", exact: true })
+      .click();
+  await page.getByLabel("Contorno da laje").selectOption("1");
+  await page.getByLabel("Vínculo da borda").selectOption("simple");
+  await page.getByLabel("X do vértice").fill("1,25");
+  await button("Aplicar vértice").click();
+  const edited = await save();
+  const updated = parseProject(edited);
+  const savedRing = updated.slabs[0].polygon!.rings[1],
+    originalRing = original.slabs[0].polygon!.rings[1];
+  expect(savedRing.map((v) => v.edgeId)).toEqual(
+    originalRing.map((v) => v.edgeId),
+  );
+  expect(savedRing[0]).toMatchObject({ x: 1.25, supported: true });
+  await button("Desfazer").click();
+  await selectSlab();
+  await page.getByLabel("Contorno da laje").selectOption("1");
+  await expect(page.getByLabel("X do vértice")).toHaveValue("1");
+  await expect(page.getByLabel("Vínculo da borda")).toHaveValue("simple");
+  await button("Refazer").click();
+  const open = page.waitForEvent("filechooser");
+  await button("Abrir projeto").click();
+  await (
+    await open
+  ).setFiles({
+    name: "poligonal.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(edited),
+  });
+  await expect(page.getByLabel("Pressão pZ")).toHaveValue("-5");
+  await expect(drawing.locator(".slab-supported-edge")).toHaveCount(7);
+  const reopen = page.waitForEvent("filechooser");
+  await button("Abrir projeto").click();
+  await (
+    await reopen
+  ).setFiles({
+    name: "ensaio.kstruct.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(before),
+  });
+  await expect(drawing.locator(".slab-supported-edge")).toHaveCount(6);
+  // Compare the actual SVG hit region in a void, the reentrant cut and the material.
+  const hits = await drawing.evaluate((svg) => {
+    const outline = svg.querySelector(
+      ".slab-plan path[fill-rule=evenodd]",
+    ) as SVGPathElement;
+    const coord = (axis: "x" | "y", v: number) =>
+      Number(
+        svg
+          .querySelector(`line[data-axis="${axis}"][data-position="${v}"]`)!
+          .getAttribute(`${axis}1`),
+      );
+    return [
+      [1.5, 1],
+      [5, 3],
+      [3, 1],
+    ].map(([x, y]) =>
+      outline.isPointInFill(
+        new DOMPoint(
+          coord("x", 0) + ((coord("x", 4) - coord("x", 0)) * x) / 4,
+          coord("y", 0) + ((coord("y", 4) - coord("y", 0)) * y) / 4,
+        ),
+      ),
+    );
+  });
+  expect(hits).toEqual([false, false, true]);
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  await button("Analisar").click();
+  await page.waitForFunction(
+    () =>
+      (window as unknown as SlabTestWindow).finishSlabAnalysis !== undefined,
+  );
+  await page.evaluate(() =>
+    (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+  );
+  await expect(
+    page.getByRole("table", { name: "Flecha e momentos no ponto de consulta" }),
+  ).toContainText("Centroide da área líquida");
+  await expect(drawing.locator(".slab-map polygon")).toHaveCount(160);
+  await expect(page.locator(".slab-equilibrium")).toContainText("-85");
+});

@@ -5,6 +5,7 @@ import {
   type WorkPlane,
 } from "./geometry";
 import { memberAxis, memberOnPlane } from "./memberOffsets";
+import { inMaterial, slabRings } from "./slabPolygon";
 import type { Project, SelectedObject } from "./model";
 
 export type SelectionMode = "replace" | "add" | "subtract" | "intersect";
@@ -149,20 +150,23 @@ export function objectsInWindow(
       const level = p.guides.z.find((g) => g.id === slab.levelId);
       if (!level || Math.abs(level.position - plane.offset) >= tolerance)
         continue;
-      const left = slab.x,
-        right = slab.x + slab.lengthX,
-        bottom = slab.y,
-        top = slab.y + slab.lengthY;
-      if (
-        crossing
-          ? right >= bounds.left &&
-            left <= bounds.right &&
-            top >= bounds.bottom &&
-            bottom <= bounds.top
-          : inside({ u: left, v: bottom }, bounds) &&
-            inside({ u: right, v: top }, bounds)
-      )
-        found.push({ kind: "slab", id: slab.id });
+      const rings = slabRings(slab);
+      const corners = [
+        { x: bounds.left, y: bounds.bottom },
+        { x: bounds.left, y: bounds.top },
+        { x: bounds.right, y: bounds.bottom },
+        { x: bounds.right, y: bounds.top },
+      ];
+      const uv = ({ x, y }: { x: number; y: number }) => ({ u: x, v: y });
+      const hit = crossing
+        ? corners.some((p) => inMaterial(p, rings)) ||
+          rings.some((ring) =>
+            ring.some((v, i) =>
+              intersects(uv(v), uv(ring[(i + 1) % ring.length]), bounds),
+            ),
+          )
+        : rings[0].every((v) => inside(uv(v), bounds));
+      if (hit) found.push({ kind: "slab", id: slab.id });
     }
   return found;
 }

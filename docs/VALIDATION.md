@@ -580,3 +580,31 @@ Com o OOFEM 3.0 indicado em `OOFEM_BIN`, execute os testes abaixo. No navegador,
 npm test -- tests/member-diagram.test.ts
 npm run test:e2e -- results.spec.ts --grep 'consulta o diagrama|extremo calculado'
 ```
+
+
+## KS-41 · painel poligonal com abertura
+
+Na planta XY, lance o exterior por (0, 0), (6, 0), (6, 2), (3, 2), (3, 4) e (0, 4) em metros. Abra o retângulo entre X = 1 e 2 m e Y = 0,5 e 1,5 m. Adote 0,10 m de espessura, E = 30 GPa, ν = 0,20, apoio simples em todas as bordas externas e bordas livres na abertura. Aplique −5 kN/m² em Z. Com quatro divisões por lado de cada triângulo inicial, o ensaio tem 100 nós e 160 elementos DKT.
+
+O exterior mede 18 m² e a abertura mede 1 m². O centroide da área líquida está em X = 43,5/17 m e Y = 29/17 m. Sobre os 17 m² atuam −85 kN. As reações abaixo incluem as forças verticais e os momentos nodais de apoio, tomados em torno de (0, 0) no plano.
+
+| Grandeza | Equilíbrio analítico | OOFEM 3.0 | Tolerância absoluta |
+| --- | ---: | ---: | ---: |
+| Soma das áreas | 17 m² | 17 m² na malha | 10⁻¹¹ m² |
+| Reação em Z | +85 kN | +84,99951 kN | 0,002 kN |
+| Momento das reações em X | +145 kN·m | +144,99888 kN·m | 0,004 kN·m |
+| Momento das reações em Y | −217,5 kN·m | −217,49808 kN·m | 0,004 kN·m |
+
+A cobertura é conferida recortando cada triângulo pelos retângulos do furo e do recorte externo. A área de interseção deve ser inferior a 10⁻¹² m² em ambos. Um painel quadrado com furo central exercita a consulta em um ponto material quando o centroide cai na abertura.
+
+O ensaio de apoio oblíquo gira o triângulo (0, 0), (4, 0), (0, 3) no plano, com cosseno 0,8 e seno 0,6. Os catetos são simplesmente apoiados e a hipotenusa é livre. Comparam-se todos os nós correspondentes antes e depois do giro. A flecha se conserva e os vetores globais de rotações e reações acompanham a rotação do painel. Os limites são 10⁻⁹ m ou rad para deslocamentos e rotações, 0,2 N para forças e 0,05 N·m para momentos de apoio. As verificações retangulares de QDKT e DKT continuam comparando flecha, Mx e My com a série de Navier e a soma das reações com 60 kN. [Referência QDKT](#placa-retangular-simplesmente-apoiada) · [Referência DKT](#laje-retangular-isolada)
+
+Com `OOFEM_BIN` apontando para o executável fixado, rode na raiz do repositório.
+
+```sh
+npm run check
+npm run build
+npm run test:e2e
+```
+
+Para repetir só as verificações de placas, execute `npm test -- tests/polygon-slab.test.ts tests/plate.integration.test.ts tests/oofem.integration.test.ts` e `npm run test:e2e -- slab.spec.ts`. O ensaio de interface desenha, fecha, corrige e cancela anéis na planta, edita vértice e apoio, desfaz, salva e reabre o painel. A ponte de teste entrega a entrada gerada pelo editor ao executável real e devolve a saída para a consulta dos mapas.
