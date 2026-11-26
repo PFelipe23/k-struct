@@ -158,3 +158,7 @@ Em cada elemento, o adaptador soma os perfis lineares ativos e fornece as duas i
 Cada padrão pode guardar `prescribed` com o ID do nó, o grau de liberdade e o valor assinado em metros ou radianos na base do apoio. A migração de v18 mantém as atribuições existentes. Um grau rígido sem atribuição recebe zero. Cada direção admite uma prescrição por padrão. Liberar o grau exige retirar antes as prescrições nele existentes.
 
 O adaptador soma os movimentos pelos fatores do caso e escreve um único `BoundaryCondition` por nó com restrições. A mesma base local define a ordem dos graus e os valores lidos da saída. O pós-processador confere cada deslocamento restringido e transforma as componentes em globais. As combinações tomam a soma ponderada dos movimentos dos casos. A tabela e o CSV exibem as componentes calculadas e as impostas no apoio. Células vazias identificam graus livres e estações internas.
+
+### Diagnósticos de análise
+
+As mensagens verificáveis antes da execução carregam etapa, severidade e referências por ID físico. Quando a análise de apoios insuficientes identifica um componente ligado, o diagnóstico seleciona somente seus nós e barras. Um log genérico de singularidade mantém o texto bruto do OOFEM e recomenda inspeção sem escolher uma peça arbitrária. Contextos de falha no histórico guardam o projeto serializado da execução; a navegação fica desativada se o projeto aberto não corresponder àquela revisão.

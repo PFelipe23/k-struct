@@ -8,6 +8,7 @@ import {
   supportsDof,
   supportToLocal,
 } from "../domain/supports";
+import type { AnalysisDiagnostic } from "../domain/diagnostics";
 import type {
   AnalysisResult,
   Displacement,
@@ -276,6 +277,9 @@ export default function Results({
   running,
   cancelling,
   openRunHistory,
+  diagnostics = [],
+  diagnosticsNavigable = false,
+  onInspectDiagnostic,
 }: {
   project: Project;
   forceMemberId: string;
@@ -285,6 +289,9 @@ export default function Results({
   running: boolean;
   cancelling: boolean;
   openRunHistory?: () => void;
+  diagnostics?: AnalysisDiagnostic[];
+  diagnosticsNavigable?: boolean;
+  onInspectDiagnostic?: (diagnostic: AnalysisDiagnostic) => void;
 }) {
   const { units } = useUnits();
   const [tab, setTab] = useState("log");
@@ -412,16 +419,46 @@ export default function Results({
           </p>
         )}
         {tab === "log" ? (
-          <div className="message-log">
-            <span className={running ? "working" : "log-dot"} />
-            <pre role="status">
-              {cancelling
-                ? "Cancelando execução do OOFEM…"
-                : running
-                  ? "OOFEM em execução…"
-                  : logMessage}
-            </pre>
-          </div>
+          <>
+            <div className="message-log">
+              <span className={running ? "working" : "log-dot"} />
+              <pre role="status">
+                {cancelling
+                  ? "Cancelando execução do OOFEM…"
+                  : running
+                    ? "OOFEM em execução…"
+                    : logMessage}
+              </pre>
+            </div>
+            {diagnostics.length > 0 && (
+              <div className="analysis-diagnostics" aria-label="Diagnósticos">
+                {diagnostics.map((diagnostic) => (
+                  <article key={diagnostic.id}>
+                    <strong>
+                      {diagnostic.severity === "erro" ? "Erro" : "Aviso"} ·{" "}
+                      {diagnostic.stage}
+                    </strong>
+                    <p>{diagnostic.message}</p>
+                    <p>{diagnostic.action}</p>
+                    {diagnostic.objects.length > 0 && diagnosticsNavigable && (
+                      <button
+                        type="button"
+                        onClick={() => onInspectDiagnostic?.(diagnostic)}
+                      >
+                        Inspecionar {diagnostic.objects.length} objeto(s)
+                      </button>
+                    )}
+                    {diagnostic.objects.length > 0 && !diagnosticsNavigable && (
+                      <small>
+                        Este diagnóstico pertence a uma revisão anterior do
+                        modelo.
+                      </small>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         ) : !result && view.kind === "combination" ? (
           <div className="no-results">{view.problem.replace("\n", " ")}</div>
         ) : !result ? (
