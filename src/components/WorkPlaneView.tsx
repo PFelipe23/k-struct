@@ -38,6 +38,7 @@ import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
 import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
 import { actionVector, pointFraction } from "../domain/memberPointLoads";
+import DistributedLoadGlyph from "./DistributedLoadGlyph";
 import PointLoadGlyph, { pointLoadLabel } from "./PointLoadGlyph";
 import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
@@ -63,7 +64,13 @@ export type PlaneCamera = {
   scale: number;
 };
 
-export type Tool = "select" | "node" | "member" | "slab" | "pointLoad";
+export type Tool =
+  | "select"
+  | "node"
+  | "member"
+  | "slab"
+  | "pointLoad"
+  | "distributedLoad";
 export type Display = "model" | "deformed" | MemberForceComponent;
 interface Props {
   project: Project;
@@ -85,6 +92,7 @@ interface Props {
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
+  resultPatterns: ReadonlySet<string>;
   active: boolean;
   savedCamera: RefObject<PlaneCamera | null>;
   onActivate: () => void;
@@ -120,6 +128,7 @@ export default function WorkPlaneView({
   display,
   slabMap,
   patternId,
+  resultPatterns,
   pending,
   onPoint,
   onSelect,
@@ -145,7 +154,10 @@ export default function WorkPlaneView({
     y: number;
   } | null>(null);
   // The span picker handles its own hits and does not request point placement.
-  const tool = quick || activeTool === "pointLoad" ? "select" : activeTool;
+  const tool =
+    quick || activeTool === "pointLoad" || activeTool === "distributedLoad"
+      ? "select"
+      : activeTool;
   useEffect(() => {
     setSpanPointer(null);
     if (quick) setCursor(null);
@@ -168,12 +180,19 @@ export default function WorkPlaneView({
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
-  const floors = plane.kind === "XY"
-    ? (project.diaphragms ?? []).filter((floor) =>
-        project.guides.z.some((level) =>
-          level.id === floor.levelId && level.position === plane.offset),
-      )
-    : [];
+  const displayedPatterns =
+    display === "model"
+      ? [patterns]
+      : project.loadPatterns.filter((p) => resultPatterns.has(p.id));
+  const floors =
+    plane.kind === "XY"
+      ? (project.diaphragms ?? []).filter((floor) =>
+          project.guides.z.some(
+            (level) =>
+              level.id === floor.levelId && level.position === plane.offset,
+          ),
+        )
+      : [];
   const slab =
     plane.kind === "XY"
       ? project.slabs.find((item) =>
@@ -198,13 +217,15 @@ export default function WorkPlaneView({
   useLayoutEffect(() => {
     const svg = ref.current!;
     const measure = ({ width, height }: DOMRectReadOnly) =>
-      setSize(previous =>
+      setSize((previous) =>
         previous.width === width && previous.height === height
           ? previous
           : { width, height },
       );
     measure(svg.getBoundingClientRect());
-    const observer = new ResizeObserver(([entry]) => measure(entry.contentRect));
+    const observer = new ResizeObserver(([entry]) =>
+      measure(entry.contentRect),
+    );
     observer.observe(svg);
     return () => observer.disconnect();
   }, [tool, plane.kind, plane.offset, units.length, relativeError]);
@@ -318,11 +339,13 @@ export default function WorkPlaneView({
       uGuides,
       vGuides,
     });
-    if (candidate.kind === "grid") candidate.label = `Malha ${displayLength(0.5)} ${units.length}`;
+    if (candidate.kind === "grid")
+      candidate.label = `Malha ${displayLength(0.5)} ${units.length}`;
     return candidate;
   };
 
-  const displayLength = (si: number) => fromSI(si, "length", units).toFixed(2).replace(".", ",");
+  const displayLength = (si: number) =>
+    fromSI(si, "length", units).toFixed(2).replace(".", ",");
   const parsedDeltaU = toSI(parseDecimalInput(deltaU), "length", units);
   const parsedDeltaV = toSI(parseDecimalInput(deltaV), "length", units);
   const hasRelativeBoth =
@@ -346,7 +369,12 @@ export default function WorkPlaneView({
             parsedDeltaV,
             plane,
           );
-          if (!Number.isFinite(target[axisU]) || !Number.isFinite(target[axisV]) || !Number.isFinite(relativeDistance)) return null;
+          if (
+            !Number.isFinite(target[axisU]) ||
+            !Number.isFinite(target[axisV]) ||
+            !Number.isFinite(relativeDistance)
+          )
+            return null;
           return {
             u: target[axisU],
             v: target[axisV],
@@ -913,6 +941,29 @@ export default function WorkPlaneView({
                 }}
               />
               {layers.loads &&
+                displayedPatterns.flatMap((pattern) =>
+                  (pattern.distributed ?? [])
+                    .filter((load) => load.memberId === m.id)
+                    .map((load) => (
+                      <DistributedLoadGlyph
+                        key={JSON.stringify([pattern.id, load.id])}
+                        load={load}
+                        line={line}
+                        basis={beamAxes(
+                          line.start,
+                          line.end,
+                          m.roll,
+                          project.mode,
+                        )}
+                        axes={[axisU, axisV, normal]}
+                        project={(at) => [sx(at[axisU]), sy(at[axisV])]}
+                        marker={markerId}
+                        units={units}
+                        stationsOnly={display !== "model"}
+                      />
+                    )),
+                )}
+              {layers.loads &&
                 display === "model" &&
                 (patterns.points ?? [])
                   .filter((l) => l.memberId === m.id)
@@ -1167,16 +1218,34 @@ export default function WorkPlaneView({
           }}
         />
         {floors.map((floor) => {
-          const x = sx(floor.reference.x), y = sy(floor.reference.y);
+          const x = sx(floor.reference.x),
+            y = sy(floor.reference.y);
           return (
-            <g key={floor.id} className="diaphragm-links" role="img"
-              aria-label={`Diafragma ${floor.name}`} pointerEvents="none">
+            <g
+              key={floor.id}
+              className="diaphragm-links"
+              role="img"
+              aria-label={`Diafragma ${floor.name}`}
+              pointerEvents="none"
+            >
               {floor.nodeIds.map((id) => {
                 const node = nodeMap.get(id)!;
-                return <line key={id} x1={x} y1={y} x2={sx(node.x)} y2={sy(node.y)} />;
+                return (
+                  <line
+                    key={id}
+                    x1={x}
+                    y1={y}
+                    x2={sx(node.x)}
+                    y2={sy(node.y)}
+                  />
+                );
               })}
               <path d={`M ${x} ${y - 9} l 9 9 -9 9 -9 -9 Z`} />
-              {labels && <text x={x + 11} y={y + 16}>{floor.name} · ref.</text>}
+              {labels && (
+                <text x={x + 11} y={y + 16}>
+                  {floor.name} · ref.
+                </text>
+              )}
             </g>
           );
         })}
@@ -1417,7 +1486,9 @@ export default function WorkPlaneView({
             {displayLength(relativeAnchor[axisV])}) {units.length}
           </span>
           <label>
-            <span>Δ{axisU.toUpperCase()} ({units.length})</span>
+            <span>
+              Δ{axisU.toUpperCase()} ({units.length})
+            </span>
             <input
               aria-label={`Δ${axisU.toUpperCase()} (${units.length})`}
               aria-invalid={relativeInvalid.u}
@@ -1440,7 +1511,9 @@ export default function WorkPlaneView({
             />
           </label>
           <label>
-            <span>Δ{axisV.toUpperCase()} ({units.length})</span>
+            <span>
+              Δ{axisV.toUpperCase()} ({units.length})
+            </span>
             <input
               aria-label={`Δ${axisV.toUpperCase()} (${units.length})`}
               aria-invalid={relativeInvalid.v}
@@ -1488,9 +1561,9 @@ export default function WorkPlaneView({
               }`
             : cursor && !quick
               ? `${axisU.toUpperCase()} ${fromSI(cursor.u, "length", units).toFixed(2)} · ${axisV.toUpperCase()} ${fromSI(cursor.v, "length", units).toFixed(2)} ${units.length}`
-            : display === "deformed"
-              ? `Deformada ×${deformationScale.toFixed(1)}`
-              : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
+              : display === "deformed"
+                ? `Deformada ×${deformationScale.toFixed(1)}`
+                : `${axisV.toUpperCase()} ↑  ${axisU.toUpperCase()} →`}
         </span>
       </div>
     </section>

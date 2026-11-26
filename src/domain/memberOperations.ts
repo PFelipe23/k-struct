@@ -1,3 +1,4 @@
+import { rebaseDistributedLoad } from "./memberDistributedLoads";
 import { pointLoadFrame, rebasePointLoad } from "./memberPointLoads";
 import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
 import { sameStiffness } from "./memberStiffness";
@@ -319,6 +320,14 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
         const from = previousFrames.get(load.memberId);
         return from ? rebasePointLoad(load, from, target, survivor.id) : load;
       });
+  for (const pat of p.loadPatterns)
+    if (pat.distributed)
+      pat.distributed = pat.distributed.map((load) => {
+        const from = previousFrames.get(load.memberId);
+        return from
+          ? rebaseDistributedLoad(load, from, target, survivor.id)
+          : load;
+      });
   p.members = p.members.filter(
     (m) => !selected.has(m.id) || m.id === survivor.id,
   );
@@ -400,6 +409,13 @@ function editEndOrSplit(
       if (pat.points)
         pat.points = pat.points.map((l) =>
           l.memberId === m.id ? rebasePointLoad(l, previous, target, m.id) : l,
+        );
+    for (const pat of p.loadPatterns)
+      if (pat.distributed)
+        pat.distributed = pat.distributed.map((load) =>
+          load.memberId === m.id
+            ? rebaseDistributedLoad(load, previous, target, m.id)
+            : load,
         );
   }
   // Every physical member passing through the new joint must use the very same node.

@@ -1,5 +1,10 @@
 import { distance, interiorParameter, tolerance } from "./geometry";
 import { distanceFromI, type MemberPointLoad } from "./memberPointLoads";
+import {
+  loadInterval,
+  zeroCrossings,
+  type DistributedLoad,
+} from "./memberDistributedLoads";
 import { memberAxis } from "./memberOffsets";
 import type { Project, StructuralNode } from "./model";
 
@@ -65,6 +70,13 @@ export function beamMeshLayout(p: Project) {
       if (list) list.push(load);
       else loadsByMember.set(load.memberId, [load]);
     }
+  const intervalsByMember = new Map<string, DistributedLoad[]>();
+  for (const pattern of p.loadPatterns)
+    for (const load of pattern.distributed ?? []) {
+      const list = intervalsByMember.get(load.memberId);
+      if (list) list.push(load);
+      else intervalsByMember.set(load.memberId, [load]);
+    }
   for (const m of p.members) {
     const axis = memberAxis(m, nodes.get(m.start)!, nodes.get(m.end)!);
     const span = axis.clear;
@@ -115,9 +127,36 @@ export function beamMeshLayout(p: Project) {
       }
       (target.pointLoads ??= []).push(load);
     }
-    const required = extra.length
+    // Changes of distributed intensity have a single, continuous force section.
+    // Keep all physical breakpoints across cases, before adding regular stations.
+    const boundaries: BeamStation[] = [];
+    for (const load of intervalsByMember.get(m.id) ?? []) {
+      const [a, b] = loadInterval(load, axis.span);
+      for (const s of [0, ...zeroCrossings(load.qStart, load.qEnd), 1]) {
+        const t = (a + (b - a) * s - (m.offsets?.i.rigidLength ?? 0)) / span;
+        if (t > 0 && t < 1) boundaries.push({ t });
+      }
+    }
+    let required = extra.length
       ? fixed.concat(extra).sort((a, b) => a.t - b.t)
       : fixed;
+    if (boundaries.length) {
+      const unique: BeamStation[] = [];
+      for (const next of [...required, ...boundaries].sort(
+        (a, b) => a.t - b.t,
+      )) {
+        const prev = unique.at(-1);
+        if (
+          !prev ||
+          (next.t - prev.t) * span >
+            32 * Number.EPSILON * Math.max(1, axis.span)
+        )
+          unique.push(next);
+        else if (next.nodeId || next.pointLoads)
+          unique[unique.length - 1] = next;
+      }
+      required = unique;
+    }
     const stations: BeamStation[] = [required[0]];
     let step = 1;
     for (const next of required.slice(1)) {

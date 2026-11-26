@@ -10,6 +10,10 @@ import {
   pointFraction,
   type MemberPointLoad,
 } from "../domain/memberPointLoads";
+import {
+  distributedArrows,
+  distributedLoadLabel,
+} from "./DistributedLoadGlyph";
 import { pointLoadLabel } from "./PointLoadGlyph";
 import { memberAxis } from "../domain/memberOffsets";
 import { beamMeshLayout } from "../domain/beamMesh";
@@ -194,8 +198,9 @@ function drawPointAction(
   vector: Point3,
   span: number,
   kind: MemberPointLoad["kind"],
+  proportion = 1,
 ) {
-  const length = Math.min(Math.max(span * 0.12, 0.18), 1.1);
+  const length = Math.min(Math.max(span * 0.12, 0.18), 1.1) * proportion;
   const dir = scenePoint(vector).normalize();
   const side = dir
     .clone()
@@ -629,6 +634,40 @@ export default function SpatialView({
       );
       if (layers.loads) {
         const axes = beamAxes(axis.start, axis.end, m.roll, project.mode);
+        for (const load of pattern?.distributed ?? []) {
+          if (load.memberId !== m.id) continue;
+          const samples = distributedArrows(load, axis, axes),
+            tails: THREE.Vector3[] = [];
+          const size = Math.min(Math.max(axis.span * 0.12, 0.18), 1.1);
+          for (const sample of samples) {
+            const at = scenePoint(sample.at),
+              vector = scenePoint(sample.direction);
+            tails.push(at.clone().addScaledVector(vector, -size));
+            if (vector.length() > 1e-12)
+              drawPointAction(
+                s.model,
+                s.materials.load,
+                at,
+                sample.direction,
+                axis.span,
+                "force",
+                vector.length(),
+              );
+          }
+          s.model.add(
+            new THREE.Line(
+              new THREE.BufferGeometry().setFromPoints(tails),
+              s.materials.load,
+            ),
+          );
+          const label = annotate(
+            s.model,
+            tails[0].clone().lerp(tails.at(-1)!, 0.5),
+            [distributedLoadLabel(load, axis.span, units)],
+          )!;
+          label.element.classList.add("scene-point-load");
+          label.element.dataset.distributedLoad = load.id;
+        }
         for (const load of pattern?.points ?? []) {
           if (load.memberId !== m.id) continue;
           const at = scenePoint(

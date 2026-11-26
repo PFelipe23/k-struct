@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { memberAxis } from "../domain/memberOffsets";
+import { distributedLoadLabel } from "./DistributedLoadGlyph";
 import { distance } from "../domain/geometry";
 import {
   nearNodes,
@@ -144,6 +146,19 @@ function objectDetails(p: Project, focus: Focus, units: UnitPreferences) {
       );
     }
     for (const pat of p.loadPatterns) {
+      if (focus.kind === "member" && pat.distributed?.length) {
+        const m = p.members.find((m) => m.id === id)!,
+          span = memberAxis(
+            m,
+            p.nodes.find((n) => n.id === m.start)!,
+            p.nodes.find((n) => n.id === m.end)!,
+          ).span;
+        for (const load of pat.distributed)
+          if (load.memberId === id)
+            details.push(
+              `${id} · ${named(pat)} · ${distributedLoadLabel(load, span, units)}`,
+            );
+      }
       const loads =
         focus.kind === "node"
           ? pat.nodal.filter((l) => l.nodeId === id)

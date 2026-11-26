@@ -53,7 +53,8 @@ import {
 } from "../units";
 import { useUnits } from "./Units";
 import { pointLoadLabel } from "./PointLoadGlyph";
-import type { PointLoadSelection } from "./MemberPointLoadDialog";
+import type { MemberLoadSelection } from "./memberLoadInput";
+import { distributedLoadLabel } from "./DistributedLoadGlyph";
 import FoundationDialog from "./FoundationDialog";
 import SupportFrameEditor from "./SupportFrameEditor";
 import BatchAssignPanel from "./BatchAssignPanel";
@@ -360,7 +361,7 @@ export default function Inspector({
   edit,
   onMaterials,
   onSections,
-  onPointLoad,
+  onMemberLoad,
 }: {
   project: Project;
   selection: SelectedObject[];
@@ -368,7 +369,7 @@ export default function Inspector({
   edit: (fn: (p: Project) => void) => string | null | void;
   onMaterials: () => void;
   onSections: (id: string) => void;
-  onPointLoad: (selection: PointLoadSelection) => void;
+  onMemberLoad: (selection: MemberLoadSelection) => void;
 }) {
   const { units } = useUnits();
   const [foundationId, setFoundationId] = useState<string>();
@@ -762,7 +763,7 @@ export default function Inspector({
                   key={load.id}
                   className="point-load-entry"
                   onClick={() =>
-                    onPointLoad({
+                    onMemberLoad({
                       memberId: member.id,
                       loadId: load.id,
                       fraction: 0,
@@ -774,13 +775,45 @@ export default function Inspector({
               ))}
             <button
               onClick={() =>
-                onPointLoad({ memberId: member.id, fraction: 0.5 })
+                onMemberLoad({ memberId: member.id, fraction: 0.5 })
               }
             >
               Adicionar carga concentrada
             </button>
             <h4>
-              Carga distribuída <span>{pattern.name}</span>
+              Cargas por trecho <span>{pattern.name}</span>
+            </h4>
+            {(pattern.distributed ?? [])
+              .filter((l) => l.memberId === member.id)
+              .map((load) => (
+                <button
+                  key={load.id}
+                  className="point-load-entry"
+                  onClick={() =>
+                    onMemberLoad({
+                      kind: "distributed",
+                      memberId: member.id,
+                      loadId: load.id,
+                      fraction: 0,
+                    })
+                  }
+                >
+                  {distributedLoadLabel(load, span, units)}
+                </button>
+              ))}
+            <button
+              onClick={() =>
+                onMemberLoad({
+                  kind: "distributed",
+                  memberId: member.id,
+                  fraction: 0,
+                })
+              }
+            >
+              Adicionar carga por trecho
+            </button>
+            <h4>
+              Carga distribuída uniforme <span>{pattern.name}</span>
             </h4>
             {axes.map((k) => (
               <NumberField

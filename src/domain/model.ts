@@ -16,6 +16,7 @@ import {
   remapDiaphragmNodes,
   diaphragmStability,
 } from "./diaphragms";
+import { distributedLoadError } from "./memberDistributedLoads";
 import { componentError, positionError } from "./memberPointLoads";
 import { connectionStations } from "./beamMesh";
 import { selectionKey } from "./selection";
@@ -414,12 +415,36 @@ const pointLoadSchema = z.strictObject({
   }),
   components: directionSchema,
 });
-export const projectSchema = projectV16.extend({
+const projectV17 = projectV16.extend({
   schemaVersion: z.literal(17),
   loadPatterns: z
     .array(
       projectV16.shape.loadPatterns.element.extend({
         points: z.array(pointLoadSchema).max(patternLoadLimit).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+const distributedSchema = z.strictObject({
+  id,
+  memberId: id,
+  system: pointLoadSchema.shape.system,
+  measure: pointLoadSchema.shape.position.shape.kind,
+  start: finite,
+  end: finite,
+  qStart: directionSchema,
+  qEnd: directionSchema,
+});
+export const projectSchema = projectV17.extend({
+  schemaVersion: z.literal(18),
+  loadPatterns: z
+    .array(
+      projectV17.shape.loadPatterns.element.extend({
+        distributed: z
+          .array(distributedSchema)
+          .max(patternLoadLimit)
+          .optional(),
       }),
     )
     .min(1)
@@ -491,7 +516,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 17,
+    schemaVersion: 18,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -829,6 +854,15 @@ export function parseProject(source: string): Project {
     const old = projectV16.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 17 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 17
+  ) {
+    const old = projectV17.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 18 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1053,6 +1087,25 @@ export function referenceErrors(p: Project): string[] {
       const error =
         positionError(load.position, memberAxis(m, a, b).span) ??
         componentError(load, p.mode);
+      if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+    }
+    for (const load of pat.distributed ?? []) {
+      const m = membersById.get(load.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: carga distribuída em barra inexistente.`);
+        continue;
+      }
+      if (seen.has(load.id))
+        errors.push(`${pat.name}: ID de carga distribuída repetido.`);
+      seen.add(load.id);
+      const a = nodes.get(m.start),
+        b = nodes.get(m.end);
+      if (!a || !b) continue;
+      const error = distributedLoadError(
+        load,
+        memberAxis(m, a, b).span,
+        p.mode,
+      );
       if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
     }
     if (pat.nodal.some((l) => !nodes.has(l.nodeId)))
@@ -1340,6 +1393,8 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
     if (pat.points)
       pat.points = pat.points.filter((l) => !bars.has(l.memberId));
+    if (pat.distributed)
+      pat.distributed = pat.distributed.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
     pat.pressure = pat.pressure.filter((load) => !slabs.has(load.slabId));
   }
