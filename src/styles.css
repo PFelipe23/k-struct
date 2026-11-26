@@ -2690,3 +2690,76 @@ button.primary {
 .family-editor .launch-error {
   color: var(--danger);
 }
+
+.slab-sizing-dialog {
+  width: min(780px, 94vw);
+  max-height: 86vh;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--panel);
+}
+.slab-sizing-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.slab-sizing-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.slab-sizing-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 2fr) minmax(220px, 3fr);
+  gap: 18px;
+}
+.slab-sizing-body .stack-field {
+  margin-bottom: 8px;
+}
+.slab-sizing-body ul {
+  max-height: 110px;
+  overflow: auto;
+  padding-inline-start: 16px;
+}
+.slab-sizing-body svg {
+  width: 100%;
+  height: 220px;
+  background: var(--surface-view);
+}
+.slab-sizing-body polygon {
+  fill: var(--surface-raised);
+  stroke: var(--muted);
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+.slab-sizing-body [data-quality="warning"] {
+  fill: #b78033;
+}
+.slab-sizing-body [data-quality="invalid"] {
+  fill: #bd534c;
+}
+.slab-sizing-body [data-picked="true"] {
+  stroke: var(--geometry-selected);
+  stroke-width: 3;
+}
+.slab-sizing-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+@media (max-width: 580px) {
+  .slab-sizing-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.slab-comparison-coordinates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.slab-comparison-coordinates input {
+  width: 95px;
+}

@@ -1,11 +1,7 @@
+import { inspectSlabMesh } from "../domain/slabQuality";
 import { materialSample } from "../domain/polygonMesh";
 import { cross2, slabProperties, type XY } from "../domain/slabPolygon";
-import type {
-  AnalysisCase,
-  Project,
-  Slab,
-  RectangleSlab,
-} from "../domain/model";
+import type { AnalysisCase, Project, Slab } from "../domain/model";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { meshSlab, type SlabDof, type SlabMesh } from "../domain/slab";
 import { selfWeightSummary } from "../domain/selfWeight";
@@ -59,6 +55,17 @@ export function exportSlab(
   )!;
   const level = project.guides.z.find(({ id }) => id === definition.levelId)!;
   const mesh = meshSlab(definition, level.position);
+  const invalid = inspectSlabMesh(definition, mesh).issues.find(
+    (v) => v.level === "invalid",
+  );
+  if (invalid) {
+    const region = invalid.element
+      ? `elemento ${invalid.element}`
+      : "contorno do painel";
+    throw new Error(
+      `Malha inválida em ${definition.name}, ${region} (X ${invalid.at.x} m, Y ${invalid.at.y} m). ${invalid.reason}.`,
+    );
+  }
   const pressureZ = analysisCase.factors.reduce(
     (sum, { patternId, factor }) => {
       const pattern = project.loadPatterns.find(({ id }) => id === patternId)!;
@@ -138,9 +145,10 @@ export function exportSlab(
     ...nodes.map(({ number, x, y, z, tangent }) => {
       // QDKT uses panel-local coordinates. Global mesh positions remain available for the maps.
       if (quad) {
-        const i = (number - 1) % (definition.divisionsX + 1);
-        const j = Math.floor((number - 1) / (definition.divisionsX + 1));
-        return `Node ${number} coords 3 ${(i / definition.divisionsX) * definition.lengthX} ${(j / definition.divisionsY) * definition.lengthY} 0`;
+        const grid = mesh.grid!,
+          i = (number - 1) % grid.x.length,
+          j = Math.floor((number - 1) / grid.x.length);
+        return `Node ${number} coords 3 ${grid.x[i]} ${grid.y[j]} 0`;
       }
       const axes = tangent
         ? ` lcs 6 ${tangent.x} ${tangent.y} 0 ${-tangent.y} ${tangent.x} 0`
@@ -339,16 +347,9 @@ export function parseSlabOutput(
         `Momentos fora do intervalo numérico no nó ${i + 1} da laje.`,
       );
   }
-  let center: SlabSample;
-  let samplePoint = { ...input.centroid, relocated: false };
-  if (definition.polygon) {
-    const sample = materialSample(mesh, input.centroid);
-    samplePoint = { ...sample.point, relocated: sample.relocated };
-    center = { uz: 0, mx: 0, my: 0 };
-    for (const [i, id] of sample.face.entries())
-      for (const key of ["uz", "mx", "my"] as const)
-        center[key] += nodes[id - 1][key] * sample.weights[i];
-  } else center = rectangleCenter(definition, nodes);
+  const sample = materialSample(mesh, input.centroid);
+  const samplePoint = { ...sample.point, relocated: sample.relocated };
+  const center = interpolateSlab(nodes, sample);
   const reactions = slabReactions(input, reactionMap);
   return {
     slabId: definition.id,
@@ -364,23 +365,18 @@ export function parseSlabOutput(
   };
 }
 
-function rectangleCenter(definition: RectangleSlab, nodes: SlabDisplacement[]) {
-  const { divisionsX: nx, divisionsY: ny } = definition;
-  const at = (i: number, j: number) => nodes[j * (nx + 1) + i];
-  const left = Math.floor(nx / 2),
-    right = Math.ceil(nx / 2);
-  const bottom = Math.floor(ny / 2),
-    top = Math.ceil(ny / 2);
-  // The center lies on the DKT diagonal. In QDKT use bilinear interpolation.
-  const near =
-    definition.formulation === "qdkt"
-      ? [at(left, bottom), at(right, bottom), at(left, top), at(right, top)]
-      : [at(left, bottom), at(right, top)];
-  const center = { uz: 0, mx: 0, my: 0 };
-  for (const point of near) {
-    center.uz += point.uz / near.length;
-    center.mx += point.mx / near.length;
-    center.my += point.my / near.length;
-  }
-  return center;
+function interpolateSlab(
+  nodes: SlabSample[],
+  sample: ReturnType<typeof materialSample>,
+): SlabSample {
+  const values = { uz: 0, mx: 0, my: 0 };
+  for (const [i, id] of sample.face.entries())
+    for (const field of ["uz", "mx", "my"] as const)
+      values[field] += nodes[id - 1][field] * sample.weights[i];
+  return values;
+}
+
+export function querySlab(result: SlabResult, point: XY) {
+  const sample = materialSample(result.mesh, point);
+  return sample.relocated ? null : interpolateSlab(result.nodes, sample);
 }

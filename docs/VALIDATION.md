@@ -621,3 +621,37 @@ npm run test:e2e
 ```
 
 Para repetir só as verificações de placas, execute `npm test -- tests/polygon-slab.test.ts tests/plate.integration.test.ts tests/oofem.integration.test.ts` e `npm run test:e2e -- slab.spec.ts`. O ensaio de interface desenha, fecha, corrige e cancela anéis na planta, edita vértice e apoio, desfaz, salva e reabre o painel. A ponte de teste entrega a entrada gerada pelo editor ao executável real e devolve a saída para a consulta dos mapas.
+
+## KS-42 · refinamento e qualidade da malha
+
+Use a placa de 4 × 3 m simplesmente apoiada, com espessura de 0,10 m, E de 30 GPa, ν de 0,20 e pressão de −5 kN/m². Consulte o centro em X = 2 m e Y = 1,5 m a cada análise. Na interface, guarde a primeira referência em **Comparar malhas** antes de editar o tamanho-alvo. Os tamanhos de 0,50, 0,25 e 0,125 m reproduzem as subdivisões 8 × 6, 16 × 12 e 32 × 24 dos ensaios legados retangulares. Cada célula contém um QDKT ou dois DKT.
+
+| Formulação | Alvo (m) | Elementos | UZ (mm) | Mx (kN·m/m) | My (kN·m/m) | Σ RZ (kN) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| QDKT | 0,50 | 48 | −1,026687 | 1,997732 | 3,127024 | 60,00020 |
+| QDKT | 0,25 | 192 | −1,029917 | 1,989041 | 3,087367 | 60,00000 |
+| QDKT | 0,125 | 768 | −1,030673 | 1,986897 | 3,077772 | 60,00014 |
+| DKT | 0,50 | 96 | −1,013955 | 2,025044 | 3,104622 | 59,99980 |
+| DKT | 0,25 | 384 | −1,026874 | 1,996033 | 3,082756 | 60,00012 |
+| DKT | 0,125 | 1.536 | −1,029932 | 1,988656 | 3,076822 | 59,99996 |
+| Navier | — | — | −1,030920 | 1,986133 | 3,074724 | 60,00000 |
+
+O erro absoluto da flecha diminui nas três malhas das duas formulações. Na mais fina, os erros relativos de UZ, Mx e My ficam abaixo de 0,2% da série de Navier. Esse limite admite o erro de discretização dos momentos recuperados. A tolerância absoluta de 3 N no equilíbrio inclui o arredondamento das reações no arquivo de saída do OOFEM. Um ensaio com uma borda refinada verifica a consulta fora dos nós e a invariância ao transladar o retângulo no pavimento. [Referência de Navier e ensaios retangulares](#placa-retangular-simplesmente-apoiada)
+
+No painel em L da KS-41, use tamanho global de 1 m. Acrescente tamanho de 0,25 m nas quatro bordas do furo e na borda externa apoiada de X = 6 m. As bordas selecionadas recebem segmentos de até 0,25 m. Há triângulos da malha inicial que permanecem inteiros longe dessas bordas. A área líquida se conserva em 17 m², sem elementos invertidos, e as consultas no furo e no recorte ficam fora do material.
+
+| Controles locais | Triângulos DKT | Nós | Carga aplicada (kN) | Σ RZ (kN) | Ângulo mínimo |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nenhum | 160 | 94 | −85 | 84,99987 | 7,125° |
+| Abertura e borda apoiada | 484 | 271 | −85 | 84,99969 | 7,125° |
+
+O inspetor marca em âmbar triângulos com ângulo inferior a 15° e quadriláteros com razão de distorção inferior a 0,1. O ângulo identifica triângulos esguios. A razão é o menor valor entre o quociente dos Jacobianos extremos e o quociente dos comprimentos de lado extremos. Assim, uma célula retangular muito alongada também recebe alerta. São indicadores para revisão e estudo de convergência. O erro relativo de cobertura da área deve ser de até 10⁻⁹. Uma borda física pertence a um elemento e uma aresta interna a dois.
+
+O critério de degenerescência exige 2A/L² > 10⁻¹⁰ no triângulo e 4Jmín/L² > 10⁻¹⁰ no quadrilátero, com L igual ao maior lado. Essa normalização independe da unidade de comprimento. Os quatro cantos delimitam os extremos do determinante do Jacobiano do mapa bilinear. Orientação invertida ou geometria numericamente singular bloqueia a exportação. O triângulo de 100 m de base e 0,1 m de altura, com vértices sobre os eixos coordenados, produz um alerta. Aumentar a base para 10¹⁰ m torna a malha inválida. A prévia identifica o elemento e sua posição.
+
+Com `OOFEM_BIN` configurado para a versão 3.0 do projeto, reproduza os ensaios numéricos e o fluxo de interface com os comandos abaixo.
+
+```sh
+npm test -- tests/slab-sizing.test.ts tests/plate.integration.test.ts tests/polygon-slab.test.ts tests/oofem.integration.test.ts
+npm run test:e2e -- slab.spec.ts
+```

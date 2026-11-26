@@ -1,4 +1,4 @@
-import { meshPolygon } from "./polygonMesh";
+import { meshSlab } from "./slab";
 import {
   normalizeRings,
   polygonError,
@@ -655,9 +655,24 @@ const projectV24 = projectV23.extend({
   schemaVersion: z.literal(24),
   slabs: z.array(z.union([rectangleSlab, polygonSlab])).max(1),
 });
-export const projectSchema = projectV24.extend({
+const projectV25 = projectV24.extend({
   schemaVersion: z.literal(25),
 });
+const sizingSchema = z.strictObject({
+  target: finite.positive(),
+  edges: z
+    .array(z.strictObject({ edgeId: id, size: finite.positive() }))
+    .max(maxSlabVertices),
+});
+const sizedRectangle = rectangleSlab.extend({
+  sizing: sizingSchema.optional(),
+});
+const sizedPolygon = polygonSlab.extend({ sizing: sizingSchema.optional() });
+export const projectSchema = projectV25.extend({
+  schemaVersion: z.literal(26),
+  slabs: z.array(z.union([sizedRectangle, sizedPolygon])).max(1),
+});
+export type SlabSizing = z.infer<typeof sizingSchema>;
 export function defaultSelfWeight() {
   return {
     enabled: false,
@@ -683,8 +698,8 @@ export type ResultEnvelope = Project["resultEnvelopes"][number];
 export type StructuralNode = Project["nodes"][number];
 export type Member = Project["members"][number];
 export type Slab = Project["slabs"][number];
-export type RectangleSlab = z.infer<typeof rectangleSlab>;
-export type PolygonSlab = z.infer<typeof polygonSlab>;
+export type RectangleSlab = z.infer<typeof sizedRectangle>;
+export type PolygonSlab = z.infer<typeof sizedPolygon>;
 export type NodalLoad = Project["loadPatterns"][number]["nodal"][number];
 export type UniformLoad = Project["loadPatterns"][number]["uniform"][number];
 export type SelectedObject = z.infer<typeof objectRef>;
@@ -743,7 +758,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 25,
+    schemaVersion: 26,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1164,6 +1179,15 @@ export function parseProject(source: string): Project {
     const old = projectV24.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 25 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 25
+  ) {
+    const old = projectV25.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 26 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1207,7 +1231,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 25, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 26, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)
@@ -1353,19 +1377,19 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${slab.name}: material inexistente.`);
     if (!p.guides.z.some((level) => level.id === slab.levelId))
       errors.push(`${slab.name}: pavimento inexistente.`);
-    if (slab.polygon) {
-      const error = polygonError(slab.polygon.rings);
+    if (slab.polygon || slab.sizing) {
+      const error = slab.polygon ? polygonError(slab.polygon.rings) : null;
       if (error) errors.push(`${slab.name} · ${error}`);
       else {
         try {
-          meshPolygon(slab.polygon, 0);
+          meshSlab(slab, 0);
         } catch (e) {
           errors.push(
             `${slab.name} · ${e instanceof Error ? e.message : String(e)}`,
           );
         }
       }
-      continue;
+      if (slab.polygon) continue;
     }
     for (const [start, span, count] of [
       [slab.x, slab.lengthX, slab.divisionsX],

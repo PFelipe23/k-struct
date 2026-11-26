@@ -237,6 +237,7 @@ export function addSlabOpening(p: Project, slabId: string, points: XY[]) {
     thickness,
     materialId,
     formulation: "dkt",
+    ...(slab.sizing ? { sizing: slab.sizing } : {}),
     polygon: { rings, refinements: slab.polygon?.refinements ?? 2 },
   };
 }
