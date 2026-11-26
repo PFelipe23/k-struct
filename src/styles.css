@@ -2467,3 +2467,30 @@ button.primary {
 .diaphragm-links line { stroke: var(--geometry-selected); stroke-dasharray: 5 4; opacity: .8; }
 .diaphragm-links path { fill: var(--geometry-selected); stroke: var(--surface-view); stroke-width: 1; }
 .diaphragm-links text { fill: var(--geometry-selected); font-size: 11px; }
+
+.foundation-dialog {
+  width: min(54rem, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.foundation-vectors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.foundation-vectors label { display: grid; gap: 0.25rem; }
+.foundation-vectors input { width: 100%; min-width: 0; }
+.foundation-table { overflow-x: auto; margin: 0.75rem 0; }
+.foundation-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.foundation-table th, .foundation-table td {
+  padding: 0.4rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.foundation-table th:first-child { text-align: left; }
+.foundation-dialog dt { font-weight: 600; }

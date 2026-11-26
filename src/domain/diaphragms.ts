@@ -8,6 +8,7 @@ import {
   tolerance,
   type Point3,
 } from "./geometry";
+import { foundationConstraintRows } from "./foundation";
 import { supportBasis, supportsDof } from "./supports";
 import type { Project, StructuralNode } from "./model";
 
@@ -226,6 +227,8 @@ export function diaphragmStability(
       const r = scale(subtract(n, body[0]), 1 / span);
       for (const { dof, terms } of supportRows(n, 6 * i, r))
         if (supportsDof(n, dof)) basis.add(terms);
+      for (const row of foundationConstraintRows(n, r, span))
+        basis.add(indexed(6 * i, row));
       const f = floorByNode.get(n.id);
       if (f === undefined) continue;
       const first = nodes.get(floors[f].nodeIds[0])!;

@@ -20,7 +20,12 @@ import {
   type Transform,
   type VectorMap,
 } from "./transformGeometry";
-import { combineSupport, hasSupport, sameSupportAxes } from "./supports";
+import {
+  combineSupport,
+  hasSupport,
+  sameOrientedSupportAxes,
+  sameSupportAxes,
+} from "./supports";
 
 export type CopyOptions = {
   supports: boolean;
@@ -101,9 +106,14 @@ function copyAssignments(
           `Cópia ${i} · ${node.name} → ${dest.name} · apoio existente`,
         );
       if (!occupied || options.conflicts === "combine") {
-        const support = mapSupport(node, vector, plan.project.mode);
+        const support = mapSupport(node, vector, plan.project.mode, parity);
         const { frame } = support;
-        if (occupied && !sameSupportAxes(dest.supportFrame, frame))
+        if (
+          occupied &&
+          (support.foundation || dest.foundation
+            ? !sameOrientedSupportAxes(dest.supportFrame, frame)
+            : !sameSupportAxes(dest.supportFrame, frame))
+        )
           throw new Error(
             `Apoios de ${dest.name} usam referenciais diferentes. Escolha conservar o apoio existente.`,
           );

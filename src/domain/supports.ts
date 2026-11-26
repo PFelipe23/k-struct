@@ -22,7 +22,7 @@ export function hasSpring(node: StructuralNode, dof: SupportDof) {
 }
 
 export function hasElasticSupport(node: StructuralNode) {
-  return supportDofs.some((dof) => hasSpring(node, dof));
+  return !!node.foundation || supportDofs.some((dof) => hasSpring(node, dof));
 }
 
 export function supportsDof(node: StructuralNode, dof: SupportDof) {
@@ -30,7 +30,7 @@ export function supportsDof(node: StructuralNode, dof: SupportDof) {
 }
 
 export function hasSupport(node: StructuralNode) {
-  return supportDofs.some((dof) => supportsDof(node, dof));
+  return !!node.foundation || supportDofs.some((dof) => supportsDof(node, dof));
 }
 
 export function setSpring(
@@ -60,8 +60,15 @@ export function setRigidSupport(
 
 export function combineSupport(
   target: StructuralNode,
-  source: Pick<StructuralNode, "restraints" | "springs">,
+  source: Pick<StructuralNode, "restraints" | "springs" | "foundation">,
 ) {
+  if (source.foundation) {
+    if (target.foundation)
+      throw new Error(
+        `${target.name}: já existe uma matriz de fundação. Escolha o apoio a conservar.`,
+      );
+    target.foundation = structuredClone(source.foundation);
+  }
   for (const dof of supportDofs) {
     if (target.restraints[dof] || source.restraints[dof]) {
       setRigidSupport(target, dof, true);
@@ -129,6 +136,12 @@ export function supportToLocal(vector: Point3, basis: SupportBasis): Point3 {
     y: dot(basis.y, vector),
     z: dot(basis.z, vector),
   };
+}
+
+export function sameOrientedSupportAxes(a?: SupportFrame, b?: SupportFrame) {
+  const A = supportBasis(a),
+    B = supportBasis(b);
+  return coordinates.every((k) => dot(A[k], B[k]) > 1 - 1e-14);
 }
 
 export function sameSupportAxes(a?: SupportFrame, b?: SupportFrame) {

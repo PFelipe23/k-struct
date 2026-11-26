@@ -143,6 +143,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v16") ??
       localStorage.getItem("kstruct.draft.v15") ??
       localStorage.getItem("kstruct.draft.v14") ??
       localStorage.getItem("kstruct.draft.v13") ??
@@ -408,7 +409,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v15", serialized);
+      localStorage.setItem("kstruct.draft.v16", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1391,11 +1392,13 @@ export default function App() {
                     <CircleDot size={12} />
                     {n.name}
                     <small>
-                      {hasElasticSupport(n)
-                        ? "Apoio elástico"
-                        : hasSupport(n)
-                          ? "Apoio"
-                          : ""}
+                      {n.foundation
+                        ? `Fundação · ${n.foundation.name}`
+                        : hasElasticSupport(n)
+                          ? "Apoio elástico"
+                          : hasSupport(n)
+                            ? "Apoio"
+                            : ""}
                     </small>
                   </button>
                 ))}

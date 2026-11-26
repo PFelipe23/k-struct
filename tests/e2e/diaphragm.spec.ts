@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { parseProject, serializeProject } from "../../src/domain/model";
+import { openProjectInBrowser } from "../fixtures/open-project";
 import { analyzeInBrowser } from "../fixtures/analyze-in-browser";
 import { diaphragmBenchmark } from "../fixtures/diaphragm";
 
@@ -16,13 +17,7 @@ test("cria e edita o diafragma em planta, analisa, desfaz e reabre o arquivo", a
   );
   await page.goto("/");
   const open = (source: string) =>
-    page
-      .locator("input[type=file]")
-      .setInputFiles({
-        name: "piso.kstruct.json",
-        mimeType: "application/json",
-        buffer: Buffer.from(source),
-      });
+    openProjectInBrowser(page, "piso.kstruct.json", source);
   await open(serializeProject(model));
   const button = (name: string) =>
     page.getByRole("button", { name, exact: true });
