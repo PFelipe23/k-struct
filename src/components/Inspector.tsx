@@ -30,6 +30,7 @@ import {
   tolerance,
 } from "../domain/geometry";
 import { reverseMember } from "../domain/editing";
+import { setRigidSupport, setSpring } from "../domain/supports";
 import {
   free,
   nodalLoad,
@@ -48,7 +49,7 @@ import {
   parseUnitInput,
   unitLabel,
   fromSI,
-  type UnitQuantity,
+  type MeasuredQuantity,
 } from "../units";
 import { useUnits } from "./Units";
 import SupportFrameEditor from "./SupportFrameEditor";
@@ -68,16 +69,18 @@ export function NumberField({
   min,
   max,
   integer = false,
+  disabled = false,
   validate,
 }: {
   label: string;
   value: number;
   unit?: string;
-  quantity?: UnitQuantity;
+  quantity?: MeasuredQuantity;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
   integer?: boolean;
+  disabled?: boolean;
   validate?: (value: number) => string | undefined;
 }) {
   const { units } = useUnits();
@@ -91,7 +94,7 @@ export function NumberField({
     setDraft(displayValue());
     setInvalid(false);
     setDetail(undefined);
-  }, [value, quantity, units]);
+  }, [value, quantity, units, disabled]);
   const commit = () => {
     if (cancelling.current) {
       cancelling.current = false;
@@ -122,6 +125,7 @@ export function NumberField({
         <input
           aria-label={label}
           aria-invalid={invalid}
+          disabled={disabled}
           inputMode={integer ? "numeric" : "decimal"}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -430,6 +434,7 @@ export default function Inspector({
       for (const n of p.nodes) {
         if (!selectedNodes.has(n.id)) continue;
         n.restraints = free();
+        delete n.springs;
         for (const k of dofs) n.restraints[k] = fixed;
       }
     });
@@ -553,8 +558,11 @@ export default function Inspector({
                     checked={node.restraints[k]}
                     onChange={(e) =>
                       edit((p) => {
-                        p.nodes.find((n) => n.id === node.id)!.restraints[k] =
-                          e.target.checked;
+                        setRigidSupport(
+                          p.nodes.find((n) => n.id === node.id)!,
+                          k,
+                          e.target.checked,
+                        );
                       })
                     }
                   />
@@ -572,6 +580,37 @@ export default function Inspector({
               ))}
             </div>
             {supportPresets}
+            <details className="nodal-springs">
+              <summary>Molas nodais</summary>
+              <p className="help">
+                As molas seguem o referencial do apoio. Zero deixa a direção
+                livre. Desmarque a restrição rígida da direção para editar sua
+                mola.
+              </p>
+              {dofs.map((key) => (
+                <NumberField
+                  key={key}
+                  label={`Rigidez ${key.toUpperCase()} ${node.supportFrame ? "local" : "global"}`}
+                  quantity={
+                    key[0] === "u"
+                      ? "translationStiffness"
+                      : "rotationStiffness"
+                  }
+                  value={node.springs?.[key] ?? 0}
+                  disabled={node.restraints[key]}
+                  min={0}
+                  onChange={(value) =>
+                    edit((draft) => {
+                      setSpring(
+                        draft.nodes.find(({ id }) => id === node.id)!,
+                        key,
+                        value,
+                      );
+                    })
+                  }
+                />
+              ))}
+            </details>
             <h4>
               Carga nodal <span>{pattern.name}</span>
             </h4>

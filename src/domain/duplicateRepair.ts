@@ -21,7 +21,13 @@ import {
   type Project,
   type StructuralNode,
 } from "./model";
-import { sameSupportAxes } from "./supports";
+import {
+  combineSupport,
+  hasElasticSupport,
+  hasSpring,
+  hasSupport,
+  sameSupportAxes,
+} from "./supports";
 
 export type Decisions = {
   nodes: Merge[];
@@ -45,11 +51,17 @@ export type Question = {
 type Item = { id: string; name: string };
 export const named = (item: Item) => `${item.name} [${item.id}]`;
 const dofs = Object.keys(free()) as (keyof ReturnType<typeof free>)[];
-const hasRestraints = (n: StructuralNode) => dofs.some((k) => n.restraints[k]);
 export const supportText = (node: StructuralNode) => {
   const keys = dofs
-    .filter((k) => node.restraints[k])
-    .map((k) => k.toUpperCase())
+    .flatMap((k) =>
+      node.restraints[k]
+        ? [k.toUpperCase()]
+        : hasSpring(node, k)
+          ? [
+              `${k.toUpperCase()} elástico (${node.springs![k]} ${k[0] === "u" ? "N/m" : "N·m/rad"})`,
+            ]
+          : [],
+    )
     .join(", ");
   return keys
     ? `${keys} · ${node.supportFrame ? "referencial local" : "referencial global"}`
@@ -172,16 +184,21 @@ export function planRepair(
       supports = ids.map((id) => nodes.get(id)!);
     for (const n of supports)
       notes.push(`Apoio · ${named(n)} → ${label} · ${supportText(n)}`);
-    const restrained = supports.filter(hasRestraints);
-    const targetFrame = (hasRestraints(dst) ? dst : restrained[0])
-      ?.supportFrame;
+    const restrained = supports.filter(hasSupport);
+    const elasticCount = restrained.filter(hasElasticSupport).length;
+    const targetFrame = (hasSupport(dst) ? dst : restrained[0])?.supportFrame;
     const canUnion = restrained.every((n) =>
       sameSupportAxes(n.supportFrame, targetFrame),
     );
     if (
       !canUnion ||
+      elasticCount > 1 ||
       supports.some((n) =>
-        dofs.some((k) => n.restraints[k] !== dst.restraints[k]),
+        dofs.some(
+          (k) =>
+            n.restraints[k] !== dst.restraints[k] ||
+            (n.springs?.[k] ?? 0) !== (dst.springs?.[k] ?? 0),
+        ),
       )
     ) {
       const value = ask(
@@ -192,7 +209,9 @@ export function planRepair(
             ? [
                 {
                   value: "union",
-                  label: "Unir os graus de liberdade restringidos",
+                  label: elasticCount
+                    ? "Unir vínculos e somar molas em paralelo"
+                    : "Unir os graus de liberdade restringidos",
                 },
               ]
             : []),
@@ -204,9 +223,13 @@ export function planRepair(
         else delete dst.supportFrame;
         for (const k of dofs)
           dst.restraints[k] = supports.some((n) => n.restraints[k]);
+        delete dst.springs;
+        for (const n of supports) combineSupport(dst, n);
       } else if (value) {
         const chosen = nodes.get(value.slice(4))!;
         dst.restraints = { ...chosen.restraints };
+        if (chosen.springs) dst.springs = { ...chosen.springs };
+        else delete dst.springs;
         if (chosen.supportFrame) dst.supportFrame = chosen.supportFrame;
         else delete dst.supportFrame;
       }

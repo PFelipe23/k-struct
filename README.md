@@ -12,12 +12,12 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 
 - Lançar barras e nós em planta XY ou elevações XZ/YZ, com eixos, pavimentos, modo ortogonal e snap em referências ou passos de 0,50 m.
 - Mover nós e barras, espelhar módulos e replicar por translação ou rotação com prévia. Escolher os apoios e padrões de carga das cópias e conectar interseções em 3D.
-- Editar coordenadas, apoios em referenciais globais ou inclinados, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
+- Editar coordenadas, apoios rígidos ou elásticos em referenciais globais ou inclinados, seções retangulares, circulares, tubulares e I, orientação da seção e cargas globais.
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nodais e cargas uniformes em barras. Peso próprio é manual nesta etapa.
 - Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
-- Salvar e reabrir `.kstruct.json` no esquema v13, com migração dos projetos v1 a v12 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v14, com migração dos projetos v1 a v13 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -101,11 +101,13 @@ Selecione nós e barras com Ctrl ou recupere um grupo em **Seleção e grupos**.
 
 Por exemplo, em duas barras com qZ de −2 e −3 kN/m, **Somar** −1 kN/m produz −3 e −4 kN/m. **Aplicar lote** registra toda a operação em uma edição. **Desfazer** recupera a seção, os vínculos e as cargas anteriores de cada objeto.
 
-### Apoios inclinados
+### Apoios inclinados e molas nodais
 
 Selecione um nó e escolha **Local** em **Propriedades → Apoios e restrições → Referencial do apoio**. Em XZ, informe o ângulo da tangente em graus a partir de +X no sentido de +Z. Confira a prévia e clique em **Aplicar referencial**. Um rolete bloqueia apenas a translação Z local, que corresponde à normal, e deixa livres a translação X local e a rotação Y. Em XYZ, informe a direção de x local e uma direção para y. O editor mostra a base ortonormal de mão direita antes de aplicar. As cargas nodais continuam expressas em XYZ globais.
 
 Analise o caso e abra **Reações**. Quando houver um apoio local com reação, a tabela e o CSV incluem colunas globais e locais, com unidades e o referencial de cada apoio. Em XZ, RX local corresponde à tangente e RZ local à normal. Para reproduzir a viga de 6 m com rolete inclinado, mantenha o nó inicial global e aplique −36,86989765° ao nó final da **Viga de referência**. [Valores esperados](docs/VALIDATION.md#ks-20--apoios-inclinados)
+
+Para definir apoio elástico, abra **Molas nodais** em **Apoios e restrições**. Desmarque a restrição rígida da direção e informe a rigidez de translação na unidade de força por comprimento ou de rotação na unidade de momento por radiano. Zero libera a direção. Os campos indicam o eixo global ou local conforme o referencial do nó. Em **Análise**, consulte as reações e os deslocamentos globais. Com molas inclinadas, a tabela de deslocamentos também mostra a projeção nos eixos do apoio. [Ensaios de molas nodais](docs/VALIDATION.md#ks-25--molas-nodais)
 
 ### Materiais do projeto
 

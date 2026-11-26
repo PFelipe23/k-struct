@@ -328,3 +328,31 @@ Os ensaios usam o OOFEM 3.0 fixado pelo KStruct. A entrada espacial usa elemento
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/member-stiffness.test.ts tests/member-stiffness.integration.test.ts
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-stiffness.spec.ts
 ```
+
+## KS-25 · molas nodais
+
+Os ensaios usam a distribuição fixada do OOFEM 3.0. A viga de referência mede 6 m e tem seção retangular de 15 × 20 cm e E = 200 GPa. A ligação A restringe UX e UZ. O nó no meio se conecta à mesma barra física para receber uma força de 20 kN para baixo. B tem rotação livre e uma mola vertical. Pelo equilíbrio, cada apoio recebe +10 kN. A reação da mola na estrutura é R = −k·u. A variação na flecha do meio devido ao recalque de B é metade do deslocamento do apoio.
+
+| Rigidez de B | UZ de B | Flecha adicional no meio em relação à viga com B rígido |
+| --- | --- | --- |
+| 10.000 kN/m | −1 mm | −0,5 mm |
+| 100.000 kN/m | −0,1 mm | −0,05 mm |
+| 1.000.000 kN/m | −0,01 mm | −0,005 mm |
+
+As tolerâncias absolutas no ensaio plano são 5 × 10⁻⁵ N nas reações, 5 × 10⁻¹² m em B e 5 × 10⁻¹¹ m para a flecha adicional. Zerar a única mola vertical de B produz o diagnóstico de apoio insuficiente para impedir movimento de corpo rígido.
+
+| Ensaio adicional | Valores de referência |
+| --- | --- |
+| Momento de −15 kN·m na ponta B, com A fixo em UX e UZ e mola de 5.000 kN·m/rad em RY | RY de A = −3 mrad e momento de reação +15 kN·m. |
+| Viga espacial com a base dos apoios inclinada em 30° em torno de X e carga girada com a normal | B conserva UZ local = −1 mm e energia elástica de 5 J. Reação local de +10 kN, com componentes globais Ry = −5 kN e Rz = +8,660254 kN. |
+| Momento de +15 kN·m em torno de um eixo local x a 30° de X no plano XY, com mola de 5.000 kN·m/rad | Rotação local de +3 mrad e momento de reação local de −15 kN·m. |
+| Mola vertical de 10.000 kN/m a 0,5 m de A, dentro do primeiro metro rígido, com −1 kN em B | Reações verticais de −11 kN em A e +12 kN na mola, com deslocamento de −1,2 mm no nó elástico. |
+
+Nos casos acima, a tolerância é 5 × 10⁻¹² m ou rad nos deslocamentos e rotações, 5 × 10⁻⁴ N ou N·m nas reações e 5 × 10⁻⁷ J na energia. Para reproduzir a conferência mínima da sintaxe `Spring`, use um nó de solo fixo e um segundo nó com referencial a 30° em XZ, UX local e RY restringidos, mola de 1.000 kN/m em z local e força de −1 kN nessa direção. O GL 3 do segundo nó vale −0,001 m.
+
+O cenário de interface edita a mola em kN/cm, consulta os resultados globais e locais, zera a rigidez, desfaz e refaz e confere o salvamento e a reabertura. O teste de combinação confirma que a reação da mola é multiplicada com a mesma parcela do caso.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/nodal-springs.test.ts tests/nodal-springs.integration.test.ts
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- nodal-springs.spec.ts
+```

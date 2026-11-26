@@ -8,6 +8,7 @@ import {
   scale,
   type Point3,
 } from "./geometry";
+import type { StructuralNode } from "./model";
 
 export type SupportFrame =
   | { kind: "planar"; angle: number }
@@ -15,6 +16,66 @@ export type SupportFrame =
 
 export const supportDofs = ["ux", "uy", "uz", "rx", "ry", "rz"] as const;
 export type SupportDof = (typeof supportDofs)[number];
+
+export function hasSpring(node: StructuralNode, dof: SupportDof) {
+  return (node.springs?.[dof] ?? 0) > 0;
+}
+
+export function hasElasticSupport(node: StructuralNode) {
+  return supportDofs.some((dof) => hasSpring(node, dof));
+}
+
+export function supportsDof(node: StructuralNode, dof: SupportDof) {
+  return node.restraints[dof] || hasSpring(node, dof);
+}
+
+export function hasSupport(node: StructuralNode) {
+  return supportDofs.some((dof) => supportsDof(node, dof));
+}
+
+export function setSpring(
+  node: StructuralNode,
+  dof: SupportDof,
+  stiffness: number,
+) {
+  if (!Number.isFinite(stiffness) || stiffness < 0)
+    throw new Error("Informe uma rigidez finita e não negativa.");
+  node.restraints[dof] = false;
+  if (stiffness > 0) {
+    (node.springs ??= {})[dof] = stiffness;
+  } else if (node.springs) {
+    delete node.springs[dof];
+    if (supportDofs.every((key) => !node.springs?.[key])) delete node.springs;
+  }
+}
+
+export function setRigidSupport(
+  node: StructuralNode,
+  dof: SupportDof,
+  fixed: boolean,
+) {
+  setSpring(node, dof, 0);
+  node.restraints[dof] = fixed;
+}
+
+export function combineSupport(
+  target: StructuralNode,
+  source: Pick<StructuralNode, "restraints" | "springs">,
+) {
+  for (const dof of supportDofs) {
+    if (target.restraints[dof] || source.restraints[dof]) {
+      setRigidSupport(target, dof, true);
+      continue;
+    }
+    const stiffness =
+      (target.springs?.[dof] ?? 0) + (source.springs?.[dof] ?? 0);
+    if (!Number.isFinite(stiffness))
+      throw new Error(
+        `${target.name}: soma de rigidez fora do intervalo numérico.`,
+      );
+    setSpring(target, dof, stiffness);
+  }
+}
 
 export function restrainedDofs(restraints: Record<SupportDof, boolean>) {
   return supportDofs.filter((key) => restraints[key]);

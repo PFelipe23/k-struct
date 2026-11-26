@@ -1,5 +1,6 @@
 import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
 import { sameStiffness } from "./memberStiffness";
+import { hasSupport } from "./supports";
 import {
   add,
   beamAxes,
@@ -140,7 +141,7 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     throw new Error(
       `${n.name} tem uma conexão da malha. Remova a conexão antes de alterar a extremidade.`,
     );
-  if (Object.values(n.restraints).some(Boolean))
+  if (hasSupport(n))
     throw new Error(
       `${n.name} tem apoio. A operação alteraria a posição ou eliminaria o vínculo.`,
     );
