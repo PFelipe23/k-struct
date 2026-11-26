@@ -1,4 +1,5 @@
 import { patternWind } from "../domain/wind";
+import ThermalLoadGlyph from "./ThermalLoadGlyph";
 import {
   useCallback,
   useEffect,
@@ -790,6 +791,10 @@ export default function WorkPlaneView({
           const a = nodeMap.get(m.start)!,
             b = nodeMap.get(m.end)!;
           const line = memberAxis(m, a, b);
+          const thermal =
+            display === "model" &&
+            layers.loads &&
+            patterns.thermal?.find((f) => f.memberId === m.id);
           const u = line.faceI[axisU],
             v = line.faceI[axisV],
             du = line.faceJ[axisU] - u,
@@ -946,6 +951,18 @@ export default function WorkPlaneView({
                     );
                 }}
               />
+              {thermal && (
+                <ThermalLoadGlyph
+                  field={thermal}
+                  memberName={m.name}
+                  anchor={interpolate(line.faceI, line.faceJ, 0.62)}
+                  basis={beamAxes(line.start, line.end, m.roll, project.mode)}
+                  plane={plane.kind}
+                  sx={sx}
+                  sy={sy}
+                  marker={markerId}
+                />
+              )}
               {layers.loads &&
                 displayedPatterns.flatMap((pattern) =>
                   (pattern.distributed ?? [])

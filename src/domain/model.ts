@@ -17,6 +17,7 @@ import {
   remapDiaphragmNodes,
   diaphragmStability,
 } from "./diaphragms";
+import { thermalFieldError } from "./thermalLoads";
 import { distributedLoadError } from "./memberDistributedLoads";
 import { componentError, positionError } from "./memberPointLoads";
 import { connectionStations } from "./beamMesh";
@@ -490,7 +491,7 @@ const projectV20 = projectV19.extend({
     .min(1)
     .max(100),
 });
-export const projectSchema = projectV20.extend({
+const projectV21 = projectV20.extend({
   schemaVersion: z.literal(21),
   loadPatterns: z
     .array(
@@ -511,6 +512,27 @@ export const projectSchema = projectV20.extend({
             }),
           )
           .max(500)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export const projectSchema = projectV21.extend({
+  schemaVersion: z.literal(22),
+  loadPatterns: z
+    .array(
+      projectV21.shape.loadPatterns.element.extend({
+        thermal: z
+          .array(
+            z.strictObject({
+              memberId: id,
+              uniform: finite,
+              deltaY: finite,
+              deltaZ: finite,
+            }),
+          )
+          .max(patternLoadLimit)
           .optional(),
       }),
     )
@@ -592,7 +614,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 21,
+    schemaVersion: 22,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -975,6 +997,15 @@ export function parseProject(source: string): Project {
     const old = projectV20.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 21 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 21
+  ) {
+    const old = projectV21.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 22 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1018,7 +1049,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 20, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 22, com valores numéricos finitos.",
     );
   }
   const errors = referenceErrors(parsed.data);
@@ -1247,6 +1278,23 @@ export function referenceErrors(p: Project): string[] {
         p.mode,
       );
       if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+    }
+    const heated = new Set<string>();
+    for (const field of pat.thermal ?? []) {
+      const m = membersById.get(field.memberId);
+      if (!m) {
+        errors.push(`${pat.name}: ação térmica em barra inexistente.`);
+        continue;
+      }
+      if (heated.has(m.id))
+        errors.push(`${pat.name} · ${m.name}: ação térmica repetida.`);
+      heated.add(m.id);
+      const section = sections.get(m.sectionId);
+      const material = section && materials.get(section.materialId);
+      if (section && material) {
+        const error = thermalFieldError(field, p.mode, section, material.alpha);
+        if (error) errors.push(`${pat.name} · ${m.name}: ${error}`);
+      }
     }
     if (pat.nodal.some((l) => !nodes.has(l.nodeId)))
       errors.push(`${pat.name}: carga em nó inexistente.`);
@@ -1535,6 +1583,8 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
         (w) => !nodes.has(w.bottomId) && !nodes.has(w.topId),
       );
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
+    if (pat.thermal)
+      pat.thermal = pat.thermal.filter((l) => !bars.has(l.memberId));
     if (pat.points)
       pat.points = pat.points.filter((l) => !bars.has(l.memberId));
     if (pat.distributed)

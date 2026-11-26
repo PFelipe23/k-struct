@@ -49,6 +49,7 @@ import {
 } from "../domain/supports";
 import { foundationRecords } from "./foundation";
 import { foundationReaction } from "../domain/foundation";
+import { caseThermalFields } from "../domain/thermalLoads";
 import { beamPropertyRecords } from "./beamProperties";
 import { exportSlab, parseSlabOutput, type SlabResult } from "./slab";
 
@@ -223,7 +224,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     sets.push(`Set ${sets.length + 1} ${value}`);
     return sets.length;
   };
-  const properties = beamPropertyRecords(p, memberElements, set);
+  const temperatures = caseThermalFields(p, analysisCase);
+  const heatedSections = new Set(
+    p.members.filter((m) => temperatures.has(m.id)).map((m) => m.sectionId),
+  );
+  const properties = beamPropertyRecords(
+    p,
+    memberElements,
+    set,
+    heatedSections,
+  );
   const motions = caseMotions(p, analysisCase);
   for (const n of p.nodes) {
     const fixed = dofs.filter(([key]) => n.restraints[key]);
@@ -263,6 +273,16 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     if (!values.some(Boolean)) return;
     bcs.push(
       `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
+    );
+  }
+  for (const [memberId, field] of temperatures) {
+    const ids = memberElements.get(memberId)!;
+    // Beam3d's third component follows its curvature convention about local z.
+    const values = spatial
+      ? [field.uniform, field.deltaZ, -field.deltaY]
+      : [field.uniform, field.deltaZ];
+    bcs.push(
+      `StructTemperatureLoad ${bcs.length + 1} loadTimeFunction 1 Components ${values.length} ${values.join(" ")} set ${set(`elements ${ids.length} ${ids.join(" ")}`)}`,
     );
   }
   const densities = new Map<string, LinearDensity[]>();

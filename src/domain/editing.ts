@@ -1,3 +1,4 @@
+import { rebaseThermal } from "./thermalLoads";
 import {
   distributedLoadError,
   rebaseDistributedLoad,
@@ -149,6 +150,16 @@ export function reverseMember(p: Project, id: string) {
       pat.distributed = pat.distributed.map((load) =>
         load.memberId === id ? rebaseDistributedLoad(load, from, to, id) : load,
       );
+  for (const pat of p.loadPatterns) {
+    const field = pat.thermal?.find((f) => f.memberId === id);
+    if (field) {
+      const section = p.sections.find((s) => s.id === member.sectionId)!;
+      Object.assign(
+        field,
+        rebaseThermal(field, from.axes, to.axes, id, section),
+      );
+    }
+  }
   // Mesh connections refer to physical node IDs and derive x/L from i and j.
   // Uniform loads are global, and groups and sections refer to the same ID.
 }
@@ -395,6 +406,19 @@ export function splitMembers(p: Project, cuts: Map<string, string[]>) {
       child,
       frame: pointLoadFrame(child, nodes, p.mode),
     }));
+    for (const pat of p.loadPatterns) {
+      const field = pat.thermal?.find((f) => f.memberId === m.id);
+      if (field) {
+        const section = p.sections.find((s) => s.id === m.sectionId)!;
+        pat.thermal = pat
+          .thermal!.filter((f) => f.memberId !== m.id)
+          .concat(
+            targets.map(({ child, frame }) =>
+              rebaseThermal(field, from.axes, frame.axes, child.id, section),
+            ),
+          );
+      }
+    }
     for (const pat of p.loadPatterns)
       if (pat.points)
         pat.points = pat.points.map((load) => {
