@@ -555,3 +555,28 @@ npm run test:e2e -- results.spec.ts --grep 'envelope nodal'
 ```
 
 No navegador, o ensaio percorre a fila, consulta nó e apoio, alterna o referencial e compara o CSV antes e depois das trocas kN → N, kN·m → N·m e mm → m. As rotações continuam em mrad. Uma edição da carga retira a tabela e o CSV até a nova análise. [Configuração do OOFEM](OOFEM.md)
+
+## KS-37 — Consulta de diagramas
+
+O comprimento L vai da face i à face j do trecho deformável. No campo x, a distância acompanha a unidade de comprimento selecionada. O campo x/L aceita decimais e frações. A estação de um salto possui duas leituras na mesma abscissa. Uma carga concentrada pode produzir salto no cortante, e um binário concentrado pode produzir salto no momento. A orientação local segue a conectividade i → j. A convenção de indicar a posição a partir da ponta i também aparece na documentação do SAP2000. [Convenções das forças internas em barras](https://docs.csiamerica.com/help-files/sap/Output/Frame_Element_Internal_Forces_Output_Conventions.htm)
+
+**Cálculo.** O OOFEM fornece os esforços de extremidade. Entre duas faces consecutivas, a intensidade distribuída é constante ou linear. O normal e os cortantes são polinômios de grau até dois. As duas ordenadas nativas e o gradiente da intensidade fixam seus coeficientes. O momento fletor é linear em um trecho sem carga transversal. Em um trecho carregado, é de grau até três e fica determinado pelos dois momentos e pelas duas derivadas fornecidas pelos cortantes de extremidade. Nos eixos locais espaciais, dMy/dx = Vz e dMz/dx = −Vy. No plano, dM/dx = V. O domínio dos polinômios termina em cada face da malha. [Relações de equilíbrio por integração](https://engineeringstatics.org/integration_method.html)
+
+A busca compara as duas pontas de cada trecho, as faces dos saltos e as raízes internas da derivada do esforço consultado. No envelope, cada combinação fornece seus próprios candidatos. A leitura na posição vencedora recupera todas as componentes simultâneas daquela origem. Em um resultado que só disponha de estações, a consulta identifica a amostra efetiva. O desenho usa pontos intermediários para traçar as curvas. O CSV de estações continua a exportar as amostras do solver.
+
+| Ensaio | Referência de conferência |
+| --- | --- |
+| Viga biapoiada, 6 m, força de 12 kN para baixo a 2 m | Lado i com V = +8 kN, lado j com V = −4 kN e M = +16 kN·m nas duas faces. 2 m, 200 cm e x/L = 1/3 consultam o mesmo corte. Invertida a conectividade, o corte fica a 4 m da nova origem, V passa de −4 para +8 kN e M local vale −16 kN·m. |
+| Viga biapoiada, 6 m, carga uniforme de 10 kN/m | M máximo = qL²/8 = 45 kN·m em x = 3 m. Nas malhas de 3, 5 e 8 divisões, os maiores momentos amostrados são 40, 43,2 e 45 kN·m. |
+| Carga triangular de 0 a 6 kN/m em 6 m | O máximo está em x/L = 1/√3 e vale 13,8564 kN·m. A regressão admite 5 × 10⁻⁵ em x/L e 0,6 N·m no momento, considerando a precisão de impressão das forças de extremidade. |
+| Envelope com carga uniforme e combinação de momento constante | A segunda combinação tem 42 kN·m e tração de 5 kN. Governa nas duas estações em x = 2 e 4 m. Entre elas, a primeira combinação governa com 45 kN·m em x = 3 m e normal nulo. |
+| Balanço espacial com rotação da seção, peso próprio e carga variável local | As seis componentes em três seções da malha de 3 divisões são confrontadas com as estações coincidentes de uma análise independente com 12 divisões. Tolerância absoluta por componente de 0,02 + 1,1 × 10⁻⁴ vezes o módulo da referência, em N ou N·m. |
+
+A viga com força concentrada usa tolerância de 0,0005 N ou N·m nas faces. Para a viga uniformemente carregada, o teste admite 0,005 N·m no momento máximo e 5 × 10⁻⁹ em x/L. A superposição de +2 kN/m com a carga triangular de 0 a −6 kN/m leva o cortante máximo a +2 kN em x = 2 m. Com quatro subdivisões, a maior amostra vale +1,875 kN. Há ensaios adicionais para o salto de um binário de 6 kN·m, os limites de carregamentos parciais e uma barra inclinada com braços rígidos e 7 m de comprimento deformável.
+
+Com o OOFEM 3.0 indicado em `OOFEM_BIN`, execute os testes abaixo. No navegador, o roteiro cobre cursor, entrada inválida, unidades, frações, faces, troca de combinação governante e invalidação por edição da carga. [Configuração do OOFEM](OOFEM.md)
+
+```sh
+npm test -- tests/member-diagram.test.ts
+npm run test:e2e -- results.spec.ts --grep 'consulta o diagrama|extremo calculado'
+```

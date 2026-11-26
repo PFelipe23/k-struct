@@ -29,7 +29,6 @@ export type EnvelopeStation = SectionLocation & {
   ranges: Record<MemberForceComponent, ForceRange>;
 };
 export type MemberEnvelopeResult = Record<string, EnvelopeStation[]>;
-export type EnvelopeSection = { memberId: string; index: number };
 
 export function envelopeCombinations(
   project: Project,

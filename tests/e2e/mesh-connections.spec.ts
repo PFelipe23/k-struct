@@ -152,21 +152,19 @@ test("conecta, refina, reabre e consulta ambos os lados da mesma barra", async (
       governing,
     );
   }
-  const upperTrace = view.locator(".envelope-max-line polyline");
+  const marker = view.locator(".envelope-max-line circle");
   for (const side of ["i", "j"]) {
     const label = `0,33333 · Lado ${side}`;
-    const index = await station
-      .getByRole("option", { name: label, exact: true })
-      .getAttribute("value");
-    const screen = await upperTrace.evaluate((line, i) => {
-      const trace = line as SVGPolylineElement;
-      const point = trace.points
-        .getItem(i)
-        .matrixTransform(trace.getScreenCTM()!);
-      return { x: point.x, y: point.y };
-    }, Number(index));
-    await page.mouse.click(screen.x, screen.y);
-    await expect(station).toHaveValue(index!);
+    await station.selectOption({ label });
+    const bounds = await marker.boundingBox();
+    await station.selectOption({
+      label: `0,33333 · Lado ${side === "i" ? "j" : "i"}`,
+    });
+    await page.mouse.click(
+      bounds!.x + bounds!.width / 2,
+      bounds!.y + bounds!.height / 2,
+    );
+    await expect(station.locator("option:checked")).toHaveText(label);
   }
   const csvDownload = page.waitForEvent("download");
   await env.getByRole("button", { name: "CSV" }).click();

@@ -32,10 +32,8 @@ import {
 import { resolveWorkPlaneSnap, type SnapCandidate } from "../domain/snap";
 import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { MemberForceComponent } from "../solver/combinations";
-import type {
-  EnvelopeSection,
-  MemberEnvelopeResult,
-} from "../solver/envelopes";
+import type { MemberEnvelopeResult } from "../solver/envelopes";
+import type { SectionCursor, MemberDiagram } from "../solver/memberDiagram";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
 import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
@@ -86,11 +84,15 @@ interface Props {
   onPickLoad?: (id: string, point: Point3) => void;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
-  envelope: {
-    result: MemberEnvelopeResult;
-    section: EnvelopeSection;
-    onSection: (section: EnvelopeSection) => void;
+  envelope: MemberEnvelopeResult | null;
+  sectionPlot: {
+    memberId: string;
+    t: number;
+    min: number;
+    max: number;
+    points: ReturnType<MemberDiagram["trace"]>;
   } | null;
+  onSection: (section: SectionCursor) => void;
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
@@ -126,7 +128,9 @@ export default function WorkPlaneView({
   onSpan,
   onPickLoad,
   result,
-  envelope,
+  envelope: envelopeResult,
+  sectionPlot,
+  onSection,
   display,
   slabMap,
   patternId,
@@ -447,9 +451,11 @@ export default function WorkPlaneView({
   const deformationScale = 60 / (maxU * camera.scale);
   const component =
     display === "model" || display === "deformed" ? null : display;
-  const envelopeResult = envelope?.result;
   const maxForce = useMemo(() => {
     let magnitude = 1;
+    if (sectionPlot)
+      for (const p of sectionPlot.points)
+        magnitude = Math.max(magnitude, Math.abs(p.max), Math.abs(p.min));
     if (!component) return magnitude;
     if (envelopeResult) {
       for (const stations of Object.values(envelopeResult)) {
@@ -468,7 +474,7 @@ export default function WorkPlaneView({
           magnitude = Math.max(magnitude, Math.abs(station[component]));
     }
     return magnitude;
-  }, [component, envelopeResult, result]);
+  }, [component, envelopeResult, result, sectionPlot]);
   const gridStep = camera.scale < 25 ? 2 : camera.scale > 120 ? 0.5 : 1;
   const grid = (center: number, pixels: number) => {
     const start =
@@ -818,51 +824,85 @@ export default function WorkPlaneView({
               sy(v + dv * t - (du / length) * offset),
             ] as const;
           };
+          const inspected = sectionPlot?.memberId === m.id ? sectionPlot : null;
           const band =
             envelopeStations && component && length >= tolerance
               ? {
-                  max: envelopeStations.map((s) =>
-                    forcePoint(s.t, s.ranges[component].max.forces[component]),
-                  ),
-                  min: envelopeStations.map((s) =>
-                    forcePoint(s.t, s.ranges[component].min.forces[component]),
-                  ),
+                  max: inspected
+                    ? inspected.points.map((p) => forcePoint(p.t, p.max))
+                    : envelopeStations.map((s) =>
+                        forcePoint(
+                          s.t,
+                          s.ranges[component].max.forces[component],
+                        ),
+                      ),
+                  min: inspected
+                    ? inspected.points.map((p) => forcePoint(p.t, p.min))
+                    : envelopeStations.map((s) =>
+                        forcePoint(
+                          s.t,
+                          s.ranges[component].min.forces[component],
+                        ),
+                      ),
                 }
               : null;
           const sectionAt = (event: { clientX: number; clientY: number }) => {
-            if (!band || !envelope || !envelopeStations) return;
+            const samples = envelopeStations ?? stations;
+            if (
+              !component ||
+              !samples?.length ||
+              length < tolerance ||
+              tool !== "select"
+            )
+              return;
             const bounds = ref.current!.getBoundingClientRect();
             const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
             const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
             const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
-            let index = nearestSection(envelopeStations, t);
-            const station = envelopeStations[index];
-            // On a jump both traces have the same abscissa. Pick the closer force ordinate.
-            if (
-              station.side &&
-              Math.abs(t - station.t) * length * camera.scale <= 2
-            ) {
-              const other = index + (station.side === "left" ? 1 : -1);
-              const toPointer = ([px, py]: readonly [number, number]) =>
-                Math.hypot(
-                  px + bounds.left - event.clientX,
-                  py + bounds.top - event.clientY,
+            let index = nearestSection(samples, t);
+            if (Math.abs(t - samples[index].t) * length * camera.scale > 2) {
+              onSection({ memberId: m.id, t });
+              return;
+            }
+            if (samples[index].side) {
+              const other = index + (samples[index].side === "left" ? 1 : -1);
+              const toCurve = (i: number) => {
+                const range = envelopeStations?.[i].ranges[component];
+                const values = range
+                  ? [range.min.forces[component], range.max.forces[component]]
+                  : [stations![i][component]];
+                return Math.min(
+                  ...values.map((v) => {
+                    const [px, py] = forcePoint(samples[i].t, v);
+                    return Math.hypot(
+                      px + bounds.left - event.clientX,
+                      py + bounds.top - event.clientY,
+                    );
+                  }),
                 );
-              const toCurve = (i: number) =>
-                Math.min(toPointer(band.min[i]), toPointer(band.max[i]));
+              };
               if (toCurve(other) < toCurve(index)) index = other;
             }
-            envelope.onSection({ memberId: m.id, index });
+            onSection({
+              memberId: m.id,
+              t: samples[index].t,
+              side: samples[index].side,
+            });
           };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {
-            diagram = stations
-              .map((s) => {
-                if (display === "deformed")
-                  return `${sx(u + du * s.t + s[dofU] * deformationScale)},${sy(v + dv * s.t + s[dofV] * deformationScale)}`;
-                return forcePoint(s.t, s[display]).join(",");
-              })
-              .join(" ");
+            diagram =
+              inspected && component
+                ? inspected.points
+                    .map((p) => forcePoint(p.t, p.max).join(","))
+                    .join(" ")
+                : stations
+                    .map((s) => {
+                      if (display === "deformed")
+                        return `${sx(u + du * s.t + s[dofU] * deformationScale)},${sy(v + dv * s.t + s[dofV] * deformationScale)}`;
+                      return forcePoint(s.t, s[display]).join(",");
+                    })
+                    .join(" ");
           }
           return (
             <g key={m.id}>
@@ -943,7 +983,11 @@ export default function WorkPlaneView({
                 onClick={(e) => {
                   if (tool !== "select") return;
                   e.stopPropagation();
-                  if (band && !additiveSelection(e)) sectionAt(e);
+                  if (
+                    (band || (component && stations)) &&
+                    !additiveSelection(e)
+                  )
+                    sectionAt(e);
                   else
                     onSelect(
                       { kind: "member", id: m.id },
@@ -1115,9 +1159,29 @@ export default function WorkPlaneView({
                     fill="var(--geometry-result-fill)"
                     stroke="var(--geometry-result)"
                     strokeWidth="1.6"
-                    pointerEvents="none"
+                    className="member-force-diagram"
+                    pointerEvents={
+                      tool === "select" ? "visiblePainted" : "none"
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (additiveSelection(e))
+                        onSelect({ kind: "member", id: m.id }, true);
+                      else sectionAt(e);
+                    }}
                   />
                 ))}
+              {inspected && component && !band && length >= tolerance && (
+                <circle
+                  className="section-cursor"
+                  aria-label="Cursor da seção"
+                  cx={forcePoint(inspected.t, inspected.max)[0]}
+                  cy={forcePoint(inspected.t, inspected.max)[1]}
+                  r="4"
+                  fill="var(--geometry-result)"
+                  pointerEvents="none"
+                />
+              )}
               {band && (
                 <g
                   className="envelope-plot"
@@ -1134,10 +1198,9 @@ export default function WorkPlaneView({
                   />
                   {(["max", "min"] as const).map((bound) => {
                     const points = band[bound];
-                    const selectedPoint =
-                      envelope?.section.memberId === m.id
-                        ? points[envelope.section.index]
-                        : undefined;
+                    const selectedPoint = inspected
+                      ? forcePoint(inspected.t, inspected[bound])
+                      : undefined;
                     return (
                       <g key={bound} className={`envelope-${bound}-line`}>
                         <polyline

@@ -130,11 +130,14 @@ import LoadDefinitions, {
   type LoadDefinitionsPage,
 } from "./components/LoadDefinitions";
 import { version } from "../package.json";
+import {
+  prepareMemberDiagram,
+  type SectionCursor,
+} from "./solver/memberDiagram";
 import { combineLinearResults, requiredCaseIds } from "./solver/combinations";
 import {
   envelopeCombinations,
   evaluateEnvelope,
-  type EnvelopeSection,
   type EnvelopeResult,
 } from "./solver/envelopes";
 import {
@@ -329,8 +332,9 @@ export default function App() {
     id: string;
   } | null>(null);
   const [envelopeView, setEnvelopeView] = useState<EnvelopeView>("members");
+  const [resultTab, setResultTab] = useState("log");
   const [preferredSection, setPreferredSection] =
-    useState<EnvelopeSection | null>(null);
+    useState<SectionCursor | null>(null);
   const [forceMemberId, setForceMemberId] = useState("");
   if (forceMemberId && !p.members.some(({ id }) => id === forceMemberId))
     setForceMemberId("");
@@ -451,16 +455,6 @@ export default function App() {
       (item) =>
         item.kind === "member" && p.members.some(({ id }) => item.id === id),
     )?.id ?? p.members[0]?.id;
-  const section =
-    envelopeResult && sectionMemberId
-      ? {
-          memberId: sectionMemberId,
-          index:
-            preferredSection?.memberId === sectionMemberId
-              ? preferredSection.index
-              : 0,
-        }
-      : null;
   const beamDisplay = isSlabDisplay(display) ? "model" : display;
   const envelopeComponent =
     beamDisplay === "model" || beamDisplay === "deformed"
@@ -476,6 +470,59 @@ export default function App() {
     : result
       ? beamDisplay
       : "model";
+  const diagram = useMemo(() => {
+    if (!sectionMemberId || slab) return null;
+    const sources =
+      envelope && envelopeResult && envelopeView === "members"
+        ? envelopeCombinations(p, envelope)
+        : result && resultTab === "section"
+          ? [
+              combination ?? {
+                id: analysisCase.id,
+                name: analysisCase.name,
+                factors: [{ caseId: analysisCase.id, factor: 1 }],
+              },
+            ]
+          : null;
+    return (
+      sources && prepareMemberDiagram(p, sectionMemberId, sources, caseResults)
+    );
+  }, [
+    sectionMemberId,
+    slab,
+    envelope,
+    envelopeResult,
+    envelopeView,
+    p,
+    result,
+    resultTab,
+    combination,
+    analysisCase,
+    caseResults,
+  ]);
+  const reading = useMemo(
+    () =>
+      diagram?.read(
+        preferredSection?.memberId === diagram.memberId
+          ? preferredSection
+          : { t: 0 },
+        envelopeComponent,
+      ) ?? null,
+    [diagram, preferredSection, envelopeComponent],
+  );
+  const sectionPlot = useMemo(
+    () =>
+      diagram && reading
+        ? {
+            memberId: diagram.memberId,
+            t: reading.location.t,
+            min: reading.min.forces[envelopeComponent],
+            max: reading.max.forces[envelopeComponent],
+            points: diagram.trace(envelopeComponent, reading),
+          }
+        : null,
+    [diagram, reading, envelopeComponent],
+  );
   const defaultDiagram = slab ? "slab-uz" : spatial ? "deformed" : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
@@ -654,13 +701,28 @@ export default function App() {
     }
     setDisplay(value);
   };
-  const inspectSection = (target: EnvelopeSection) => {
+  const inspectSection = (target: SectionCursor) => {
+    if (!envelope) {
+      setResultTab("section");
+      setDisplay(envelopeComponent);
+    }
     selectObject({ kind: "member", id: target.memberId });
     setPreferredSection(target);
     setTool("select");
     setPending(null);
   };
+  const sectionControls =
+    diagram && reading
+      ? {
+          diagram,
+          reading,
+          component: envelopeComponent,
+          onSection: inspectSection,
+          onComponent: showDisplay,
+        }
+      : null;
   const replace = (project: Project) => {
+    setResultTab("log");
     invalidateResults();
     current.current = project;
     dispatch({ type: "reset", project });
@@ -1970,14 +2032,12 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   quick={active && tool === "member" && memberMode === "span"}
                   result={result}
                   envelope={
-                    showEnvelope && envelopeResult && section
-                      ? {
-                          result: envelopeResult.members,
-                          section,
-                          onSection: inspectSection,
-                        }
+                    showEnvelope && envelopeResult
+                      ? envelopeResult.members
                       : null
                   }
+                  sectionPlot={sectionPlot}
+                  onSection={inspectSection}
                   display={visibleDisplay}
                   slabMap={
                     view.plane.kind === "XY" && view.guide.id === slab?.levelId
@@ -2069,15 +2129,23 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               envelope={envelope}
               result={envelopeResult}
               component={envelopeComponent}
-              section={section}
+              controls={sectionControls}
               problem={envelopeState?.problem ?? "Calculando envelope…"}
-              onSection={inspectSection}
             />
           ) : (
             <Results
               project={p}
               forceMemberId={forceMemberId}
-              onForceMemberChange={setForceMemberId}
+              tab={resultTab}
+              onTab={(tab) => {
+                setResultTab(tab);
+                if (tab === "section") showDisplay(envelopeComponent);
+              }}
+              controls={sectionControls}
+              onForceMemberChange={(id) => {
+                setForceMemberId(id);
+                if (id) selectObject({ kind: "member", id });
+              }}
               view={
                 combination && combined
                   ? {
