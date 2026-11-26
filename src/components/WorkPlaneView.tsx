@@ -1,3 +1,4 @@
+import { patternWind } from "../domain/wind";
 import {
   useCallback,
   useEffect,
@@ -180,6 +181,11 @@ export default function WorkPlaneView({
   const selected = new Set(selection.map((s) => `${s.kind}:${s.id}`));
   const hasMemberSelection = selection.some((item) => item.kind === "member");
   const patterns = project.loadPatterns.find((p) => p.id === patternId)!;
+  const wind =
+    layers.loads && display === "model"
+      ? patternWind(nodeMap, project.mode, patterns)
+      : [];
+  const nodalActions = [...patterns.nodal, ...wind.flatMap((w) => w.loads)];
   const displayedPatterns =
     display === "model"
       ? [patterns]
@@ -1249,6 +1255,40 @@ export default function WorkPlaneView({
             </g>
           );
         })}
+        {wind
+          .filter((w) => {
+            const positions = w.corners.map((p) => p[normal]);
+            return (
+              plane.offset >= Math.min(...positions) - tolerance &&
+              plane.offset <= Math.max(...positions) + tolerance
+            );
+          })
+          .map((w) => (
+            <g key={w.id} pointerEvents="none">
+              <polygon
+                points={w.corners
+                  .map((p) => `${sx(p[axisU])},${sy(p[axisV])}`)
+                  .join(" ")}
+                stroke="var(--geometry-load)"
+                fill="var(--geometry-load)"
+                fillOpacity={0.1}
+                pointerEvents="none"
+              >
+                <title>
+                  Faixa de vento · {w.area.toLocaleString("pt-BR")} m²
+                </title>
+              </polygon>
+              {labels && (
+                <text
+                  className="node-label"
+                  x={sx(w.center[axisU]) + 6}
+                  y={sy(w.center[axisV]) - 6}
+                >
+                  {w.name} · {w.area.toLocaleString("pt-BR")} m²
+                </text>
+              )}
+            </g>
+          ))}
         {nodes.map((n) => {
           const active = selected.has(`node:${n.id}`);
           const x = sx(n[axisU]),
@@ -1256,7 +1296,7 @@ export default function WorkPlaneView({
           const r = n.restraints;
           const hasSupport = Object.values(r).some(Boolean);
           const fixed = spatial ? Object.values(r).every(Boolean) : r.ry;
-          const loads = patterns.nodal.filter((l) => l.nodeId === n.id);
+          const loads = nodalActions.filter((l) => l.nodeId === n.id);
           const force = (k: Coordinate) =>
             loads.reduce((sum, l) => sum + l[`f${k}`], 0);
           const fu = force(axisU),

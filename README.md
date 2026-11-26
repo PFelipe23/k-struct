@@ -20,7 +20,7 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
 - Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
 - Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
-- Salvar e reabrir `.kstruct.json` no esquema v20, com migração dos projetos v1 a v19 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v21, com migração dos projetos v1 a v20 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -144,6 +144,8 @@ O fluxo de laje usa um painel isolado por projeto e resultados por caso estátic
 ### Padrões, casos, combinações e envelopes
 
 Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.
+
+Para gerar vento estático, abra **Cargas e casos → Padrões → Adicionar faixa de vento**. Selecione dois nós na mesma vertical e informe a largura de fachada que descarrega nessa vertical. O intervalo de 0 a 100% cobre toda a altura entre os nós. A prévia indica a área, a linha de ação e as duas parcelas nodais. **Aplicar definições** grava as faixas no padrão selecionado. Reabra uma faixa para substituir suas parcelas ou use **Cancelar** para descartar a edição. [Exemplo de fachada de 4 × 3 m](docs/VALIDATION.md#ks-33--vento-estático-por-faixa)
 
 No desktop, escolha um caso estático em **Caso, combinação ou envelope** e clique em **Analisar**. Repita para os demais casos. O seletor alterna entre os resultados da revisão atual.
 

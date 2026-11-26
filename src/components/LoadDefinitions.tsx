@@ -1,3 +1,4 @@
+import WindStrips from "./WindStrips";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
@@ -407,6 +408,19 @@ export default function LoadDefinitions({
                 ` · ${pattern.pressure.length} pressões em laje`}
               . Atribua as cargas pelo painel de propriedades.
             </p>
+            {!project.slabs.length && (
+              <WindStrips
+                project={project}
+                strips={pattern.wind ?? []}
+                onChange={(wind) =>
+                  setPatterns(
+                    patterns.map((item) =>
+                      item.id === patternId ? { ...item, wind } : item,
+                    ),
+                  )
+                }
+              />
+            )}
             <fieldset className="case-factors">
               <legend>Peso próprio automático</legend>
               <label>

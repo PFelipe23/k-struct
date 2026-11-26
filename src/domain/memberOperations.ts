@@ -152,12 +152,14 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     throw new Error(
       `${n.name} tem apoio. A operação alteraria a posição ou eliminaria o vínculo.`,
     );
-  const pattern = p.loadPatterns.find((pat) =>
-    pat.nodal.some(
-      (l) =>
-        l.nodeId === n.id &&
-        [l.fx, l.fy, l.fz, l.mx, l.my, l.mz].some((v) => v !== 0),
-    ),
+  const pattern = p.loadPatterns.find(
+    (pat) =>
+      pat.wind?.some((w) => w.bottomId === n.id || w.topId === n.id) ||
+      pat.nodal.some(
+        (l) =>
+          l.nodeId === n.id &&
+          [l.fx, l.fy, l.fz, l.mx, l.my, l.mz].some((v) => v !== 0),
+      ),
   );
   if (pattern)
     throw new Error(

@@ -1,3 +1,4 @@
+import { distributeWind } from "./wind";
 import { z } from "zod";
 import {
   geometrySchemas,
@@ -478,12 +479,39 @@ const selfWeightSchema = z
     multiplier: finite.nonnegative(),
   })
   .strict();
-export const projectSchema = projectV19.extend({
+const projectV20 = projectV19.extend({
   schemaVersion: z.literal(20),
   loadPatterns: z
     .array(
       projectV19.shape.loadPatterns.element.extend({
         selfWeight: selfWeightSchema,
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export const projectSchema = projectV20.extend({
+  schemaVersion: z.literal(21),
+  loadPatterns: z
+    .array(
+      projectV20.shape.loadPatterns.element.extend({
+        wind: z
+          .array(
+            z.strictObject({
+              id,
+              name: text,
+              bottomId: id,
+              topId: id,
+              angle: finite.min(-360).max(360),
+              pressure: finite.nonnegative(),
+              coefficient: finite,
+              width: finite.positive(),
+              from: finite.min(0).max(1),
+              to: finite.min(0).max(1),
+            }),
+          )
+          .max(500)
+          .optional(),
       }),
     )
     .min(1)
@@ -564,7 +592,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 20,
+    schemaVersion: 21,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -938,6 +966,15 @@ export function parseProject(source: string): Project {
         })),
       };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 20
+  ) {
+    const old = projectV20.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 21 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -1146,6 +1183,17 @@ export function referenceErrors(p: Project): string[] {
   }
   const membersById = new Map(p.members.map((m) => [m.id, m]));
   for (const pat of p.loadPatterns) {
+    const windIds = new Set<string>();
+    for (const strip of pat.wind ?? []) {
+      if (windIds.has(strip.id))
+        errors.push(`${pat.name}: faixa de vento com ID repetido.`);
+      windIds.add(strip.id);
+      try {
+        distributeWind(nodes, p.mode, strip);
+      } catch (error) {
+        errors.push(`${pat.name} · ${strip.name}: ${(error as Error).message}`);
+      }
+    }
     const motions = new Set<string>();
     for (const { nodeId, dof } of pat.prescribed ?? []) {
       const node = nodes.get(nodeId);
@@ -1482,6 +1530,10 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
   for (const group of p.selectionGroups)
     group.objects = group.objects.filter((o) => !removed[o.kind].has(o.id));
   for (const pat of p.loadPatterns) {
+    if (pat.wind)
+      pat.wind = pat.wind.filter(
+        (w) => !nodes.has(w.bottomId) && !nodes.has(w.topId),
+      );
     pat.uniform = pat.uniform.filter((l) => !bars.has(l.memberId));
     if (pat.points)
       pat.points = pat.points.filter((l) => !bars.has(l.memberId));

@@ -14,7 +14,7 @@ export async function analyzeInBrowser(
   let expectedDeck: string;
   try {
     await reference.addInitScript(
-      (source) => localStorage.setItem("kstruct.draft.v20", source),
+      (source) => localStorage.setItem("kstruct.draft.v21", source),
       serializeProject(project),
     );
     await reference.goto(page.url());
