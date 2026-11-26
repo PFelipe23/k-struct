@@ -436,13 +436,33 @@ const distributedSchema = z.strictObject({
   qStart: directionSchema,
   qEnd: directionSchema,
 });
-export const projectSchema = projectV17.extend({
+const projectV18 = projectV17.extend({
   schemaVersion: z.literal(18),
   loadPatterns: z
     .array(
       projectV17.shape.loadPatterns.element.extend({
         distributed: z
           .array(distributedSchema)
+          .max(patternLoadLimit)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export const projectSchema = projectV18.extend({
+  schemaVersion: z.literal(19),
+  loadPatterns: z
+    .array(
+      projectV18.shape.loadPatterns.element.extend({
+        prescribed: z
+          .array(
+            z.strictObject({
+              nodeId: id,
+              dof: z.enum(supportDofs),
+              value: finite,
+            }),
+          )
           .max(patternLoadLimit)
           .optional(),
       }),
@@ -516,7 +536,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 18,
+    schemaVersion: 19,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -863,6 +883,15 @@ export function parseProject(source: string): Project {
     const old = projectV17.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 18 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 18
+  ) {
+    const old = projectV18.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 19 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const factorIssue = parsed.error.issues.find(
@@ -906,7 +935,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 15, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 19, com valores numéricos finitos.",
     );
   }
   const errors = referenceErrors(parsed.data);
@@ -1071,6 +1100,23 @@ export function referenceErrors(p: Project): string[] {
   }
   const membersById = new Map(p.members.map((m) => [m.id, m]));
   for (const pat of p.loadPatterns) {
+    const motions = new Set<string>();
+    for (const { nodeId, dof } of pat.prescribed ?? []) {
+      const node = nodes.get(nodeId);
+      const label = `${pat.name} · ${node?.name ?? nodeId} · ${dof.toUpperCase()}`;
+      if (!node)
+        errors.push(`${label}: movimento prescrito em nó inexistente.`);
+      else if (p.mode === "planar" && ["uy", "rx", "rz"].includes(dof))
+        errors.push(`${label}: movimento prescrito fora do plano XZ.`);
+      else if (!node.restraints[dof])
+        errors.push(
+          `${label}: o movimento prescrito exige restrição rígida. Remova a prescrição antes de liberar o grau de liberdade.`,
+        );
+      const key = nodeId + ":" + dof;
+      if (motions.has(key))
+        errors.push(`${label}: movimento prescrito repetido no mesmo padrão.`);
+      motions.add(key);
+    }
     const seen = new Set<string>();
     for (const load of pat.points ?? []) {
       const m = membersById.get(load.memberId);
@@ -1396,6 +1442,8 @@ export function removeSelection(p: Project, selection: SelectedObject[]) {
     if (pat.distributed)
       pat.distributed = pat.distributed.filter((l) => !bars.has(l.memberId));
     pat.nodal = pat.nodal.filter((l) => !nodes.has(l.nodeId));
+    if (pat.prescribed)
+      pat.prescribed = pat.prescribed.filter((l) => !nodes.has(l.nodeId));
     pat.pressure = pat.pressure.filter((load) => !slabs.has(load.slabId));
   }
 }

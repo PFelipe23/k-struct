@@ -1,3 +1,4 @@
+import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
 import { rebaseDistributedLoad } from "./memberDistributedLoads";
 import {
   pointLoadFrame,
@@ -247,8 +248,50 @@ export function planRepair(
       }
       if (value) notes.push(`Apoio final · ${label} · ${supportText(dst)}`);
     }
-    for (const pat of p.loadPatterns)
+    for (const pat of p.loadPatterns) {
       pat.nodal = resolveRows(pat.nodal, ids, nodes, "nodeId", pat);
+      const original = pat.prescribed?.filter((r) => ids.includes(r.nodeId));
+      if (!original?.length) continue;
+      pat.prescribed = pat.prescribed!.filter((r) => !ids.includes(r.nodeId));
+      const contributions = supports.flatMap((n) => {
+        const rows = original.filter((r) => r.nodeId === n.id);
+        if (rows.length && !sameSupportAxes(n.supportFrame, dst.supportFrame)) {
+          blocking.push(
+            `${pat.name} · ${n.name}: alinhe os eixos dos apoios antes de unir nós com movimentos prescritos.`,
+          );
+          return [];
+        }
+        return transformMotions(
+          rows,
+          keep,
+          n.supportFrame,
+          dst.supportFrame,
+          (v) => v,
+          1,
+        ).map((r) => ({ ...r, source: n.id }));
+      });
+      for (const dof of dofs) {
+        const rows = contributions.filter((r) => r.dof === dof);
+        if (!rows.length) continue;
+        if (!dst.restraints[dof]) {
+          blocking.push(
+            `${label} · ${dof.toUpperCase()}: a união precisa conservar a restrição do movimento prescrito em ${pat.name}.`,
+          );
+          continue;
+        }
+        let selected = rows[0];
+        if (rows.some((r) => r.value !== selected.value)) {
+          const choice = ask(
+            ["motion", pat.id, dof, ...ids],
+            `Movimentos ${dof.toUpperCase()} diferentes em ${pat.name} para ${label}`,
+            rows.map((r) => sourceOption(nodes.get(r.source)!)),
+          );
+          if (!choice) continue;
+          selected = rows.find((r) => choice === "use:" + r.source)!;
+        }
+        setPrescribedMotion(pat, { nodeId: keep, dof, value: selected.value });
+      }
+    }
   }
   for (const m of stage.members) {
     const old = members.get(m.id)!;

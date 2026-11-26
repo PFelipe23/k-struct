@@ -30,6 +30,7 @@ import {
   tolerance,
 } from "../domain/geometry";
 import { reverseMember } from "../domain/editing";
+import { setPrescribedMotion } from "../domain/prescribedMotions";
 import { setRigidSupport, setSpring } from "../domain/supports";
 import {
   free,
@@ -358,6 +359,7 @@ export default function Inspector({
   project: p,
   selection,
   patternId,
+  onPatternChange,
   edit,
   onMaterials,
   onSections,
@@ -366,12 +368,14 @@ export default function Inspector({
   project: Project;
   selection: SelectedObject[];
   patternId: string;
+  onPatternChange: (id: string) => void;
   edit: (fn: (p: Project) => void) => string | null | void;
   onMaterials: () => void;
   onSections: (id: string) => void;
   onMemberLoad: (selection: MemberLoadSelection) => void;
 }) {
   const { units } = useUnits();
+  const [angleUnit, setAngleUnit] = useState("mrad");
   const [foundationId, setFoundationId] = useState<string>();
   const single = selection.length === 1 ? selection[0] : null;
   const spatial = p.mode === "spatial";
@@ -634,6 +638,71 @@ export default function Inspector({
                   }
                 />
               ))}
+            </details>
+            <details className="nodal-springs" key={`motions-${node.id}`}>
+              <summary>
+                Movimentos prescritos
+                {pattern.prescribed?.some((r) => r.nodeId === node.id) &&
+                  ` · ${pattern.name}`}
+              </summary>
+              <p className="help">
+                Informe o movimento conhecido no referencial{" "}
+                {node.supportFrame ? "local do apoio" : "global"}. O sinal segue
+                o sentido positivo do eixo. Zero restabelece a condição imóvel
+                nesse padrão.
+              </p>
+              <label className="stack-field">
+                Padrão do movimento
+                <select
+                  value={patternId}
+                  onChange={(e) => onPatternChange(e.target.value)}
+                >
+                  {p.loadPatterns.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {dofs.some((k) => k[0] === "r" && node.restraints[k]) && (
+                <label className="stack-field">
+                  Unidade de rotação
+                  <select
+                    value={angleUnit}
+                    onChange={(e) => setAngleUnit(e.target.value)}
+                  >
+                    <option value="mrad">mrad</option>
+                    <option value="rad">rad</option>
+                  </select>
+                </label>
+              )}
+              {dofs.map((dof) => {
+                const rotation = dof[0] === "r";
+                const factor = rotation && angleUnit === "mrad" ? 1000 : 1;
+                const motion = pattern.prescribed?.find(
+                  (r) => r.nodeId === node.id && r.dof === dof,
+                );
+                return (
+                  <NumberField
+                    key={`${node.id}-${patternId}-${dof}-${angleUnit}`}
+                    label={`${dof.toUpperCase()} imposto ${node.supportFrame ? "local" : "global"}`}
+                    disabled={!node.restraints[dof]}
+                    quantity={rotation ? undefined : "displacement"}
+                    unit={rotation ? angleUnit : undefined}
+                    value={(motion?.value ?? 0) * factor}
+                    onChange={(value) =>
+                      edit((draft) =>
+                        setPrescribedMotion(
+                          draft.loadPatterns.find(
+                            (item) => item.id === patternId,
+                          )!,
+                          { nodeId: node.id, dof, value: value / factor },
+                        ),
+                      )
+                    }
+                  />
+                );
+              })}
             </details>
             <h4>
               Carga nodal <span>{pattern.name}</span>

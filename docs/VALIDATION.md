@@ -188,10 +188,10 @@ O teste de interface `tests/e2e/mesh-connections.spec.ts` conecta C, inspeciona 
 
 Dois balanços XZ independentes de 3 m têm seções de 20 × 30 cm e carga de ponta de −10,5 kN. As duas seções começam vinculadas ao mesmo aço, com E = 210 GPa, ν = 0,30, ρ = 7.850 kg/m³ e α = 0,000012/K. A referência de Euler–Bernoulli fornece $I_y=bh^3/12=0{,}00045\,\mathrm{m}^4$ e $u_z=-PL^3/(3EI_y)$, com $P$ em módulo.
 
-| Configuração | Flecha na ponta A | Flecha na ponta B |
-| --- | ---: | ---: |
-| Duas seções com E = 210 GPa | −1,000 mm | −1,000 mm |
-| Cópia com E = 420 GPa atribuída apenas à seção B | −1,000 mm | −0,500 mm |
+| Configuração                                     | Flecha na ponta A | Flecha na ponta B |
+| ------------------------------------------------ | ----------------: | ----------------: |
+| Duas seções com E = 210 GPa                      |         −1,000 mm |         −1,000 mm |
+| Cópia com E = 420 GPa atribuída apenas à seção B |         −1,000 mm |         −0,500 mm |
 
 Em ambas as configurações cada engaste deve fornecer +10,5 kN em Z e −31,5 kN·m em Y. O teste verifica os IDs de material nos registros `SimpleCS`, as propriedades em `IsoLE`, as flechas com tolerância absoluta de 5 × 10⁻¹¹ m e as reações com 0,05 N ou N·m. Outro ensaio abre a viga biapoiada no formato v8 e confere α = 0, a flecha de −8,4375 mm e o momento de +45 kN·m no meio do vão.
 
@@ -205,11 +205,11 @@ Flambagem/P–Δ, massas/modal, cascas, ligação entre lajes e barras, liberaç
 
 O catálogo recebe dimensões em cm e o domínio trabalha em metros. A largura acompanha y local, a altura acompanha z local e x vai de i para j. A rotação positiva segue a regra da mão direita em torno de x. A tabela usa mm para permitir a conferência direta com as dimensões de referência.
 
-| Forma e dimensões (mm) | A (mm²) | Iy (mm⁴) | Iz (mm⁴) | J (mm⁴) |
-| --- | ---: | ---: | ---: | ---: |
-| Círculo, d = 100 | 7 853,982 | 4 908 738,521 | 4 908 738,521 | 9 817 477,042 |
-| Tubo, D = 100, t = 10, di = 80 | 2 827,433 | 2 898 119,223 | 2 898 119,223 | 5 796 238,446 |
-| I, h = 200, b = 100, tf = 10, tw = 6 | 3 080,000 | 20 982 666,667 | 1 669 906,667 | 80 346,667 |
+| Forma e dimensões (mm)               |   A (mm²) |       Iy (mm⁴) |      Iz (mm⁴) |       J (mm⁴) |
+| ------------------------------------ | --------: | -------------: | ------------: | ------------: |
+| Círculo, d = 100                     | 7 853,982 |  4 908 738,521 | 4 908 738,521 | 9 817 477,042 |
+| Tubo, D = 100, t = 10, di = 80       | 2 827,433 |  2 898 119,223 | 2 898 119,223 | 5 796 238,446 |
+| I, h = 200, b = 100, tf = 10, tw = 6 | 3 080,000 | 20 982 666,667 | 1 669 906,667 |    80 346,667 |
 
 No círculo maciço, A = πd²/4, Iy = Iz = πd⁴/64 e J = πd⁴/32. No anel, a referência subtrai o círculo interno do externo. A parede deve satisfazer 0 < t < D/2. O retângulo conserva os 60 termos ímpares da série de Saint-Venant usada nas versões anteriores.
 
@@ -218,17 +218,17 @@ O I tem duas mesas iguais, alma centrada e cantos vivos. Com a altura livre hw =
 - A = 2b·tf + hw·tw.
 - Iy = [b·h³ − (b − tw)·hw³]/12.
 - Iz = [2tf·b³ + hw·tw³]/12.
-- Para torção uniforme de Saint-Venant em chapas finas, J ≈ [2b·tf³ + (h − tf)·tw³]/3. A altura h − tf vai do centro de uma mesa ao centro da outra. Raios de concordância, cordões de solda e rigidez de empenamento restringido ficam fora do modelo. Iy + Iz é o momento polar geométrico. O exemplo publicado W610×125 (612 × 229 × 19,6 × 11,9 mm) resulta em 1,4823 × 10⁶ mm⁴, compatível com os 1,48 × 10⁶ mm⁴ da fonte. [CISC, *Torsional Section Properties of Steel Shapes*, p. 6, equações 6 e 8](https://www.labciv.eng.uerj.br/pgeciv/files/Torsion%20Properties.pdf)
+- Para torção uniforme de Saint-Venant em chapas finas, J ≈ [2b·tf³ + (h − tf)·tw³]/3. A altura h − tf vai do centro de uma mesa ao centro da outra. Raios de concordância, cordões de solda e rigidez de empenamento restringido ficam fora do modelo. Iy + Iz é o momento polar geométrico. O exemplo publicado W610×125 (612 × 229 × 19,6 × 11,9 mm) resulta em 1,4823 × 10⁶ mm⁴, compatível com os 1,48 × 10⁶ mm⁴ da fonte. [CISC, _Torsional Section Properties of Steel Shapes_, p. 6, equações 6 e 8](https://www.labciv.eng.uerj.br/pgeciv/files/Torsion%20Properties.pdf)
 
 O KStruct limita a aproximação de J a b/tf ≥ 10 e hw/tw ≥ 10 e exige tw < b. Esses limites são um critério de aplicação adotado pelo projeto. O formulário identifica a dimensão a corrigir e impede salvar. O esquema do arquivo também verifica esses limites.
 
 **Balanço espacial.** Uma barra de 2 m em +X tem os seis graus de liberdade impedidos em i. Em j atuam Fy = +300 N, Fz = −900 N e Mx = +15 N·m. O material tem E = 210 GPa, ν = 0,30 e G = E/[2(1 + ν)]. Com rotação da seção igual a zero, a referência de Euler–Bernoulli fornece uy = Fy·L³/(3E·Iz), uz = Fz·L³/(3E·Iy) e rx = Mx·L/(GJ).
 
-| Seção | uy (mm) | uz (mm) | rx (mrad) |
-| --- | ---: | ---: | ---: |
+| Seção    |   uy (mm) |   uz (mm) |  rx (mrad) |
+| -------- | --------: | --------: | ---------: |
 | Circular | +0,776070 | −2,328209 | +0,0378334 |
-| Tubular | +1,314481 | −3,943444 | +0,0640810 |
-| I | +2,281279 | −0,544667 | +4,622825 |
+| Tubular  | +1,314481 | −3,943444 | +0,0640810 |
+| I        | +2,281279 | −0,544667 |  +4,622825 |
 
 O teste roda o OOFEM 3.0 com oito elementos Beam3d para cada seção, primeiro a 0° e depois a 90°. Um quarto de volta troca Iy e Iz nas duas referências de flexão. A tolerância relativa para cada deslocamento e rotação é 2 × 10⁻⁶. O balanço retangular da v9 passa pela migração antes de verificar a flexão biaxial, a força normal, a torção e as reações. Os testes estão em `tests/sections.test.ts` e `tests/oofem.integration.test.ts`.
 
@@ -239,9 +239,9 @@ No pórtico espacial de referência, a diagonal B5 tem seção de 15 × 20 cm, �
 Um balanço espacial horizontal de 6 m, com E = 200 GPa e a mesma seção, recebe Fy = +1,2 kN e Fz = −2,4 kN na ponta. Use $I_y = bh^3/12$, $I_z = hb^3/12$ e a referência de Euler–Bernoulli $u = P L^3/(3 E I)$. A rotação a 90° troca as inércias usadas em cada direção. Os deslocamentos conferem com tolerância de 5 × 10⁻⁹ m.
 
 | Orientação da seção | UY na ponta | UZ na ponta |
-| --- | ---: | ---: |
-| 0° | +7,68 mm | −8,64 mm |
-| 90° | +4,32 mm | −15,36 mm |
+| ------------------- | ----------: | ----------: |
+| 0°                  |    +7,68 mm |    −8,64 mm |
+| 90°                 |    +4,32 mm |   −15,36 mm |
 
 Depois de inverter i/j com a seção já a 90°, os deslocamentos continuam iguais aos da última linha. Ensaios adicionais conferem N = +1,8 kN nas duas orientações em XZ e XYZ e a troca dos lados de uma seção interna carregada.
 
@@ -267,10 +267,10 @@ As entradas abaixo são referências independentes do exportador do KStruct. Usa
 
 Em [pinned-truss.in](../tests/fixtures/pinned-truss.in), os nós A=(0, 0), B=(6, 0) e C=(3, 4) estão no plano XZ. A restringe UX e UZ, e B restringe UZ. Os três membros têm E = 200 GPa, A = 1.000 mm² e Iy = 2,5 × 10⁻⁵ m⁴. O banzo AB tem dois elementos contínuos no meio do vão. A articulação fica nas pontas físicas.
 
-| Carregamento | Reações verticais em A e B | Esforços e deslocamentos de referência |
-| --- | --- | --- |
-| Força de 10 kN para baixo em C | 5 kN em cada apoio | Tração de 3,75 kN em AB e compressão de 6,25 kN em AC e BC. Cortantes e momentos nulos. UZ de C = −0,2375 mm. |
-| Carga uniforme de 10 kN/m para baixo ao longo de AB | 30 kN em cada apoio | Momento nulo nas pontas e sagente de 45 kN·m no meio do vão. Cortante de +30 kN junto a A e −30 kN junto a B na convenção de seção do KStruct. Flecha central de −33,75 mm. |
+| Carregamento                                        | Reações verticais em A e B | Esforços e deslocamentos de referência                                                                                                                                      |
+| --------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Força de 10 kN para baixo em C                      | 5 kN em cada apoio         | Tração de 3,75 kN em AB e compressão de 6,25 kN em AC e BC. Cortantes e momentos nulos. UZ de C = −0,2375 mm.                                                               |
+| Carga uniforme de 10 kN/m para baixo ao longo de AB | 30 kN em cada apoio        | Momento nulo nas pontas e sagente de 45 kN·m no meio do vão. Cortante de +30 kN junto a A e −30 kN junto a B na convenção de seção do KStruct. Flecha central de −33,75 mm. |
 
 No primeiro caso, as diagonais medem 5 m e a componente vertical da força em cada uma vale 4/5 do seu módulo. O deslocamento segue do trabalho virtual, somando as contribuições axiais das três barras. No segundo, para o módulo da carga uniforme q, o momento central vale qL²/8 e a flecha central em módulo vale 5qL⁴/(384EIy). As tolerâncias absolutas são 10⁻⁷ N ou N·m nos esforços, 10⁻¹⁰ m no deslocamento de C e 10⁻⁹ m na flecha de AB.
 
@@ -286,17 +286,16 @@ Execute o teste abaixo com o solver fixado pelo projeto para repetir os três ca
 OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/pinned-truss.integration.test.ts
 ```
 
-
 ## KS-23 · excentricidades de inserção e trechos rígidos
 
 Os ensaios usam o OOFEM 3.0 fixado pelo projeto. As coordenadas dos nós e as excentricidades estão em metros. Nos ensaios axiais, o balanço tem 6 m, E = 200 GPa e A = 0,03 m².
 
-| Ensaio | Valor de referência |
-| --- | --- |
-| Balanço XYZ ao longo de X, nó de aplicação 0,20 m em +Y em relação à seção da ponta, Fz = −10 kN | Mx da seção = −2 kN·m. No engaste, Rz = +10 kN, Mx = +2 kN·m e My = −60 kN·m. Trocar o lado do braço inverte Mx. |
-| Barra XZ e XYZ com P = 60 kN | Alongamento de 0,060 mm na barra centrada e 0,050 mm com 0,50 m rígido em cada ponta. Neste último caso, PL/(EA) usa 5 m. |
-| Carga qz = −10 kN/m com eixo 0,20 m em +Y e trechos rígidos de 0,50 e 1,00 m | No engaste, Rz = +60 kN, Mx = +12 kN·m e My = −180 kN·m. Os momentos fletores em módulo nas faces i e j são 151,25 e 5 kN·m. |
-| Dois apoios verticais a 0,50 m um do outro, na mesma zona rígida inicial de 1 m, com Fz = −1 kN no nó a 6 m | Reações verticais de −11 e +12 kN. A flecha na ponta é −2,083333 mm para Iy = 0,0001 m⁴. |
+| Ensaio                                                                                                      | Valor de referência                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Balanço XYZ ao longo de X, nó de aplicação 0,20 m em +Y em relação à seção da ponta, Fz = −10 kN            | Mx da seção = −2 kN·m. No engaste, Rz = +10 kN, Mx = +2 kN·m e My = −60 kN·m. Trocar o lado do braço inverte Mx.             |
+| Barra XZ e XYZ com P = 60 kN                                                                                | Alongamento de 0,060 mm na barra centrada e 0,050 mm com 0,50 m rígido em cada ponta. Neste último caso, PL/(EA) usa 5 m.    |
+| Carga qz = −10 kN/m com eixo 0,20 m em +Y e trechos rígidos de 0,50 e 1,00 m                                | No engaste, Rz = +60 kN, Mx = +12 kN·m e My = −180 kN·m. Os momentos fletores em módulo nas faces i e j são 151,25 e 5 kN·m. |
+| Dois apoios verticais a 0,50 m um do outro, na mesma zona rígida inicial de 1 m, com Fz = −1 kN no nó a 6 m | Reações verticais de −11 e +12 kN. A flecha na ponta é −2,083333 mm para Iy = 0,0001 m⁴.                                     |
 
 O ensaio de torção compara o nó excêntrico com uma força e um binário aplicados diretamente no eixo. A excentricidade de inserção no nó da ponta vale −0,20 m em Y quando o braço da seção até a carga vale +0,20 m. A comparação é repetida com i/j invertidos e com 2 e 9 elementos. A verificação axial compara 2 e 11 elementos. Os limites absolutos são 0,01 N·m na torção e 10⁻¹² m no alongamento. Os testes adicionais cobrem apoio inclinado, equilíbrio das cargas distribuídas, divisão da barra, conexões dentro do trecho rígido, na face e no trecho deformável.
 
@@ -309,12 +308,12 @@ OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-offsets.spec.ts
 
 O modelo espacial tem dois balanços de 3 m ao longo de X, cada um com a mesma seção retangular de 0,15 × 0,20 m. O aço tem E = 200 GPa, ν = 0,30 e massa específica de 7.850 kg/m³. Em cada ponta livre atuam Fx = 1.200 N, Fy = 300 N, Fz = −900 N e Mx = 15 N·m. Os valores abaixo usam A = 0,03 m², Iy = 0,0001 m⁴, Iz = 0,00005625 m⁴ e J = 0,000121808661794 m⁴.
 
-| Fator aplicado ao primeiro balanço | Referência | Fator 1 | Fator 0,5 |
-| --- | --- | --- | --- |
-| EA | UX = Fx·L/(EA) | +0,0006 mm | +0,0012 mm |
-| EIy | UZ = Fz·L³/(3EIy) | −0,405 mm | −0,810 mm |
-| EIz | UY = Fy·L³/(3EIz) | +0,240 mm | +0,480 mm |
-| GJ | RX = Mx·L/(GJ) | +0,00480261413 mrad | +0,00960522826 mrad |
+| Fator aplicado ao primeiro balanço | Referência        | Fator 1             | Fator 0,5           |
+| ---------------------------------- | ----------------- | ------------------- | ------------------- |
+| EA                                 | UX = Fx·L/(EA)    | +0,0006 mm          | +0,0012 mm          |
+| EIy                                | UZ = Fz·L³/(3EIy) | −0,405 mm           | −0,810 mm           |
+| EIz                                | UY = Fy·L³/(3EIz) | +0,240 mm           | +0,480 mm           |
+| GJ                                 | RX = Mx·L/(GJ)    | +0,00480261413 mrad | +0,00960522826 mrad |
 
 Aplique um fator por vez. A tolerância absoluta é de 5 × 10⁻¹² m ou rad para as quatro respostas. As três outras componentes do primeiro balanço, as respostas do segundo e as reações dos engastes conservam os valores de referência. Cada barra tem massa geométrica de 706,5 kg, calculada por ρAL com a área e a massa específica exportadas. Um ensaio XZ com balanço de 6 m e Fz = −600 N compara −2,16 mm para EIy bruto e −4,32 mm para fator 0,5, com tolerância de 5 × 10⁻¹¹ m. A exportação com todos os fatores iguais a 1 coincide com a de um projeto migrado da versão 12.
 
@@ -333,20 +332,20 @@ OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-stiffness.spec.ts
 
 Os ensaios usam a distribuição fixada do OOFEM 3.0. A viga de referência mede 6 m e tem seção retangular de 15 × 20 cm e E = 200 GPa. A ligação A restringe UX e UZ. O nó no meio se conecta à mesma barra física para receber uma força de 20 kN para baixo. B tem rotação livre e uma mola vertical. Pelo equilíbrio, cada apoio recebe +10 kN. A reação da mola na estrutura é R = −k·u. A variação na flecha do meio devido ao recalque de B é metade do deslocamento do apoio.
 
-| Rigidez de B | UZ de B | Flecha adicional no meio em relação à viga com B rígido |
-| --- | --- | --- |
-| 10.000 kN/m | −1 mm | −0,5 mm |
-| 100.000 kN/m | −0,1 mm | −0,05 mm |
-| 1.000.000 kN/m | −0,01 mm | −0,005 mm |
+| Rigidez de B   | UZ de B  | Flecha adicional no meio em relação à viga com B rígido |
+| -------------- | -------- | ------------------------------------------------------- |
+| 10.000 kN/m    | −1 mm    | −0,5 mm                                                 |
+| 100.000 kN/m   | −0,1 mm  | −0,05 mm                                                |
+| 1.000.000 kN/m | −0,01 mm | −0,005 mm                                               |
 
 As tolerâncias absolutas no ensaio plano são 5 × 10⁻⁵ N nas reações, 5 × 10⁻¹² m em B e 5 × 10⁻¹¹ m para a flecha adicional. Zerar a única mola vertical de B produz o diagnóstico de apoio insuficiente para impedir movimento de corpo rígido.
 
-| Ensaio adicional | Valores de referência |
-| --- | --- |
-| Momento de −15 kN·m na ponta B, com A fixo em UX e UZ e mola de 5.000 kN·m/rad em RY | RY de A = −3 mrad e momento de reação +15 kN·m. |
-| Viga espacial com a base dos apoios inclinada em 30° em torno de X e carga girada com a normal | B conserva UZ local = −1 mm e energia elástica de 5 J. Reação local de +10 kN, com componentes globais Ry = −5 kN e Rz = +8,660254 kN. |
-| Momento de +15 kN·m em torno de um eixo local x a 30° de X no plano XY, com mola de 5.000 kN·m/rad | Rotação local de +3 mrad e momento de reação local de −15 kN·m. |
-| Mola vertical de 10.000 kN/m a 0,5 m de A, dentro do primeiro metro rígido, com −1 kN em B | Reações verticais de −11 kN em A e +12 kN na mola, com deslocamento de −1,2 mm no nó elástico. |
+| Ensaio adicional                                                                                   | Valores de referência                                                                                                                  |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Momento de −15 kN·m na ponta B, com A fixo em UX e UZ e mola de 5.000 kN·m/rad em RY               | RY de A = −3 mrad e momento de reação +15 kN·m.                                                                                        |
+| Viga espacial com a base dos apoios inclinada em 30° em torno de X e carga girada com a normal     | B conserva UZ local = −1 mm e energia elástica de 5 J. Reação local de +10 kN, com componentes globais Ry = −5 kN e Rz = +8,660254 kN. |
+| Momento de +15 kN·m em torno de um eixo local x a 30° de X no plano XY, com mola de 5.000 kN·m/rad | Rotação local de +3 mrad e momento de reação local de −15 kN·m.                                                                        |
+| Mola vertical de 10.000 kN/m a 0,5 m de A, dentro do primeiro metro rígido, com −1 kN em B         | Reações verticais de −11 kN em A e +12 kN na mola, com deslocamento de −1,2 mm no nó elástico.                                         |
 
 Nos casos acima, a tolerância é 5 × 10⁻¹² m ou rad nos deslocamentos e rotações, 5 × 10⁻⁴ N ou N·m nas reações e 5 × 10⁻⁷ J na energia. Para reproduzir a conferência mínima da sintaxe `Spring`, use um nó de solo fixo e um segundo nó com referencial a 30° em XZ, UX local e RY restringidos, mola de 1.000 kN/m em z local e força de −1 kN nessa direção. O GL 3 do segundo nó vale −0,001 m.
 
@@ -361,10 +360,10 @@ OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- nodal-springs.spec.ts
 
 O ensaio `diaphragmBenchmark` usa um piso na cota 3 m, com nós S, C, E e N sobre X = 0 e coordenadas Y de −2, 0, +1 e +2 m. As molas em X nos nós S e N têm 6.000 kN/m cada. A translação Y é restringida no centro. A distância entre os apoios é 4 m. O movimento comum no plano não deforma as barras entre os participantes.
 
-| Força aplicada | Reação X em N | Reação X em S | UX no centro | Rotação θz | UX em N / S |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| +12 kN em X no centro | −6 kN | −6 kN | +1 mm | 0 | +1 / +1 mm |
-| +12 kN em X a Y = +1 m | −9 kN | −3 kN | +1 mm | −0,25 mrad | +1,5 / +0,5 mm |
+| Força aplicada         | Reação X em N | Reação X em S | UX no centro | Rotação θz |    UX em N / S |
+| ---------------------- | ------------: | ------------: | -----------: | ---------: | -------------: |
+| +12 kN em X no centro  |         −6 kN |         −6 kN |        +1 mm |          0 |     +1 / +1 mm |
+| +12 kN em X a Y = +1 m |         −9 kN |         −3 kN |        +1 mm | −0,25 mrad | +1,5 / +0,5 mm |
 
 Os valores seguem de `ΣFx = 0`, `ΣMz = 0` e da relação força–deslocamento das duas molas. Com a origem no centro, a carga excêntrica produz −12 kN·m e a rigidez à torção do piso sobre as molas vale 48.000 kN·m/rad. O teste compara as reações com tolerância absoluta de 0,001 N e os deslocamentos e rotações com 10⁻¹⁰ m ou rad. A rotação do modelo em 90° verifica a mesma resposta em Y. A troca da referência para (+0,75 m, −0,375 m), inclusive sob força e binário simultâneos, conserva os resultados físicos.
 
@@ -402,10 +401,10 @@ A suíte também resolve a exportação F01 com o termo FX–RY negativo, a rota
 
 Use a viga biapoiada de 6 m do exemplo, retire a carga uniforme e mantenha o apoio articulado em i e o apoio móvel em j. Em **Modelo → Carga concentrada**, clique na barra e ajuste a posição para 2 m a partir de i. Repita a análise com a posição relativa `1/3`. Consulte **Esforços** na mesma estação pelos lados i e j.
 
-| Ação aplicada | Reação vertical em i | Reação vertical em j | Cortante nos lados i e j | Momento nos lados i e j |
-| --- | ---: | ---: | --- | --- |
-| FZ global = −12 kN | +8 kN | +4 kN | +8 e −4 kN | +16 e +16 kN·m |
-| MY global = +6 kN·m | −1 kN | +1 kN | −1 e −1 kN | −2 e +4 kN·m |
+| Ação aplicada       | Reação vertical em i | Reação vertical em j | Cortante nos lados i e j | Momento nos lados i e j |
+| ------------------- | -------------------: | -------------------: | ------------------------ | ----------------------- |
+| FZ global = −12 kN  |                +8 kN |                +4 kN | +8 e −4 kN               | +16 e +16 kN·m          |
+| MY global = +6 kN·m |                −1 kN |                +1 kN | −1 e −1 kN               | −2 e +4 kN·m            |
 
 A primeira linha decorre de `Rj = 12 × 2 / 6` e `M(2 m) = 8 × 2` na seção carregada. Na segunda linha o binário produz salto de +6 kN·m no momento. Os testes repetem a força com 2, 3 e 8 subdivisões regulares e invertem i/j. Também verificam a divisão e a união físicas, a superposição de casos, a soma com uma carga nodal coincidente e a aplicação dentro de um braço rígido.
 
@@ -421,10 +420,10 @@ OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-point-loads.spec.ts
 Abra a viga de referência de 6 m e zere a carga uniforme. Em **Modelo → Carga por trecho**, clique na barra. Escolha o referencial global, início a 2 m de i e fim a 5 m. Informe qZ nas duas extremidades e analise cada linha abaixo separadamente. As posições relativas equivalentes são 1/3 e 5/6.
 
 | qZ inicial e final (kN/m) | Força vertical resultante (kN) | Posição da resultante a partir de i | Reação em i (kN) | Reação em j (kN) |
-| --- | ---: | --- | ---: | ---: |
-| 0 e −6 | −9 | 4 m | +3 | +6 |
-| −2 e −6 | −12 | 3,75 m | +4,5 | +7,5 |
-| −6 e +6 | 0 | Binário de −9 kN·m em Y global | +1,5 | −1,5 |
+| ------------------------- | -----------------------------: | ----------------------------------- | ---------------: | ---------------: |
+| 0 e −6                    |                             −9 | 4 m                                 |               +3 |               +6 |
+| −2 e −6                   |                            −12 | 3,75 m                              |             +4,5 |             +7,5 |
+| −6 e +6                   |                              0 | Binário de −9 kN·m em Y global      |             +1,5 |             −1,5 |
 
 Para conferir cada seção no OOFEM, tome `d = min(3, max(0, x − 2))` e `g = (q₁ − q₀)/3`. A carga acumulada até x é `Q = q₀d + gd²/2`. O cortante é `V = Rᵢ + Q` e o momento é `M = Rᵢx + (x − 2)Q − q₀d²/2 − gd³/3`. Os testes com 2, 4 e 12 subdivisões comparam todas as estações às expressões, com tolerâncias absolutas de 0,06 N no cortante e 0,6 N·m no momento. Os esforços nas extremidades dos elementos são impressos pelo OOFEM com cinco algarismos significativos. A comparação da superposição inclui o arredondamento de cada parcela.
 
@@ -438,3 +437,16 @@ A suíte compara a distribuição constante de ponta a ponta com o carregamento 
 OOFEM_BIN=/caminho/absoluto/oofem npm run check
 OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-distributed-loads.spec.ts
 ```
+
+## KS-31 · recalques e rotações prescritos
+
+No exemplo de dois vãos, posicione A, B e C em X = 0, 4 e 8 m. Use seção de 0,30 × 0,40 m e E = 18,75 GPa, resultando em EI = 30.000 kN·m². Restrinja UZ nos três apoios e UX em A. Deixe RY livre e retire as cargas externas. No inspetor, abra **Movimentos prescritos**, escolha o padrão ativo no caso e informe −4 mm para UZ em B. Analise e consulte **Deslocamentos**, **Reações** e **Esforços**.
+
+| Ensaio                    | Resultado analítico e verificação                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recalque diferencial em B | Com L = 4 m e δ = 0,004 m, cada reação extrema vale 3EIδ/L³ = +5,625 kN. A reação central vale −11,25 kN. O momento sagente na seção B vale +22,5 kN·m nos dois lados. Ensaios com 2 e 9 elementos por vão comparam reações, equilíbrio e momento com tolerâncias de 0,1 N e 0,1 N·m. |
+| Translação uniforme       | Imponha −4 mm nos três apoios. As estações repetem o deslocamento com tolerância de 10⁻¹² m. As reações verticais e os esforços ficam abaixo de 10⁻⁵ N ou N·m.                                                                                                                        |
+| Rotação de extremidade    | Na barra AB de 4 m, impeça as duas translações verticais e as duas rotações. Imponha +1 mrad em RY de A. Os momentos de reação em A e B valem +30 e +15 kN·m, conforme 4EIθ/L e 2EIθ/L. A reação vertical em A vale −11,25 kN.                                                        |
+| Apoio inclinado           | Gire os apoios em 30° e prescreva −4 mm em Z local nos três nós, com X local impedido. As componentes globais são +2 mm em X e −3,464102 mm em Z. Uma adulteração do deslocamento impresso pelo solver deve ser rejeitada.                                                            |
+
+Com `OOFEM_BIN` configurado conforme o projeto, execute `npm test -- tests/prescribed-motions.test.ts`. A comparação das condições de contorno usa tolerância absoluta de 10⁻¹² m ou rad, acrescida de 2 × 10⁻⁸ vezes o módulo prescrito para o arredondamento da saída. O ensaio de interface edita o padrão, desfaz, refaz, salva, reabre e consulta o cálculo. [Condição de contorno no OOFEM 3.0](https://github.com/oofem/oofem/blob/v3.0/src/core/boundarycondition.C)
