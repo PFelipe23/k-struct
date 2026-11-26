@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v27, migração v1 a v26, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v28, migração v1 a v27, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos por estação ou nó, combinação e componentes simultâneas    | `src/solver/envelopes.ts`    |
@@ -215,3 +215,14 @@ O gerador toma uma alternativa de cada grupo de exclusão e alterna as variávei
 Cada saída aceita é uma combinação linear comum de casos. O campo opcional `generation` registra a família, a ação principal, as alternativas dos demais grupos, a origem dos coeficientes e a última fórmula proposta. A identificação usa IDs de família e de casos, inclusive quando nomes ou fatores mudam. A comparação entre a expressão salva e a proposta anterior identifica edições do projetista. A prévia conserva a linha editada e permite restaurar a nova proposta explicitamente. Linhas dispensadas, combinações manuais e linhas de gerações anteriores fora da prévia continuam como estavam. Uma linha nova dispensada pode voltar a ser sugerida na próxima geração.
 
 O editor confirma a configuração e as combinações na mesma transação do histórico. A fila e o cálculo dos envelopes consomem as parcelas por ID e usam os resultados da revisão vigente. A consulta de lajes isoladas continua por caso estático.
+
+
+## Painéis em planos arbitrários
+
+No esquema v28, `surfacePanels` identifica os painéis por ID físico. Cada um tem três vértices globais em metros, espessura, material e duas subdivisões. A migração de v27 conserva os objetos de pavimento, inclusive os vínculos de borda. Cada padrão pode associar ao painel uma pressão em Pa e uma carga de linha em N/m nos eixos locais. O peso próprio acompanha o vetor de gravidade global.
+
+O eixo 1 segue AB, o eixo 3 segue o produto vetorial AB × AD e o eixo 2 é 3 × 1. O OOFEM resolve triângulos Allman 3D para membrana, DKT 3D para placa e TR_SHELL02 para a resposta combinada. As duas malhas compatíveis recebem os mesmos índices nodais apenas na aresta comum. A união das direções ativas de cada elemento define quais translações e rotações entram na rigidez de cada nó. As direções sem rigidez são eliminadas na base nodal. Antes da execução, um teste cinemático verifica se os graus transmitidos pela borda efetivamente impedem o movimento de corpo rígido do painel livre.
+
+A integração de tração de borda e de carga uniforme de área inclui os pares de momentos nodais conjugados à rotação normal da membrana de Allman. Para um segmento de vetor Δr, normal unitária n, carga vetorial q e comprimento ℓ, o par escalar é ± q · (n × Δr) ℓ/12. Para a integral no triângulo usa-se a contribuição de cada lado com área/24. Essas parcelas decorrem do trabalho virtual da interpolação quadrática e se cancelam como binário externo do par. Sua inclusão permite reproduzir o campo constante de tração.
+
+O pós-processamento transforma os deslocamentos e reações da base nodal para XYZ. Projeta os tensores simétricos globais nos eixos ortonormais físicos do painel em cada ponto de integração. No OOFEM 3.0, as componentes no plano do registro `stresses` de Allman estão em Pa. A multiplicação pela espessura produz N11, N22 e N12 em N/m. Os momentos já têm unidade N·m/m. A conferência do equilíbrio usa as reações dos engastes e a integral independente das ações em relação a A do primeiro painel. [Caso de referência do OOFEM](https://github.com/oofem/oofem/blob/v3.0/tests/sm/trshell02_test.in) · [Interpolação de Allman](https://github.com/oofem/oofem/blob/v3.0/src/sm/Elements/PlaneStress/trplanestressrotallman.C)

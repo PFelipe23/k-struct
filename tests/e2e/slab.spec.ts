@@ -792,3 +792,99 @@ test("KS-43 · lança a segunda laje, conecta a viga e compara os três vínculo
   expect(values.hinged).toBeLessThan(values.elastic);
   expect(values.elastic).toBeLessThan(values.continuous);
 });
+test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em balanço", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  if (executable) await plateBridge(page);
+  const legacy = JSON.stringify({
+    ...createProject(),
+    schemaVersion: 27,
+    name: "Rascunho v27",
+  });
+  await page.addInitScript((source) => {
+    if (!localStorage.getItem("kstruct.draft.v27"))
+      localStorage.setItem("kstruct.draft.v27", source);
+  }, legacy);
+  await page.goto("/");
+  await expect(
+    page.getByRole("textbox", { name: "Nome do projeto" }),
+  ).toHaveValue("Rascunho v27");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("kstruct.draft.v28") ?? "{}")
+            .schemaVersion,
+      ),
+    )
+    .toBe(28);
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("kstruct.draft.v27")!).schemaVersion,
+    ),
+  ).toBe(27);
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Novo pórtico espacial").click();
+  const dialog = page.getByRole("dialog", { name: "Painel espacial" });
+  await button("Novo painel espacial").click();
+  await dialog.getByLabel("Nome do painel").fill("Parede");
+  await dialog.getByLabel("D · Y").fill("1,2");
+  await dialog.getByLabel("Espessura (cm)").fill("10");
+  await dialog.getByLabel("Subdivisões AD").fill("4");
+  await dialog.getByRole("button", { name: "Aplicar painel" }).click();
+  await button("Novo painel espacial").click();
+  await dialog.getByLabel("Nome do painel").fill("Laje em balanço");
+  await dialog.getByLabel("q3 local (kN/m)").fill("-1");
+  await dialog.getByRole("button", { name: "Aplicar painel" }).click();
+  const editSlab = button("Laje em balanço · Casca");
+  await expect(editSlab).toBeVisible();
+  await button("Desfazer").click();
+  await expect(editSlab).toHaveCount(0);
+  await button("Refazer").click();
+  await expect(editSlab).toBeVisible();
+  const save = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const text = await readFile((await (await save).path())!, "utf8");
+  const model = parseProject(text);
+  expect(model.surfacePanels).toHaveLength(2);
+  expect(model.loadPatterns[0].panelActions![0].traction.z).toBe(-1000);
+  await openProjectInBrowser(page, "parede-laje.kstruct.json", text);
+  await editSlab.click();
+  await expect(dialog.getByLabel("A · Z")).toHaveValue("3");
+  await expect(dialog.getByLabel("q3 local (kN/m)")).toHaveValue("-1");
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await button("Análise").click();
+  const download = page.waitForEvent("download");
+  await button("Entrada OOFEM").click();
+  expect(await readFile((await (await download).path())!, "utf8")).toBe(
+    exportOofem(model, "EL").deck,
+  );
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  await button("Analisar").click();
+  await page.waitForFunction(
+    () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+  );
+  await page.evaluate(() =>
+    (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+  );
+  const results = page.getByRole("region", {
+    name: "Resultados dos painéis espaciais",
+  });
+  await expect(
+    results.getByRole("table", { name: "Extremos locais do painel" }),
+  ).toBeVisible();
+  await results
+    .getByLabel("Painel consultado")
+    .selectOption(model.surfacePanels![1].id);
+  await expect(results).toContainText("5 nós de malha compartilhados");
+  await expect(results).toContainText("M11");
+  await editSlab.click();
+  await dialog.getByLabel("q3 local (kN/m)").fill("-2");
+  await dialog.getByRole("button", { name: "Aplicar painel" }).click();
+  await expect(results.getByRole("table")).toHaveCount(0);
+});

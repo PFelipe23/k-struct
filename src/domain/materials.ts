@@ -13,6 +13,7 @@ export type MaterialTarget = { kind: "section" | "slab"; id: string };
 
 export function materialUsage(p: Project, id: string) {
   return {
+    panels: (p.surfacePanels ?? []).filter((panel) => panel.materialId === id),
     sections: p.sections.filter((section) => section.materialId === id),
     slabs: p.slabs.filter((slab) => slab.materialId === id),
   };
@@ -65,8 +66,8 @@ export function saveMaterial(
 export function removeMaterial(p: Project, id: string) {
   const index = p.materials.findIndex((m) => m.id === id);
   if (index === -1) throw new Error("Material inexistente.");
-  const { sections, slabs } = materialUsage(p, id);
-  const users = [...sections, ...slabs].map((item) => item.name);
+  const { sections, slabs, panels } = materialUsage(p, id);
+  const users = [...sections, ...slabs, ...panels].map((item) => item.name);
   const reasons = [];
   if (users.length)
     reasons.push(

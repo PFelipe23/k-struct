@@ -1,3 +1,9 @@
+import {
+  exportPanels,
+  readPanels,
+  type PanelInput,
+  type PanelResult,
+} from "./surfacePanel";
 import { prepareFloor } from "./floorMesh";
 import {
   floorRecords,
@@ -96,6 +102,7 @@ export interface AnalysisInput {
   caseId: string;
   slab?: ReturnType<typeof exportSlab>["slab"];
   floor?: FloorInput;
+  panels?: PanelInput;
 }
 export interface Displacement {
   ux: number;
@@ -137,6 +144,7 @@ export interface AnalysisResult extends StructuralResult {
   rawOutput: string;
   slab?: SlabResult;
   floor?: FloorResult;
+  panels?: PanelResult;
 }
 
 const spatialDofs = [
@@ -155,6 +163,17 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   if (errors.length) throw new Error(errors.join("\n"));
   const analysisCase = p.analysisCases.find((c) => c.id === caseId);
   if (!analysisCase) throw new Error("Caso de análise inexistente.");
+  if (p.surfacePanels?.length) {
+    const { deck, data } = exportPanels(p, analysisCase);
+    return {
+      deck,
+      panels: data,
+      nodes: data.mesh.nodes,
+      elements: [],
+      project: p,
+      caseId,
+    };
+  }
   const pair = p.slabs.length === 2 ? prepareFloor(p, analysisCase) : undefined;
   if (p.slabs.length === 1) {
     const plate = exportSlab(p, analysisCase, p.slabs[0]);
@@ -775,6 +794,14 @@ export function parseOofemOutput(
     completedAt: new Date().toISOString(),
     rawOutput,
   };
+  if (input.panels)
+    return {
+      ...metadata,
+      displacements: {},
+      reactions: [],
+      members: {},
+      panels: readPanels(rawOutput, input.panels, nodeOutput, reactionMap),
+    };
   if (input.slab)
     return {
       ...metadata,

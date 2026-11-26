@@ -1,3 +1,9 @@
+import {
+  inGlobal,
+  panelEdges,
+  panelGeometry,
+  panelKinds,
+} from "../domain/surfacePanel";
 import { slabSurface } from "./slabSurface";
 import { patternWind } from "../domain/wind";
 import { thermalLabel } from "../domain/thermalLoads";
@@ -263,6 +269,7 @@ export default function SpatialView({
   result,
   onSelect,
   onPickLoad,
+  onPanel,
 }: LayerControls & {
   active: boolean;
   onActivate: () => void;
@@ -274,11 +281,14 @@ export default function SpatialView({
   selection: SelectedObject[];
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
+  onPanel: (id: string) => void;
   onPickLoad?: (id: string, point: Point3) => void;
 }) {
   const { units } = useUnits();
   const container = useRef<HTMLDivElement>(null),
     state = useRef<SceneState | null>(null);
+  const panelPick = useRef(onPanel);
+  panelPick.current = onPanel;
   const select = useRef(onSelect);
   select.current = onSelect;
   const pickLoad = useRef(onPickLoad);
@@ -433,7 +443,7 @@ export default function SpatialView({
         .find((h) =>
           pickLoad.current
             ? h.object.userData.selection?.kind === "member"
-            : h.object.userData.selection,
+            : h.object.userData.selection || h.object.userData.panelId,
         );
       if (pickLoad.current) {
         if (hit)
@@ -442,6 +452,10 @@ export default function SpatialView({
             y: -hit.point.z,
             z: hit.point.y,
           });
+        return;
+      }
+      if (hit?.object.userData.panelId) {
+        panelPick.current(hit.object.userData.panelId);
         return;
       }
       select.current(
@@ -528,6 +542,102 @@ export default function SpatialView({
             w.corners[1].z - w.corners[0].z,
             "force",
           );
+    }
+    for (const panel of project.surfacePanels ?? []) {
+      const { corners, axes } = panelGeometry(panel);
+      const pts = Object.values(corners).map(scenePoint);
+      const geometry = new THREE.BufferGeometry().setFromPoints(pts);
+      geometry.setIndex([0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0]);
+      // Separate faces keep a readable normal on both sides of the midsurface.
+      const faces = geometry.toNonIndexed();
+      geometry.dispose();
+      faces.computeVertexNormals();
+      const surface = new THREE.Mesh(faces, s.materials.slab);
+      surface.userData.panelId = panel.id;
+      s.model.add(surface);
+      s.model.add(
+        new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          s.materials.member,
+        ),
+      );
+      const center = pts[0].clone().lerp(pts[2], 0.5),
+        span = Math.min(pts[0].distanceTo(pts[1]), pts[0].distanceTo(pts[3]));
+      if (layers.mesh) {
+        const mesh: THREE.Vector3[] = [];
+        const at = (u: number, v: number) =>
+          pts[0]
+            .clone()
+            .addScaledVector(pts[1].clone().sub(pts[0]), u / panel.nu)
+            .addScaledVector(pts[3].clone().sub(pts[0]), v / panel.nv);
+        for (let j = 0; j < panel.nv; j++)
+          for (let i = 0; i < panel.nu; i++)
+            mesh.push(
+              at(i, j),
+              at(i + 1, j),
+              at(i, j),
+              at(i, j + 1),
+              at(i, j),
+              at(i + 1, j + 1),
+            );
+        s.model.add(
+          new THREE.LineSegments(
+            new THREE.BufferGeometry().setFromPoints(mesh),
+            s.materials.member,
+          ),
+        );
+      }
+      for (const edge of panel.fixed) {
+        const k = panelEdges.indexOf(edge);
+        s.model.add(
+          new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              pts[k],
+              pts[(k + 1) % 4],
+            ]),
+            s.materials.rigidArm,
+          ),
+        );
+      }
+      const action = pattern?.panelActions?.find((a) => a.panelId === panel.id);
+      if (layers.loads && action) {
+        const k = panelEdges.indexOf(action.edge),
+          edge = pts[k].clone().lerp(pts[(k + 1) % 4], 0.5);
+        if (Object.values(action.traction).some(Boolean))
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            edge,
+            inGlobal(action.traction, axes),
+            span,
+            "force",
+          );
+        if (action.pressure)
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            center,
+            scale(axes[2], action.pressure),
+            span,
+            "force",
+          );
+      }
+      if (layers.labels)
+        annotate(s.model, center, [
+          panel.name + " · " + panelKinds[panel.kind],
+        ]);
+      for (const [i, axis] of axes.entries()) {
+        const end = center
+          .clone()
+          .addScaledVector(scenePoint(axis), span * 0.25);
+        s.model.add(
+          new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([center, end]),
+            [s.materials.axisX, s.materials.axisY, s.materials.axisZ][i],
+          ),
+        );
+        if (layers.labels) annotate(s.model, end, [String(i + 1)]);
+      }
     }
     for (const slab of project.slabs) {
       const z = project.guides.z.find(
@@ -896,10 +1006,14 @@ export default function SpatialView({
   useEffect(() => {
     const s = state.current;
     if (s) {
-      s.modelKey = JSON.stringify([project.id, project.slabs[0]?.id]);
+      s.modelKey = JSON.stringify([
+        project.id,
+        project.slabs[0]?.id,
+        project.surfacePanels?.length,
+      ]);
       s.restoreOrFit();
     }
-  }, [project.id, project.slabs[0]?.id]);
+  }, [project.id, project.slabs[0]?.id, project.surfacePanels?.length]);
   const zoom = (factor: number) => {
     const s = state.current;
     if (!s) return;

@@ -46,6 +46,7 @@ import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
 import { slabRings } from "../domain/slabPolygon";
+import { panelGeometry } from "../domain/surfacePanel";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 import { formatQuantity, fromSI, toSI } from "../units";
@@ -100,6 +101,7 @@ interface Props {
   display: Display;
   slabMap: SlabMap | null;
   floorMaps?: SlabMap[];
+  onPanel?: (id: string) => void;
   onJoint?: () => void;
   patternId: string;
   resultPatterns: ReadonlySet<string>;
@@ -147,6 +149,7 @@ export default function WorkPlaneView({
   outline,
   onPoint,
   onSelect,
+  onPanel,
   onJoint,
 }: Props & LayerControls) {
   const { units } = useUnits();
@@ -246,6 +249,9 @@ export default function WorkPlaneView({
   const fit = () => {
     const points = [
       ...project.nodes,
+      ...(project.surfacePanels ?? []).flatMap((p) =>
+        Object.values(panelGeometry(p).corners),
+      ),
       ...slabs.flatMap((slab) =>
         slabRings(slab)[0].map((v) => ({ ...v, z: plane.offset })),
       ),
@@ -779,6 +785,47 @@ export default function WorkPlaneView({
             strokeDasharray="8 3"
           />
         )}
+        {project.surfacePanels?.map((panel) => {
+          const pts = Object.values(panelGeometry(panel).corners);
+          const face = pts.every((p) => onPlane(p, plane)),
+            trace: Point3[] = [];
+          for (const [i, a] of pts.entries()) {
+            const b = pts[(i + 1) % 4],
+              da = a[normal] - plane.offset,
+              db = b[normal] - plane.offset;
+            if (onPlane(a, plane)) trace.push(a);
+            else if (!onPlane(b, plane) && da * db < 0)
+              trace.push(interpolate(a, b, da / (da - db)));
+          }
+          if (trace.length < 2) return null;
+          const points = trace
+            .map((p) => `${sx(p[axisU])},${sy(p[axisV])}`)
+            .join(" ");
+          return (
+            <g
+              key={panel.id}
+              className="spatial-panel-trace"
+              aria-label={panel.name}
+              onClick={(e) => {
+                if (tool === "select") {
+                  e.stopPropagation();
+                  onPanel?.(panel.id);
+                }
+              }}
+            >
+              {face ? (
+                <polygon points={points} />
+              ) : (
+                <polyline points={points} />
+              )}
+              {labels && (
+                <text x={sx(trace[0][axisU]) + 4} y={sy(trace[0][axisV]) - 4}>
+                  {panel.name}
+                </text>
+              )}
+            </g>
+          );
+        })}
         {slabs.map((slab) => (
           <SlabPlan
             key={slab.id}
@@ -1681,6 +1728,7 @@ export default function WorkPlaneView({
       </svg>
       {!project.nodes.length &&
         !project.slabs.length &&
+        !project.surfacePanels?.length &&
         tool !== "slab" &&
         !tracing && (
           <div className="empty-canvas">

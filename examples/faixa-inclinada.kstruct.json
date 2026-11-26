@@ -1,0 +1,160 @@
+{
+  "format": "kstruct",
+  "schemaVersion": 28,
+  "id": "ks44-faixa",
+  "name": "Faixa inclinada · tração e flexão",
+  "units": "N-m-kg-s",
+  "nodes": [],
+  "members": [],
+  "materials": [
+    {
+      "id": "mat",
+      "name": "Material de referência",
+      "E": 30000000000,
+      "nu": 0,
+      "density": 2500,
+      "alpha": 0
+    }
+  ],
+  "sections": [
+    {
+      "shape": "rectangle",
+      "width": 0.15,
+      "height": 0.2,
+      "id": "rect",
+      "name": "Retangular R1",
+      "materialId": "mat"
+    }
+  ],
+  "loadPatterns": [
+    {
+      "id": "G",
+      "name": "Carga permanente",
+      "nodal": [],
+      "uniform": [],
+      "pressure": [],
+      "selfWeight": {
+        "enabled": false,
+        "direction": "-Z",
+        "gravity": 9.80665,
+        "multiplier": 1
+      },
+      "panelActions": [
+        {
+          "panelId": "P1",
+          "edge": "BC",
+          "traction": {
+            "x": 100000,
+            "y": 0,
+            "z": -1000
+          },
+          "pressure": 0
+        }
+      ]
+    }
+  ],
+  "analysisCases": [
+    {
+      "id": "EL",
+      "name": "EL · Estática linear",
+      "type": "linear-static",
+      "factors": [
+        {
+          "patternId": "G",
+          "factor": 1
+        }
+      ]
+    }
+  ],
+  "mesh": {
+    "segmentsPerMember": 8
+  },
+  "mode": "spatial",
+  "guides": {
+    "x": [
+      {
+        "id": "X1",
+        "name": "1",
+        "position": 0
+      },
+      {
+        "id": "X2",
+        "name": "2",
+        "position": 4
+      },
+      {
+        "id": "X3",
+        "name": "3",
+        "position": 8
+      }
+    ],
+    "y": [
+      {
+        "id": "YA",
+        "name": "A",
+        "position": 0
+      },
+      {
+        "id": "YB",
+        "name": "B",
+        "position": 4
+      },
+      {
+        "id": "YC",
+        "name": "C",
+        "position": 8
+      }
+    ],
+    "z": [
+      {
+        "id": "base",
+        "name": "Base",
+        "position": 0
+      },
+      {
+        "id": "level1",
+        "name": "Pav. 1",
+        "position": 3
+      },
+      {
+        "id": "level2",
+        "name": "Pav. 2",
+        "position": 6
+      }
+    ]
+  },
+  "resultCombinations": [],
+  "resultEnvelopes": [],
+  "slabs": [],
+  "selectionGroups": [],
+  "meshConnections": [],
+  "surfacePanels": [
+    {
+      "id": "P1",
+      "name": "Painel 1",
+      "kind": "shell",
+      "materialId": "mat",
+      "a": {
+        "x": 1,
+        "y": -2,
+        "z": 4
+      },
+      "b": {
+        "x": 2,
+        "y": 0,
+        "z": 6
+      },
+      "d": {
+        "x": 1.7999999999999998,
+        "y": -1.6,
+        "z": 3.2
+      },
+      "thickness": 0.1,
+      "nu": 8,
+      "nv": 4,
+      "fixed": [
+        "DA"
+      ]
+    }
+  ]
+}

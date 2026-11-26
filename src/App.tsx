@@ -1,3 +1,10 @@
+import {
+  SurfacePanelDialog,
+  newSurfacePanel,
+} from "./components/SurfacePanelDialog";
+import { SurfacePanelResults } from "./components/SurfacePanelResults";
+import type { SurfacePanel } from "./domain/model";
+import { panelKinds } from "./domain/surfacePanel";
 import { SlabJointDialog } from "./components/SlabJointDialog";
 import { jointPanels, jointNames, refreshJoint } from "./domain/slabJoint";
 import {
@@ -174,6 +181,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v28") ??
       localStorage.getItem("kstruct.draft.v27") ??
       localStorage.getItem("kstruct.draft.v26") ??
       localStorage.getItem("kstruct.draft.v25") ??
@@ -223,6 +231,10 @@ export default function App() {
     p.slabs.find(
       (s) => s.id === selection.find((o) => o.kind === "slab")?.id,
     ) ?? p.slabs[0];
+  const [panelDraft, setPanelDraft] = useState<SurfacePanel | null>(null);
+  const hasPanels = !!p.surfacePanels?.length;
+  const openPanel = (id: string) =>
+    setPanelDraft(p.surfacePanels?.find((v) => v.id === id) ?? null);
   const [jointOpen, setJointOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>("dual");
   const [showMemberAxes, setShowMemberAxes] = useState(false);
@@ -372,11 +384,11 @@ export default function App() {
     p.analysisCases.find((c) => c.id === preferredCaseId) ?? p.analysisCases[0];
   const caseId = analysisCase.id;
   const combination =
-    !slab && derivedChoice?.kind === "combination"
+    !hasPanels && !slab && derivedChoice?.kind === "combination"
       ? p.resultCombinations.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const envelope =
-    !slab && derivedChoice?.kind === "envelope"
+    !hasPanels && !slab && derivedChoice?.kind === "envelope"
       ? p.resultEnvelopes.find(({ id }) => id === derivedChoice.id)
       : undefined;
   const derived = combination ?? envelope;
@@ -553,7 +565,13 @@ export default function App() {
         : null,
     [diagram, reading, envelopeComponent],
   );
-  const defaultDiagram = slab ? "slab-uz" : spatial ? "deformed" : "m";
+  const defaultDiagram = hasPanels
+    ? "model"
+    : slab
+      ? "slab-uz"
+      : spatial
+        ? "deformed"
+        : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
   );
@@ -568,7 +586,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v27", serialized);
+      localStorage.setItem("kstruct.draft.v28", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1184,7 +1202,7 @@ ${modelIssues[0].message}`;
           showDisplay(defaultDiagram);
           setMessage(
             `Análise concluída · ${requestedCase.name}
-Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${outcome.message}`,
+Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamentos e esforços nos eixos locais dos painéis." : outcome.result.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${outcome.message}`,
           );
           return;
         }
@@ -1399,6 +1417,21 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                     <kbd>{shortcut}</kbd>
                   </button>
                 ))}
+                {spatial && (
+                  <button
+                    className="tool-button"
+                    aria-label="Novo painel espacial"
+                    title="Lançar uma membrana, placa ou casca por três pontos no espaço"
+                    disabled={
+                      (p.surfacePanels?.length ?? 0) >= 2 ||
+                      !!(p.slabs.length || p.members.length || p.nodes.length)
+                    }
+                    onClick={() => setPanelDraft(newSurfacePanel(p))}
+                  >
+                    <Square size={21} />
+                    <span>Painel espacial</span>
+                  </button>
+                )}
                 {spatial && (
                   <button
                     className={`tool-button ${tool === "slab" ? "active" : ""}`}
@@ -1692,22 +1725,30 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             )}
             <div className="analysis-description">
               <b>
-                {slab
-                  ? p.slabs.length === 2
-                    ? "Estática linear · Lajes acopladas"
-                    : "Estática linear · Laje isolada"
-                  : spatial
-                    ? "Estática linear espacial"
-                    : "Estática linear no plano XZ"}
+                {hasPanels
+                  ? "Estática linear · Painéis espaciais"
+                  : slab
+                    ? p.slabs.length === 2
+                      ? "Estática linear · Lajes acopladas"
+                      : "Estática linear · Laje isolada"
+                    : spatial
+                      ? "Estática linear espacial"
+                      : "Estática linear no plano XZ"}
               </b>
               <span>
-                {slab
-                  ? slab.sizing
-                    ? `Placa ${slab.formulation.toUpperCase()} · tamanho-alvo ${formatQuantity(slab.sizing.target, "length", units)} ${units.length}`
-                    : slab.polygon
-                      ? "Placa triangular DKT · contornos e aberturas"
-                      : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
-                  : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
+                {hasPanels
+                  ? p
+                      .surfacePanels!.map(
+                        (v) => v.name + " · " + panelKinds[v.kind],
+                      )
+                      .join(" / ")
+                  : slab
+                    ? slab.sizing
+                      ? `Placa ${slab.formulation.toUpperCase()} · tamanho-alvo ${formatQuantity(slab.sizing.target, "length", units)} ${units.length}`
+                      : slab.polygon
+                        ? "Placa triangular DKT · contornos e aberturas"
+                        : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
+                    : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
                 {analysisCase.factors.some(
@@ -1802,10 +1843,14 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
         )}
         <div className="run-group">
           <label>
-            {slab ? "Caso estático" : "Caso, combinação ou envelope"}
+            {slab || hasPanels
+              ? "Caso estático"
+              : "Caso, combinação ou envelope"}
             <select
               aria-label={
-                slab ? "Caso estático" : "Caso, combinação ou envelope"
+                slab || hasPanels
+                  ? "Caso estático"
+                  : "Caso, combinação ou envelope"
               }
               disabled={running}
               value={
@@ -1824,7 +1869,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   </option>
                 ))}
               </optgroup>
-              {!slab && p.resultCombinations.length > 0 && (
+              {!hasPanels && !slab && p.resultCombinations.length > 0 && (
                 <optgroup label="Combinações lineares">
                   {p.resultCombinations.map((item) => (
                     <option key={item.id} value={`combination:${item.id}`}>
@@ -1833,7 +1878,7 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   ))}
                 </optgroup>
               )}
-              {!slab && p.resultEnvelopes.length > 0 && (
+              {!hasPanels && !slab && p.resultEnvelopes.length > 0 && (
                 <optgroup label="Envelopes">
                   {p.resultEnvelopes.map((item) => (
                     <option key={item.id} value={`envelope:${item.id}`}>
@@ -1986,6 +2031,19 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   ))}
                 </details>
               )}
+              {hasPanels && (
+                <details open>
+                  <summary>
+                    Painéis espaciais <span>{p.surfacePanels!.length}</span>
+                  </summary>
+                  {p.surfacePanels!.map((v) => (
+                    <button key={v.id} onClick={() => openPanel(v.id)}>
+                      <Square size={13} />
+                      {v.name} · {panelKinds[v.kind]}
+                    </button>
+                  ))}
+                </details>
+              )}
               <details>
                 <summary>
                   Seções <span>{p.sections.length}</span>
@@ -2048,6 +2106,8 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               </span>
               <span className="model-count">
                 {p.nodes.length} nós · {p.members.length} barras
+                {hasPanels &&
+                  ` · ${p.surfacePanels!.length} ${p.surfacePanels!.length === 1 ? "painel espacial" : "painéis espaciais"}`}
                 {p.slabs.length > 0 &&
                   ` · ${p.slabs.length} ${p.slabs.length === 1 ? "laje" : "lajes"}`}
               </span>
@@ -2089,10 +2149,10 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                     {field.label}
                   </option>
                 ))}
-              {!slab && result && (
+              {!hasPanels && !slab && result && (
                 <option value="deformed">Deformada ampliada</option>
               )}
-              {!slab && (result || showEnvelope) && (
+              {!hasPanels && !slab && (result || showEnvelope) && (
                 <>
                   {spatial ? (
                     <>
@@ -2235,12 +2295,14 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
                   pending={active ? pending : null}
                   onPoint={onPoint}
                   onSelect={selectObject}
+                  onPanel={openPanel}
                   onJoint={() => setJointOpen(true)}
                 />
               );
             })}
             {perspective && (
               <SpatialView
+                onPanel={openPanel}
                 onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                 layers={perspectiveLayers}
                 setLayers={setPerspectiveLayers}
@@ -2313,7 +2375,13 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
               </div>
             )
           )}
-          {slab ? (
+          {hasPanels ? (
+            <SurfacePanelResults
+              result={caseResult?.panels}
+              caseName={analysisCase.name}
+              message={message}
+            />
+          ) : slab ? (
             <SlabResults
               comparisonKey={JSON.stringify([
                 p.id,
@@ -2415,6 +2483,52 @@ Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os m
             />
           )}
         </main>
+        {panelDraft && (
+          <SurfacePanelDialog
+            key={panelDraft.id}
+            panel={panelDraft}
+            project={p}
+            patternId={patternId}
+            close={() => setPanelDraft(null)}
+            remove={
+              p.surfacePanels?.some((v) => v.id === panelDraft.id)
+                ? () => {
+                    const err = edit((d) => {
+                      d.surfacePanels = d.surfacePanels?.filter(
+                        (v) => v.id !== panelDraft.id,
+                      );
+                      for (const pat of d.loadPatterns)
+                        if (pat.panelActions)
+                          pat.panelActions = pat.panelActions.filter(
+                            (a) => a.panelId !== panelDraft.id,
+                          );
+                    });
+                    if (!err) setPanelDraft(null);
+                  }
+                : undefined
+            }
+            apply={(panel, action) =>
+              edit((d) => {
+                const items = (d.surfacePanels ??= []),
+                  index = items.findIndex((v) => v.id === panel.id);
+                if (index < 0) items.push(panel);
+                else items[index] = panel;
+                d.surfacePanels = items;
+                const pat = d.loadPatterns.find((v) => v.id === patternId)!;
+                const actions = (pat.panelActions ?? []).filter(
+                  (a) => a.panelId !== panel.id,
+                );
+                if (
+                  action.pressure ||
+                  Object.values(action.traction).some(Boolean)
+                )
+                  actions.push(action);
+                if (actions.length) pat.panelActions = actions;
+                else delete pat.panelActions;
+              })
+            }
+          />
+        )}
         {jointOpen && (
           <SlabJointDialog
             project={p}

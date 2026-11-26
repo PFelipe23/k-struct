@@ -1,8 +1,9 @@
+import { panelGeometry } from "./surfacePanel";
 import { slabProperties } from "./slabPolygon";
 import type { Project } from "./model";
 import { memberAxis } from "./memberOffsets";
 import { globalIntensity } from "./memberDistributedLoads";
-import { beamAxes, type Point3 } from "./geometry";
+import { beamAxes, scale, type Point3 } from "./geometry";
 import { sectionProperties } from "./sections";
 
 type Pattern = Project["loadPatterns"][number];
@@ -29,10 +30,11 @@ export interface SelfWeightSlabLoad {
 export interface SelfWeightSummary {
   members: SelfWeightMemberLoad[];
   slabs: SelfWeightSlabLoad[];
+  panels: { id: string; name: string; intensity: Point3; total: Point3 }[];
   warnings: string[];
 }
 
-function vector(settings: SelfWeight) {
+export function weightAcceleration(settings: SelfWeight) {
   const axis = settings.direction[1].toLowerCase() as keyof Point3;
   const sign = settings.direction[0] === "+" ? 1 : -1;
   return {
@@ -48,9 +50,9 @@ export function selfWeightSummary(
   pattern: Pattern,
 ): SelfWeightSummary {
   if (!pattern.selfWeight.enabled)
-    return { members: [], slabs: [], warnings: [] };
+    return { members: [], slabs: [], panels: [], warnings: [] };
 
-  const gravity = vector(pattern.selfWeight);
+  const gravity = weightAcceleration(pattern.selfWeight);
   const nodes = new Map(project.nodes.map((node) => [node.id, node]));
   const sections = new Map(project.sections.map((s) => [s.id, s]));
   const materials = new Map(project.materials.map((m) => [m.id, m]));
@@ -97,6 +99,18 @@ export function selfWeightSummary(
     };
   });
 
+  const panels = (project.surfacePanels ?? []).map((panel) => {
+    const intensity = scale(
+      gravity,
+      materials.get(panel.materialId)!.density * panel.thickness,
+    );
+    return {
+      id: panel.id,
+      name: panel.name,
+      intensity,
+      total: scale(intensity, panelGeometry(panel).area),
+    };
+  });
   const warnings: string[] = [];
   if (project.slabs.length && axis !== "Z")
     warnings.push(
@@ -166,5 +180,5 @@ export function selfWeightSummary(
     )
   )
     warnings.push("O peso próprio calculado excede o intervalo numérico.");
-  return { members, slabs, warnings };
+  return { members, slabs, panels, warnings };
 }
