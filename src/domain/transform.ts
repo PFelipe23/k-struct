@@ -1,3 +1,4 @@
+import { transformMotions, setPrescribedMotion } from "./prescribedMotions";
 import { globalIntensity } from "./memberDistributedLoads";
 import { actionVector, pointLoadFrame } from "./memberPointLoads";
 import { memberAxis } from "./memberOffsets";
@@ -140,6 +141,38 @@ function copyAssignments(
     const src = plan.source.loadPatterns.find((p) => p.id === patternId);
     const dst = plan.project.loadPatterns.find((p) => p.id === patternId);
     if (!src || !dst) throw new Error("Padrão de carga inexistente.");
+    if (options.supports && src.prescribed?.length) {
+      for (const node of nodes) {
+        const dest = targetNodes.get(map.nodes.get(node.id)!)!;
+        const motions = transformMotions(
+          src.prescribed.filter((r) => r.nodeId === node.id),
+          dest.id,
+          node.supportFrame,
+          dest.supportFrame,
+          vector,
+          parity,
+        );
+        for (const motion of motions) {
+          const previous = dst.prescribed?.find(
+            (r) => r.nodeId === dest.id && r.dof === motion.dof,
+          );
+          if (
+            !dest.restraints[motion.dof] ||
+            (previous && previous.value !== motion.value)
+          ) {
+            const conflict = `Cópia ${i} · ${dest.name} · movimento imposto ${motion.dof.toUpperCase()} em ${src.name}`;
+            plan.conflicts.push(conflict);
+            if (options.conflicts === "combine")
+              throw new Error(
+                `${conflict}: prescrições incompatíveis. Conserve o destino ou edite o movimento.`,
+              );
+            continue;
+          }
+          setPrescribedMotion(dst, motion);
+          plan.loads++;
+        }
+      }
+    }
     // Sum contributions of the same source node before deciding about a destination.
     const incoming = new Map<string, NodalLoad>();
     for (const l of src.nodal) {
@@ -286,8 +319,7 @@ export function planTransform(
         if (
           source.mode === "spatial" &&
           !(nodeIds.has(m.start) && nodeIds.has(m.end))
-        )
-        {
+        ) {
           const oldLine = memberAxis(
             m,
             original.get(m.start)!,

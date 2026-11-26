@@ -31,6 +31,7 @@ import {
   loadInterval,
 } from "../domain/memberDistributedLoads";
 import { memberAxis } from "../domain/memberOffsets";
+import { caseMotions } from "../domain/prescribedMotions";
 import { floorConstraints } from "./diaphragm";
 import { rigidJointEquations } from "./rigidOffsets";
 import {
@@ -221,11 +222,12 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     return sets.length;
   };
   const properties = beamPropertyRecords(p, memberElements, set);
+  const motions = caseMotions(p, analysisCase);
   for (const n of p.nodes) {
-    const fixed = dofs.filter(([key]) => n.restraints[key]).map(([, d]) => d);
+    const fixed = dofs.filter(([key]) => n.restraints[key]);
     if (fixed.length)
       bcs.push(
-        `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${fixed.length} ${fixed.join(" ")} values ${fixed.length} ${fixed.map(() => 0).join(" ")} set ${set(`nodes 1 ${nodeNumber(n.id)}`)}`,
+        `BoundaryCondition ${bcs.length + 1} loadTimeFunction 1 dofs ${fixed.length} ${fixed.map(([, d]) => d).join(" ")} values ${fixed.length} ${fixed.map(([key]) => motions.get(n.id)?.[key] ?? 0).join(" ")} set ${set(`nodes 1 ${nodeNumber(n.id)}`)}`,
       );
   }
   const membersById = new Map(p.members.map((m) => [m.id, m]));
@@ -690,6 +692,10 @@ export function parseOofemOutput(
   }
   const reactions: Reaction[] = [];
   const printedLocalReactions: Reaction[] = [];
+  const imposed = caseMotions(
+    input.project,
+    input.project.analysisCases.find((c) => c.id === input.caseId)!,
+  );
   for (const n of input.project.nodes) {
     if (!hasSupport(n)) continue;
     const num = modelNumbers.get(n.id)!;
@@ -698,6 +704,14 @@ export function parseOofemOutput(
     const localDisplacements = nodeOutput.get(num)!;
     for (const [key, dof, axis] of dofs) {
       if (n.restraints[key]) {
+        const expected = imposed.get(n.id)?.[key] ?? 0;
+        if (
+          Math.abs(localDisplacements.get(dof)! - expected) >
+          1e-12 + 2e-8 * Math.abs(expected)
+        )
+          throw new Error(
+            `Movimento calculado incompatível com a prescrição em ${n.name}, ${key.toUpperCase()} no referencial do apoio.`,
+          );
         const value = reactionMap.get(`${num}:${dof}`);
         if (value === undefined)
           throw new Error(`Reação ausente em ${n.name}, ${key}.`);

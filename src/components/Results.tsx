@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
+import { caseMotions, combinationMotions } from "../domain/prescribedMotions";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
 import {
   hasElasticSupport,
@@ -60,6 +61,7 @@ export function buildResultTable(
   result: StructuralResult | null,
   forceMemberId = "",
   units: UnitPreferences = DEFAULT_UNITS,
+  view?: ResultView,
 ) {
   const spatial = project.mode === "spatial";
   const modelMembers = new Map(project.members.map((m) => [m.id, m]));
@@ -116,8 +118,19 @@ export function buildResultTable(
       return row;
     });
   } else if (tab === "displacements") {
+    const showImposed =
+      !!view && project.loadPatterns.some((p) => p.prescribed?.length);
+    const imposed =
+      showImposed && result
+        ? view.kind === "case"
+          ? caseMotions(project, view.definition)
+          : combinationMotions(project, view.definition)
+        : undefined;
+    const keys = spatial
+      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
+      : (["ux", "uz", "ry"] as const);
     const hasLocal = project.nodes.some(
-      (node) => node.supportFrame && hasElasticSupport(node),
+      (node) => node.supportFrame && (showImposed || hasElasticSupport(node)),
     );
     const values = (d: Displacement) => [
       ...[d.ux, ...(spatial ? [d.uy] : []), d.uz].map((value) =>
@@ -135,14 +148,22 @@ export function buildResultTable(
       ),
     ];
     const localColumns = hasLocal
-      ? [...components(" local"), "Referencial do apoio"]
+      ? [
+          ...components(showImposed ? " calculado local" : " local"),
+          "Referencial do apoio",
+        ]
       : [];
     headers = [
       "Nó / estação",
       ...components(
-        hasLocal || project.nodes.some((n) => n.foundation) ? " global" : "",
+        showImposed
+          ? " calculado global"
+          : hasLocal || project.nodes.some((n) => n.foundation)
+            ? " global"
+            : "",
       ),
       ...localColumns,
+      ...(showImposed ? components(" imposto no apoio") : []),
     ];
     rows = [
       ...Object.entries(result?.displacements ?? {}).map(([id, d]) => {
@@ -158,6 +179,17 @@ export function buildResultTable(
             frame ? "Local" : "Global",
           );
         }
+        if (showImposed)
+          for (const key of keys) {
+            const value = imposed?.get(id)?.[key] ?? 0;
+            row.push(
+              node?.restraints[key]
+                ? key[0] === "u"
+                  ? fromSI(value, "displacement", units)
+                  : value * 1000
+                : "",
+            );
+          }
         return row;
       }),
       ...Object.entries(result?.members ?? {}).flatMap(([id, stations]) =>
@@ -171,6 +203,7 @@ export function buildResultTable(
             `${memberNames.get(id) ?? id} · ${s.t === 0 ? "face i" : s.t === 1 ? "face j" : `x/L ${s.t}`}`,
             ...values(s),
             ...localColumns.map(() => ""),
+            ...(showImposed ? keys.map(() => "") : []),
           ]),
       ),
     ];
@@ -219,6 +252,7 @@ export function buildResultCsv(
     view.result,
     forceMemberId,
     units,
+    view,
   );
   const { definition } = view;
   const combination = view.kind === "combination" ? view.definition : null;
@@ -283,6 +317,7 @@ export default function Results({
     result,
     forceMemberId,
     units,
+    view,
   );
   return (
     <section className="results">

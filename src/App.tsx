@@ -57,7 +57,11 @@ import {
   type SelectedObject,
   type Selection,
 } from "./domain/model";
-import { addMember, addSlab, inspectNodeCoordinateChanges } from "./domain/editing";
+import {
+  addMember,
+  addSlab,
+  inspectNodeCoordinateChanges,
+} from "./domain/editing";
 import {
   onPlane,
   dot,
@@ -151,6 +155,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v19") ??
       localStorage.getItem("kstruct.draft.v18") ??
       localStorage.getItem("kstruct.draft.v17") ??
       localStorage.getItem("kstruct.draft.v16") ??
@@ -457,7 +462,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v18", serialized);
+      localStorage.setItem("kstruct.draft.v19", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1874,6 +1879,7 @@ export default function App() {
         {right && (
           <Inspector
             onMemberLoad={setMemberLoadDraft}
+            onPatternChange={setPatternId}
             onSections={openSections}
             onMaterials={() => setLaunchDialog("materials")}
             project={p}

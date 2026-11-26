@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v18, migração v1 a v17, geometria, validação e histórico     | `src/domain`                 |
+| Domínio           | Formato v19, migração v1 a v18, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos de esforços por estação, combinação e esforços simultâneos | `src/solver/envelopes.ts`    |
@@ -19,7 +19,7 @@ React/TypeScript/Vite/Three.js no frontend. Tauri 2/Rust no desktop, seguindo os
 
 ## Modelo próprio
 
-O esquema v18 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, diafragmas, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
+O esquema v19 contém o modo do projeto, referências de eixos X/Y e pavimentos Z, coordenadas XYZ, materiais, seções, nós, barras, lajes, diafragmas, padrões de carga, casos de análise, combinações e envelopes de esforços. O modo `planar` usa Y = 0 e UX/UZ/RY. As barras do modo `spatial` usam UX/UY/UZ/RX/RY/RZ. A leitura de v1 insere as referências iniciais, mantém o modo plano e preenche os novos componentes de apoio e carga com valores livres e nulos. A leitura de v1 e v2 inicia a lista de combinações vazia. Projetos v1 a v3 começam com a lista de envelopes vazia. A migração de v1 a v4 inicia a lista de lajes e as pressões de cada padrão vazias. A abertura dos dois formatos experimentais v5 preserva a formulação original. O formato com cota Z e pressões QDKT associa o painel ao pavimento correspondente ou cria uma referência na cota importada.
 
 Cada vista de lançamento usa um plano ortogonal em uma posição de referência. A captura é medida em pixels de tela na seguinte ordem de prioridade: nós do plano ativo (12 px), ponto médio e pé da perpendicular sobre barras inteiramente contidas no plano ativo (12 px, vencendo a menor distância em tela), guias de eixos e pavimentos no modo espacial (10 px por eixo) e, por fim, a malha de 0,50 m. O modo Orto e sua inversão temporária por `Shift` são preservados na captura de barra. A entrada por coordenadas relativas (`ΔU`/`ΔV` no plano ativo, preservando a cota normal) aplica exatamente o par informado, aceitando vírgula e ponto. Os nós têm coordenadas independentes das referências. Copiar geometria aplica uma translação aos selecionados e reutiliza nós coincidentes no destino.
 
@@ -109,7 +109,6 @@ Aparar e prolongar verificam a ponta antes de alterar sua posição. Um apoio, c
 
 Trabalho bloqueante fica em `spawn_blocking`, preservando a responsividade da janela.
 
-
 ## Eixo de inserção e trechos rígidos de barras
 
 O formato v12 guarda em `member.offsets.i` e `j` o vetor `eccentricity` em XYZ global e o comprimento `rigidLength`, ambos em metros. Y vale zero em XZ. A migração de v11 conserva todos os IDs e usa barras centradas. Os valores nulos equivalem à ausência de `offsets`. O inspetor usa a preferência de comprimento do usuário.
@@ -153,3 +152,9 @@ O formato v18 acrescenta a lista opcional `distributed` a cada padrão. A carga 
 A malha comum aos casos incorpora os limites de cada trecho e as mudanças de sinal das componentes especificadas. Uma mudança de intensidade distribuída conserva a continuidade dos esforços de seção. A divisão física interpola a intensidade no corte, mantém o ID na primeira parte carregada e atribui novos IDs às partes seguintes. Na inversão da barra, as extremidades e os vetores locais são remapeados para a mesma distribuição no espaço.
 
 Em cada elemento, o adaptador soma os perfis lineares ativos e fornece as duas intensidades ao `LinearEdgeLoad` do OOFEM, no referencial local do elemento. A carga de borda usa a aresta 1, `loadType 3`, `csType 1` e os GDL 1/3/5 no plano ou 1 a 6 no espaço. Os componentes são agrupados por extremidade. Nas partes rígidas, as forças equivalentes nas pontas do intervalo são `L(2q₀ + q₁)/6` e `L(q₀ + 2q₁)/6`. Cada uma é transportada até o nó com seu próprio braço. A verificação de equilíbrio integra a distribuição original em relação ao ponto médio e inclui o binário livre. [Implementação do LinearEdgeLoad no OOFEM 3.0](https://github.com/oofem/oofem/blob/v3.0/src/core/linearedgeload.C)
+
+## Movimentos prescritos nos apoios
+
+Cada padrão pode guardar `prescribed` com o ID do nó, o grau de liberdade e o valor assinado em metros ou radianos na base do apoio. A migração de v18 mantém as atribuições existentes. Um grau rígido sem atribuição recebe zero. Cada direção admite uma prescrição por padrão. Liberar o grau exige retirar antes as prescrições nele existentes.
+
+O adaptador soma os movimentos pelos fatores do caso e escreve um único `BoundaryCondition` por nó com restrições. A mesma base local define a ordem dos graus e os valores lidos da saída. O pós-processador confere cada deslocamento restringido e transforma as componentes em globais. As combinações tomam a soma ponderada dos movimentos dos casos. A tabela e o CSV exibem as componentes calculadas e as impostas no apoio. Células vazias identificam graus livres e estações internas.
