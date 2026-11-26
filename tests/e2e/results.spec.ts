@@ -8,6 +8,7 @@ import {
 } from "../../src/domain/model";
 import { runDeck } from "../fixtures/solve-oofem";
 import { openProjectInBrowser } from "../fixtures/open-project";
+import { familyBeam } from "../fixtures/combination-families";
 import { twoSpanBeam } from "../fixtures/two-span-beam";
 
 // Only the IPC boundary is substituted. This is a captured result from the real
@@ -279,7 +280,7 @@ test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lot
 
   const positions = () =>
     page.evaluate(() =>
-      JSON.parse(localStorage.getItem("kstruct.draft.v22")!).nodes.map(
+      JSON.parse(localStorage.getItem("kstruct.draft.v23")!).nodes.map(
         (n: { id: string; x: number }) => [n.id, n.x],
       ),
     );
@@ -1228,4 +1229,125 @@ test("pórtico em L com fila e análise manual no OOFEM 3.0", async ({
   );
   await picker.selectOption("envelope:E1");
   expect(await midspan()).toBe(batch);
+});
+
+test("gera ELU/ELS, revisa exclusões e edições, salva e usa a combinação na fila", async ({
+  page,
+}) => {
+  test.setTimeout(100_000);
+  await page.goto("/");
+  await openProjectInBrowser(
+    page,
+    "familias.kstruct.json",
+    serializeProject(familyBeam()),
+  );
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const openEditor = async () => {
+    await button("Cargas e casos").click();
+    await button("Combinações lineares").click();
+    await button("Gerar famílias ELU/ELS").click();
+  };
+  await openEditor();
+  for (const [name, role] of [
+    ["G", "permanent"],
+    ["Q1", "variable"],
+    ["Q2", "variable"],
+  ])
+    await page
+      .getByLabel(`Classificação de ${name}`, { exact: true })
+      .selectOption(role);
+  await expect(page.getByRole("dialog")).toContainText("1 × Padrão Q2");
+  for (const [label, v] of [
+    ["Permanente em ELU", "1,2"],
+    ["Principal em ELU", "1,5"],
+    ["Acompanhante em ELU", "0,75"],
+    ["Acompanhante em ELS", "0,3"],
+  ])
+    await page.getByLabel(label, { exact: true }).fill(v);
+  await page.getByLabel("Incluir família ELS", { exact: true }).check();
+  await page
+    .getByLabel("Origem dos coeficientes", { exact: true })
+    .first()
+    .fill("Ensaio ilustrativo");
+  await button("Gerar prévia").click();
+  const row = (name: string) =>
+    page.getByRole("region", { name: `Prévia ${name}`, exact: true });
+  await expect(row("ELU · Q1")).toContainText("1,2 × G + 1,5 × Q1 + 0,75 × Q2");
+  await expect(row("ELU · Q2")).toContainText("1,2 × G + 0,75 × Q1 + 1,5 × Q2");
+  const els = row("ELS · Q1");
+  await els.getByRole("button", { name: "Editar linha" }).click();
+  await els.getByLabel("Nome da linha").fill("ELS revisada");
+  await els.getByLabel("Fator de Q2").fill("0,4");
+  await row("ELS · Q2").getByRole("checkbox").uncheck();
+  await button("Usar linhas selecionadas").click();
+  await button("Envelopes").click();
+  await page.getByRole("checkbox", { name: "ELU · Q1", exact: true }).check();
+  await button("Aplicar definições").click();
+  const stored = () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v23")!));
+  await expect
+    .poll(async () => (await stored()).resultCombinations.length)
+    .toBe(4);
+  await button("Desfazer").click();
+  await expect
+    .poll(async () => (await stored()).resultCombinations.length)
+    .toBe(1);
+  await button("Refazer").click();
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const source = await readFile((await (await download).path())!, "utf8");
+  const saved = parseProject(source);
+  const id = saved.resultCombinations.find((c) => c.name === "ELU · Q1")!.id;
+  expect(saved.resultEnvelopes[0].combinationIds).toEqual(["MAN", id]);
+  await openProjectInBrowser(page, "reaberto.kstruct.json", source);
+  await openEditor();
+  await expect(
+    page.getByLabel("Principal em ELU", { exact: true }),
+  ).toHaveValue("1.5");
+  await page
+    .getByLabel("Grupo de exclusão de Q1", { exact: true })
+    .fill("Vento");
+  await page
+    .getByLabel("Grupo de exclusão de Q2", { exact: true })
+    .fill("Vento");
+  await button("Gerar prévia").click();
+  await expect(row("ELU · Q1").locator(".family-expression")).toHaveText(
+    "ELU · Q1 = 1,2 × G + 1,5 × Q1",
+  );
+  await expect(row("ELU · Q2").locator(".family-expression")).toHaveText(
+    "ELU · Q2 = 1,2 × G + 1,5 × Q2",
+  );
+  await expect(els).toContainText("ELS revisada");
+  await expect(els).toContainText("mutuamente exclusivos");
+  await expect(button("Usar linhas selecionadas")).toBeDisabled();
+  await els.getByRole("button", { name: "Editar linha" }).click();
+  await els.getByRole("button", { name: "Usar proposta recalculada" }).click();
+  await expect(button("Usar linhas selecionadas")).toBeEnabled();
+  await button("Cancelar geração").click();
+  await button("Cancelar").click();
+  expect((await stored()).resultCombinations).toEqual(saved.resultCombinations);
+  if (process.env.OOFEM_BIN) {
+    await page.exposeFunction("solveQueueDeck", (deck: string) =>
+      runDeck(deck, process.env.OOFEM_BIN!),
+    );
+    await bridge(page, { realSolver: true });
+    await page.reload();
+    await page
+      .getByLabel("Caso, combinação ou envelope")
+      .selectOption("combination:" + id);
+    await button("Analisar casos necessários").click();
+    await expect(
+      page.getByRole("region", { name: "Fila de casos" }),
+    ).toContainText("Casos necessários concluídos");
+    await button("Reações").click();
+    await expect(
+      page.getByRole("cell", { name: "21,6", exact: true }),
+    ).toHaveCount(2);
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(sessionStorage.getItem("e2e-case-starts")!),
+      ),
+    ).toEqual(["G", "Q1", "Q2"]);
+  }
 });

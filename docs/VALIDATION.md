@@ -510,3 +510,20 @@ Abra o [pórtico em L](../examples/portico-em-l-envelopes.kstruct.json), selecio
 No envelope, selecione V1 na estação x/L = 0,5. O máximo de My é 11,99 kN·m, governado por CF · Flexão. O teste compara todas as células da tabela desse extremo e do mínimo exibido com as da execução manual dos dois casos, na mesma unidade e precisão de exibição. As tolerâncias numéricas seguem o [benchmark de envelopes](#envelopes-de-esforços).
 
 Com o [OOFEM 3.0 configurado](OOFEM.md), execute `npm run test:e2e -- results.spec.ts -g 'fila serial|pórtico em L com fila'`. A ponte controlada cobre clique repetido, fator zero, dependências duplicadas, cancelamento entre casos e com o motor ativo, falha no segundo caso, histórico e edição antes de uma resposta tardia. O segundo ensaio usa o motor real para comparar fila e execução manual.
+
+## KS-35 — famílias editáveis de ELU e ELS
+
+O ensaio usa coeficientes ilustrativos informados pelo usuário. Lance a viga biapoiada de referência de 6 m e crie três padrões de carga uniforme em −Z, de 1, 2 e 4 kN/m. Crie os casos G, Q1 e Q2 com um padrão por caso, todos com fator 1. No gerador de **Combinações lineares**, classifique G como permanente e Q1 e Q2 como variáveis. Atribua ao ELU os coeficientes 1,2 / 1,5 / 0,75 e ao ELS os coeficientes 1 / 1 / 0,3, na ordem permanente / principal / acompanhante.
+
+| Família e principal | Expressão por caso       | Carga resultante em −Z (kN/m) | Reação em cada apoio (kN) | Momento no meio do vão (kN·m) |
+| ------------------- | ------------------------ | ----------------------------: | ------------------------: | ----------------------------: |
+| ELU, Q1             | 1,2 G + 1,5 Q1 + 0,75 Q2 |                           7,2 |                      21,6 |                          32,4 |
+| ELU, Q2             | 1,2 G + 0,75 Q1 + 1,5 Q2 |                           8,7 |                      26,1 |                         39,15 |
+| ELS, Q1             | G + Q1 + 0,3 Q2          |                           4,2 |                      12,6 |                          18,9 |
+| ELS, Q2             | G + 0,3 Q1 + Q2          |                           5,6 |                      16,8 |                          25,2 |
+
+Para cada intensidade q, as referências são R = qL/2 e M = qL²/8. Com Q1 e Q2 no mesmo grupo, a prévia de ELU passa a 1,2 G + 1,5 Q1 e 1,2 G + 1,5 Q2. Inserir a outra variável na linha editada deve apontar a exclusão. Atribuir o mesmo padrão a dois casos ativos deve identificar o padrão contado duas vezes. Uma combinação manual idêntica também aparece na validação.
+
+Para reproduzir a comparação numérica, configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md) e execute `npm test -- tests/combination-families.test.ts`. O teste resolve os três casos no OOFEM 3.0 e compara o ELU de principal Q1 com um quarto caso independente submetido diretamente com os fatores 1,2, 1,5 e 0,75. A flecha central esperada é −6,075 mm. As reações analíticas e o momento central desse ensaio usam tolerância absoluta de 0,02 N ou N·m, e os deslocamentos, de 5 × 10⁻⁹ m. Na comparação entre esforços ao longo da barra, a impressão nativa `%.4e` limita cada valor a cinco algarismos significativos. A tolerância soma os meios incrementos de arredondamento do caso direto e das parcelas ponderadas, mais 10⁻⁷ N ou N·m para resíduos próximos de zero.
+
+Execute `npm run test:e2e -- results.spec.ts --grep 'gera ELU/ELS'` para reproduzir a edição e dispensa de linhas, desfazer/refazer, salvar, reabrir e regenerar. Com o executável configurado, a fila resolve G, Q1 e Q2 uma vez cada e a interface mostra as duas reações de 21,6 kN. O teste de domínio verifica também a preservação do envelope manual e os IDs das combinações regeneradas.
