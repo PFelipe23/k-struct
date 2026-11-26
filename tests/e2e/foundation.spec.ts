@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { parseProject, serializeProject } from "../../src/domain/model";
+import { openProjectInBrowser } from "../fixtures/open-project";
 import { analyzeInBrowser } from "../fixtures/analyze-in-browser";
 import { coupledCsv, foundationBenchmark } from "../fixtures/foundation";
 
@@ -14,13 +15,7 @@ test("importa, confere a prévia, desfaz, reabre offline e analisa a fundação"
   original.nodes[0].springs = { ux: 150000 };
   await page.goto("/");
   const open = (source: string) =>
-    page.locator('input[type="file"]').setInputFiles({
-      name: "fundacao.kstruct.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(source),
-    });
-  const button = (name: string) =>
-    page.getByRole("button", { name, exact: true });
+    openProjectInBrowser(page, "fundacao.kstruct.json", source);
   await open(serializeProject(original));
   await button("N1 Apoio elástico").click();
   async function start() {
