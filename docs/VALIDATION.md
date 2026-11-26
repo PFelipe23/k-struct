@@ -470,3 +470,19 @@ A migração de v19 para v20 cria a configuração automática desativada e pres
 Execute `npm run check`, `npm run build` e `npm run test:e2e`. Para repetir os equilíbrios com o solver fixado, configure `OOFEM_BIN` conforme `OOFEM.md` e execute `OOFEM_BIN=/caminho/absoluto/oofem npm test -- tests/oofem.integration.test.ts tests/plate.integration.test.ts`.
 
 O ensaio adicional compara o peso próprio com a mesma intensidade uniforme manual em uma barra de eixo excêntrico com braço rígido e EI modificado. As reações e os esforços coincidem. Um padrão horizontal com fator zero é verificado também em projeto de laje.
+
+## KS-33 — Vento estático por faixa
+
+Ensaio de entrada definida pelo usuário. Em XZ, crie um pilar de (0, 0, 0) a (0, 0, 3) m, engaste a base e deixe o topo livre. Em **Cargas e casos**, adicione uma faixa ao padrão do caso. Use os dois nós do pilar, largura tributária de 4 m, intervalo de 0 a 100%, direção +X, pressão de referência de 0,8 kN/m² e coeficiente +1,25. A face é vertical e perpendicular ao vento, com largura centrada na vertical que recebe as cargas. Para uma fachada apoiada em várias verticais, atribua a cada uma sua largura de influência.
+
+A pressão líquida é o produto da pressão de referência pelo coeficiente. Um coeficiente negativo representa sucção. A força total é a pressão líquida multiplicada pela área da faixa. Sendo t a altura relativa do centro da faixa, a parcela superior é t vezes a resultante e a inferior é (1 − t) vezes a resultante. A distribuição representa a transferência estática aos nós e conserva o momento em relação a qualquer ponto.
+
+| Configuração | FX na base e no topo (kN) | Reação FX na base (kN) | Reação MY na base (kN·m) |
+| --- | --- | ---: | ---: |
+| Faixa inteira, +X | +6 e +6 | −12 | −18 |
+| Faixa inteira, −X | −6 e −6 | +12 | +18 |
+| Duas metades, +X | +4,5 e +1,5 na inferior, +1,5 e +4,5 na superior | −12 | −18 |
+
+A prévia da faixa inteira mostra 12 m² e linha de ação horizontal à cota de 1,5 m. Para repartir a fachada, edite a faixa original para 0–50% e adicione outra de 50–100%. No ensaio de combinação, o fator −0,5 para o vento em +X e 1,5 para um caso independente com −1 kN em Z no topo produzem reações de +6 kN em X, +1,5 kN em Z e +9 kN·m em Y.
+
+Com o OOFEM 3.0 configurado conforme [OOFEM.md](OOFEM.md), execute `npm test -- tests/wind.test.ts`. O ensaio XZ admite diferença absoluta inferior a 0,05 N ou 0,05 N·m nas reações. O ensaio espacial aplica sucção a 30° na metade superior de um pilar com base em (8, −2, 10) m. A reação MY calculada de 11.691,343 N·m aparece como 11.691 N·m nos cinco algarismos significativos do OOFEM, com tolerância absoluta de 0,5 N·m. Execute `npm run test:e2e -- wind.spec.ts` para conferir a prévia, o cancelamento, a atualização sem duplicação, o histórico e a reabertura do arquivo.

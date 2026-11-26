@@ -1,3 +1,4 @@
+import { patternWind } from "../domain/wind";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -497,6 +498,34 @@ export default function SpatialView({
       selection.map((item) => `${item.kind}:${item.id}`),
     );
     const pattern = project.loadPatterns.find(({ id }) => id === patternId);
+    const wind =
+      layers.loads && pattern ? patternWind(nodes, project.mode, pattern) : [];
+    const nodalActions = [
+      ...(pattern?.nodal ?? []),
+      ...wind.flatMap((w) => w.loads),
+    ];
+    for (const w of wind) {
+      s.model.add(
+        new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(w.corners.map(scenePoint)),
+          s.materials.load,
+        ),
+      );
+      if (layers.labels)
+        annotate(s.model, scenePoint(w.center), [
+          `${w.name} · ${w.area.toLocaleString("pt-BR")} m²`,
+        ]);
+      for (const load of w.loads)
+        if (load.fx || load.fy)
+          drawPointAction(
+            s.model,
+            s.materials.load,
+            scenePoint(nodes.get(load.nodeId)!),
+            { x: load.fx, y: load.fy, z: 0 },
+            w.corners[1].z - w.corners[0].z,
+            "force",
+          );
+    }
     for (const slab of project.slabs) {
       const z = project.guides.z.find(
         ({ id }) => id === slab.levelId,
@@ -720,7 +749,7 @@ export default function SpatialView({
       sphere.userData.selection = { kind: "node", id: n.id };
       s.model.add(sphere);
       const loads = layers.loads
-        ? (pattern?.nodal.filter((load) => load.nodeId === n.id) ?? [])
+        ? nodalActions.filter((load) => load.nodeId === n.id)
         : [];
       const blocked = restrainedDofs(n.restraints);
       annotate(

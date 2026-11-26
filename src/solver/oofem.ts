@@ -1,3 +1,4 @@
+import { patternWind } from "../domain/wind";
 import {
   add,
   coordinates,
@@ -284,7 +285,10 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         );
       return components;
     };
-    for (const l of pat.nodal) {
+    for (const l of [
+      ...pat.nodal,
+      ...patternWind(publicNodes, p.mode, pat).flatMap((w) => w.loads),
+    ]) {
       const values = scaleLoad(dofs.map(([, , key]) => l[key]));
       addNodalLoad(nodeNumber(l.nodeId), values);
     }
@@ -859,7 +863,11 @@ export function checkEquilibrium(
   for (const f of p.analysisCases.find((c) => c.id === caseId)!.factors) {
     const pat = p.loadPatterns.find((l) => l.id === f.patternId)!;
     if (!f.factor) continue;
-    for (const l of pat.nodal) accumulateNodal(l, f.factor);
+    for (const l of [
+      ...pat.nodal,
+      ...patternWind(byId, p.mode, pat).flatMap((w) => w.loads),
+    ])
+      accumulateNodal(l, f.factor);
     for (const load of pat.points ?? []) {
       const m = members.get(load.memberId)!;
       const line = memberAxis(m, byId.get(m.start)!, byId.get(m.end)!);

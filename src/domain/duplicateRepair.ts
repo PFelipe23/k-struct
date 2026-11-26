@@ -513,6 +513,11 @@ export function planRepair(
           `Grupo ${named(group)} · ${obj.id} → ${ids[0] ?? "removido"}`,
         );
     }
+  for (const pattern of p.loadPatterns)
+    for (const strip of pattern.wind ?? []) {
+      strip.bottomId = changedNode.get(strip.bottomId) ?? strip.bottomId;
+      strip.topId = changedNode.get(strip.topId) ?? strip.topId;
+    }
   remapDiaphragmNodes(p, nodeRefs);
   remapGroups(p, "node", nodeRefs);
   remapGroups(p, "member", memberRefs);
