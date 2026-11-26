@@ -1,3 +1,4 @@
+import { pointLoadFrame, rebasePointLoad } from "./memberPointLoads";
 import { centeredOffsets, memberAxis, setOffsets } from "./memberOffsets";
 import { sameStiffness } from "./memberStiffness";
 import { hasSupport } from "./supports";
@@ -220,6 +221,9 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   const [axis] = beamAxes(a, b, survivor.roll);
   const line = memberAxis(survivor, a, b);
   const [, , z] = beamAxes(line.start, line.end, survivor.roll);
+  const previousFrames = new Map(
+    bars.map((m) => [m.id, pointLoadFrame(m, nodes, p.mode)]),
+  );
   const ends = new Set(bars.flatMap((m) => [m.start, m.end]));
   const stations = [...ends]
     .map((id) => {
@@ -308,6 +312,13 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   }
   survivor.start = stations[0].id;
   survivor.end = stations.at(-1)!.id;
+  const target = pointLoadFrame(survivor, nodes, p.mode);
+  for (const pat of p.loadPatterns)
+    if (pat.points)
+      pat.points = pat.points.map((load) => {
+        const from = previousFrames.get(load.memberId);
+        return from ? rebasePointLoad(load, from, target, survivor.id) : load;
+      });
   p.members = p.members.filter(
     (m) => !selected.has(m.id) || m.id === survivor.id,
   );
@@ -361,6 +372,7 @@ function editEndOrSplit(
           ? "Para aparar, indique uma posição entre as extremidades."
           : "Para prolongar, indique uma posição além da extremidade escolhida.",
       );
+    const previous = pointLoadFrame(m, nodes, p.mode);
     protectJoint(p, old, new Set([m.id]));
     if (
       cmd.kind === "extend" &&
@@ -383,6 +395,12 @@ function editEndOrSplit(
       );
       discardNodes(p, new Set([old.id]), joint.id);
     }
+    const target = pointLoadFrame(m, nodes, p.mode);
+    for (const pat of p.loadPatterns)
+      if (pat.points)
+        pat.points = pat.points.map((l) =>
+          l.memberId === m.id ? rebasePointLoad(l, previous, target, m.id) : l,
+        );
   }
   // Every physical member passing through the new joint must use the very same node.
   const cuts = new Map<string, string[]>();

@@ -18,6 +18,11 @@ import {
   projectSchema,
   type Project,
 } from "../domain/model";
+import {
+  actionVector,
+  pointFraction,
+  type MemberPointLoad,
+} from "../domain/memberPointLoads";
 import { memberAxis } from "../domain/memberOffsets";
 import { floorConstraints } from "./diaphragm";
 import { rigidJointEquations } from "./rigidOffsets";
@@ -42,6 +47,7 @@ export interface MeshNode extends Point3 {
   objectId?: string;
   master?: number;
   diaphragm?: number;
+  pointLoadStation?: boolean;
 }
 export interface MeshElement {
   number: number;
@@ -148,6 +154,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const { stations: layout, rigidLinks } = beamMeshLayout(p);
   const lines = new Map<string, ReturnType<typeof memberAxis>>();
   const explicitDofs = new Set<number>();
+  const pointTargets = new Map<MemberPointLoad, number>();
   for (const m of p.members) {
     const a = modelNodes.get(m.start)!,
       b = modelNodes.get(m.end)!;
@@ -176,9 +183,13 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const ids: number[] = [];
     let start = stationNode(0, m.start);
     const stations = layout.get(m.id)!;
+    for (const l of stations[0].pointLoads ?? []) pointTargets.set(l, start);
     for (let i = 1; i < stations.length; i++) {
       const { t, nodeId } = stations[i];
       const end = stationNode(t, nodeId);
+      for (const l of stations[i].pointLoads ?? []) pointTargets.set(l, end);
+      if (t < 1 && stations[i].pointLoads?.length)
+        nodes[end - 1].pointLoadStation = true;
       if (!(distance(nodes[start - 1], nodes[end - 1]) > 0))
         throw new Error(
           `${m.name}: a malha produziria um segmento de comprimento nulo.`,
@@ -237,10 +248,10 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     const joint = nodes[node.master - 1];
     if (joint.master) node.master = joint.master;
   }
-  function addNodalLoad(id: string, values: number[]) {
+  function addNodalLoad(number: number, values: number[]) {
     if (!values.some(Boolean)) return;
     bcs.push(
-      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(id) ? " cstype 0" : ""} set ${set(`nodes 1 ${nodeNumber(id)}`)}`,
+      `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
     );
   }
   for (const factor of analysisCase.factors) {
@@ -255,7 +266,32 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     };
     for (const l of pat.nodal) {
       const values = scaleLoad(dofs.map(([, , key]) => l[key]));
-      addNodalLoad(l.nodeId, values);
+      addNodalLoad(nodeNumber(l.nodeId), values);
+    }
+    for (const load of pat.points ?? []) {
+      const target = pointTargets.get(load)!;
+      const line = lines.get(load.memberId)!;
+      const point = interpolate(
+        line.start,
+        line.end,
+        pointFraction(load.position, line.span),
+      );
+      const vector = actionVector(load, axes.get(load.memberId)!);
+      const force = load.kind === "force" ? vector : origin;
+      // A location on a rigid arm (or snapped within tolerance) transmits its
+      // force and the work-conjugate moment at the actual analysis node.
+      const moment =
+        load.kind === "moment"
+          ? vector
+          : cross(subtract(point, nodes[target - 1]), force);
+      addNodalLoad(
+        target,
+        scaleLoad(
+          spatial
+            ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
+            : [force.x, force.z, moment.y],
+        ),
+      );
     }
     for (const l of pat.uniform) {
       if (!factor.factor || !(l.qx || l.qy || l.qz)) continue;
@@ -275,7 +311,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
           const components = spatial
             ? [force.x, force.y, force.z, moment.x, moment.y, moment.z]
             : [force.x, force.z, moment.y];
-          addNodalLoad(id, scaleLoad(components));
+          addNodalLoad(nodeNumber(id), scaleLoad(components));
         }
       }
       const ids = memberElements
@@ -553,13 +589,16 @@ export function parseOofemOutput(
     if (!stations.length) stations.push(station(false));
     else if (
       input.nodes[e.start - 1].objectId ||
-      input.nodes[e.start - 1].master
+      input.nodes[e.start - 1].master ||
+      input.nodes[e.start - 1].pointLoadStation
     )
       stations.push({ ...station(false), side: "right" });
     const end = station(true);
     if (
       e.t1 < 1 &&
-      (input.nodes[e.end - 1].objectId || input.nodes[e.end - 1].master)
+      (input.nodes[e.end - 1].objectId ||
+        input.nodes[e.end - 1].master ||
+        input.nodes[e.end - 1].pointLoadStation)
     )
       end.side = "left";
     stations.push(end);
@@ -711,6 +750,23 @@ export function checkEquilibrium(
   for (const f of p.analysisCases.find((c) => c.id === caseId)!.factors) {
     const pat = p.loadPatterns.find((l) => l.id === f.patternId)!;
     for (const l of pat.nodal) accumulateNodal(l, f.factor);
+    for (const load of pat.points ?? []) {
+      const m = members.get(load.memberId)!;
+      const line = memberAxis(m, byId.get(m.start)!, byId.get(m.end)!);
+      const v = scale(
+        actionVector(load, beamAxes(line.start, line.end, m.roll, p.mode)),
+        f.factor,
+      );
+      accumulate(
+        load.kind === "force" ? v : origin,
+        load.kind === "moment" ? v : origin,
+        interpolate(
+          line.start,
+          line.end,
+          pointFraction(load.position, line.span),
+        ),
+      );
+    }
     for (const l of pat.uniform) {
       const m = members.get(l.memberId)!;
       const a = byId.get(m.start)!,

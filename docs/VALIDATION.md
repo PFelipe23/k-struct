@@ -397,3 +397,21 @@ A fatoração aplica Cholesky após equilibrar a diagonal. Verifica a simetria c
 Em um terceiro ensaio, a suíte monta diretamente `Tᵀ K T` para uma matriz densa, eixos oblíquos e um deslocamento de origem nas três direções. Os 36 termos transformados são comparados com tolerância relativa de 10⁻¹¹ (piso unitário em SI). O teste resolve o projeto reaberto e compara os seis movimentos e as seis reações à referência independente.
 
 A suíte também resolve a exportação F01 com o termo FX–RY negativo, a rotação RX livre do B16 com um vínculo complementar e a matriz diagonal em uma barra espacial frente às molas da KS-25. O teste de interface cobre arquivo inválido com apoio anterior intacto, confirmação de eixos/origem, substituição, desfazer/refazer, salvar, reabrir e executar.
+
+## Força e momento concentrados no vão (KS-29)
+
+Use a viga biapoiada de 6 m do exemplo, retire a carga uniforme e mantenha o apoio articulado em i e o apoio móvel em j. Em **Modelo → Carga concentrada**, clique na barra e ajuste a posição para 2 m a partir de i. Repita a análise com a posição relativa `1/3`. Consulte **Esforços** na mesma estação pelos lados i e j.
+
+| Ação aplicada | Reação vertical em i | Reação vertical em j | Cortante nos lados i e j | Momento nos lados i e j |
+| --- | ---: | ---: | --- | --- |
+| FZ global = −12 kN | +8 kN | +4 kN | +8 e −4 kN | +16 e +16 kN·m |
+| MY global = +6 kN·m | −1 kN | +1 kN | −1 e −1 kN | −2 e +4 kN·m |
+
+A primeira linha decorre de `Rj = 12 × 2 / 6` e `M(2 m) = 8 × 2` na seção carregada. Na segunda linha o binário produz salto de +6 kN·m no momento. Os testes repetem a força com 2, 3 e 8 subdivisões regulares e invertem i/j. Também verificam a divisão e a união físicas, a superposição de casos, a soma com uma carga nodal coincidente e a aplicação dentro de um braço rígido.
+
+No ensaio espacial, engaste a extremidade (0, 0, 0) e deixe livre a extremidade (3, 0, 4) m. Gire a seção em +90° e aplique Fz local = −10 kN em x/L = 0,4 com fator 1,5 no caso. A força resultante é +15 kN em Y global. A reação é −15 kN em Y, com momentos +24 kN·m em X e −18 kN·m em Z. A inversão de i/j conserva as reações globais. Os ensaios de esforços usam tolerâncias absolutas de até 0,005 N ou N·m na comparação com a saída numérica.
+
+```sh
+OOFEM_BIN=/caminho/absoluto/oofem npm run check
+OOFEM_BIN=/caminho/absoluto/oofem npm run test:e2e -- member-point-loads.spec.ts
+```

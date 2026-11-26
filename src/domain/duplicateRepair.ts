@@ -1,3 +1,4 @@
+import { pointLoadFrame, rebasePointLoad } from "./memberPointLoads";
 import { remapDiaphragmNodes } from "./diaphragms";
 import { centeredOffsets } from "./memberOffsets";
 import { sameStiffness } from "./memberStiffness";
@@ -312,8 +313,37 @@ export function planRepair(
         `Conservar as excentricidades e os trechos rígidos de ${named(dst)}`,
         acknowledge,
       );
-    for (const pat of p.loadPatterns)
+    for (const pat of p.loadPatterns) {
       pat.uniform = resolveRows(pat.uniform, ids, members, "memberId", pat);
+      const loads = pat.points?.filter((l) => ids.includes(l.memberId));
+      if (!loads?.length) continue;
+      const owners = new Set(loads.map((l) => l.memberId));
+      const policy =
+        owners.size < 2
+          ? "all"
+          : ask(
+              ["points", pat.id, ...ids],
+              `Cargas concentradas de ${pat.name} em ${dst.name}`,
+              [
+                { value: "all", label: "Manter as ações de todas as barras" },
+                ...ids.map((id) => sourceOption(members.get(id)!)),
+              ],
+            );
+      const target = pointLoadFrame(
+        survivingMembers.get(keep)!,
+        nodeDraft,
+        p.mode,
+      );
+      pat.points = pat.points!.flatMap((l) => {
+        if (!owners.has(l.memberId)) return [l];
+        if (policy !== "all" && policy !== "use:" + l.memberId) return [];
+        const from = pointLoadFrame(members.get(l.memberId)!, nodes, p.mode);
+        return [rebasePointLoad(l, from, target, keep)];
+      });
+      notes.push(
+        `${pat.name}: ${loads.length} ação(ões) concentrada(s) na união de ${dst.name}.`,
+      );
+    }
   }
   for (const id of stage.nulls) {
     const m = members.get(id)!;
@@ -325,6 +355,12 @@ export function planRepair(
             `${named(pat)} · excluir carga de ${named(m)} · ${formatLoad(l)}`,
           );
         pat.uniform = pat.uniform.filter((l) => l.memberId !== id);
+        if (pat.points?.some((l) => l.memberId === id)) {
+          notes.push(
+            `${pat.name}: excluir as cargas concentradas de ${named(m)}.`,
+          );
+          pat.points = pat.points.filter((l) => l.memberId !== id);
+        }
       }
     } else if (distance(nodes.get(m.start)!, nodes.get(m.end)!) >= tolerance)
       blocking.push(

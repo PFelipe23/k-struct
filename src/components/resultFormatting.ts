@@ -29,6 +29,10 @@ export const forceLabels: Record<
   mz: { symbol: "Mz", unit: "kN·m" },
 };
 
+export const reportsSectionSides = (project: Project) =>
+  project.meshConnections.length > 0 ||
+  project.loadPatterns.some((pattern) => pattern.points?.length);
+
 export const sectionSide = (side?: "left" | "right") =>
   side === "left" ? "Lado i" : side === "right" ? "Lado j" : "";
 
