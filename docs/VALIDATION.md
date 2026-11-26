@@ -486,3 +486,11 @@ A pressão líquida é o produto da pressão de referência pelo coeficiente. Um
 A prévia da faixa inteira mostra 12 m² e linha de ação horizontal à cota de 1,5 m. Para repartir a fachada, edite a faixa original para 0–50% e adicione outra de 50–100%. No ensaio de combinação, o fator −0,5 para o vento em +X e 1,5 para um caso independente com −1 kN em Z no topo produzem reações de +6 kN em X, +1,5 kN em Z e +9 kN·m em Y.
 
 Com o OOFEM 3.0 configurado conforme [OOFEM.md](OOFEM.md), execute `npm test -- tests/wind.test.ts`. O ensaio XZ admite diferença absoluta inferior a 0,05 N ou 0,05 N·m nas reações. O ensaio espacial aplica sucção a 30° na metade superior de um pilar com base em (8, −2, 10) m. A reação MY calculada de 11.691,343 N·m aparece como 11.691 N·m nos cinco algarismos significativos do OOFEM, com tolerância absoluta de 0,5 N·m. Execute `npm run test:e2e -- wind.spec.ts` para conferir a prévia, o cancelamento, a atualização sem duplicação, o histórico e a reabertura do arquivo.
+
+## KS-34 — Fila de casos estáticos
+
+Abra o [pórtico em L](../examples/portico-em-l-envelopes.kstruct.json), selecione **Envelope** e clique em **Analisar casos necessários**. A fila executa EL e CP uma vez cada na ordem do projeto. Se EL já foi analisado na mesma revisão, só CP inicia. Com ambos disponíveis, o comando não faz chamadas nativas.
+
+No envelope, selecione V1 na estação x/L = 0,5. O máximo de My é 11,99 kN·m, governado por CF · Flexão. O teste compara todas as células da tabela desse extremo e do mínimo exibido com as da execução manual dos dois casos, na mesma unidade e precisão de exibição. As tolerâncias numéricas seguem o [benchmark de envelopes](#envelopes-de-esforços).
+
+Com o [OOFEM 3.0 configurado](OOFEM.md), execute `npm run test:e2e -- results.spec.ts -g 'fila serial|pórtico em L com fila'`. A ponte controlada cobre clique repetido, fator zero, dependências duplicadas, cancelamento entre casos e com o motor ativo, falha no segundo caso, histórico e edição antes de uma resposta tardia. O segundo ensaio usa o motor real para comparar fila e execução manual.

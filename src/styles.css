@@ -2533,3 +2533,27 @@ button.primary {
 }
 .foundation-table th:first-child { text-align: left; }
 .foundation-dialog dt { font-weight: 600; }
+
+.case-queue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 7px 19px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line-strong);
+}
+.case-queue > div {
+  min-width: 0;
+  max-height: 80px;
+  overflow: auto;
+}
+.case-queue-message { white-space: pre-line; }
+.case-queue ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 4px 0 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 11px;
+}
