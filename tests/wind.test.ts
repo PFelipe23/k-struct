@@ -78,7 +78,8 @@ describe("faixas de vento", () => {
       expect(r.fx).toBeCloseTo(fx, 1);
       expect(r.fy).toBeCloseTo(fy, 1);
       expect(r.mx).toBeCloseTo(-fy * 2.25, 1);
-      expect(r.my).toBeCloseTo(fx * 2.25, 1);
+      // Five significant digits in the OOFEM reaction table (1 N·m here).
+      expect(r.my).toBeCloseTo(fx * 2.25, 0);
     },
   );
   it.skipIf(!process.env.OOFEM_BIN)(
