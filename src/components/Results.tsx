@@ -2,20 +2,20 @@ import { useState } from "react";
 import { CheckCircle2, FileDown, History, Terminal } from "lucide-react";
 import { caseMotions, combinationMotions } from "../domain/prescribedMotions";
 import type { AnalysisCase, Project, ResultCombination } from "../domain/model";
-import {
-  hasElasticSupport,
-  supportBasis,
-  supportsDof,
-  supportToLocal,
-} from "../domain/supports";
+import { hasElasticSupport, supportBasis } from "../domain/supports";
 import type { AnalysisDiagnostic } from "../domain/diagnostics";
 import type {
   AnalysisResult,
   Displacement,
-  Reaction,
   StructuralResult,
 } from "../solver/oofem";
 import { exportFile } from "../solver/desktop";
+import {
+  localReaction,
+  localDisplacement,
+  reactionColumns,
+  displacementColumns,
+} from "../solver/nodalResults";
 import {
   DEFAULT_UNITS,
   fromSI,
@@ -23,6 +23,10 @@ import {
   type UnitPreferences,
 } from "../units";
 import { useUnits } from "./Units";
+import {
+  SectionConsultation,
+  type SectionControls,
+} from "./SectionConsultation";
 import {
   encodeCsv,
   forceColumns,
@@ -78,9 +82,7 @@ export function buildResultTable(
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
-    const keys: (keyof Omit<Reaction, "nodeId">)[] = spatial
-      ? ["fx", "fy", "fz", "mx", "my", "mz"]
-      : ["fx", "fz", "my"];
+    const keys = reactionColumns[project.mode];
     const hasLocal = (result?.reactions ?? []).some(
       ({ nodeId }) => nodes.get(nodeId)?.supportFrame,
     );
@@ -101,18 +103,9 @@ export function buildResultTable(
       ];
       if (hasLocal) {
         const node = nodes.get(r.nodeId)!;
-        const basis = supportBasis(node.supportFrame);
-        const f = supportToLocal({ x: r.fx, y: r.fy, z: r.fz }, basis);
-        const m = supportToLocal({ x: r.mx, y: r.my, z: r.mz }, basis);
-        const local = { fx: f.x, fy: f.y, fz: f.z, mx: m.x, my: m.y, mz: m.z };
+        const local = localReaction(r, node);
         row.push(
-          ...keys.map((key) => {
-            const axis = key[1] as "x" | "y" | "z";
-            return node.foundation ||
-              supportsDof(node, `${key[0] === "f" ? "u" : "r"}${axis}`)
-              ? fromSI(local[key], quantity(key), units)
-              : 0;
-          }),
+          ...keys.map((key) => fromSI(local[key], quantity(key), units)),
           node.supportFrame ? "Local" : "Global",
         );
       }
@@ -127,9 +120,7 @@ export function buildResultTable(
           ? caseMotions(project, view.definition)
           : combinationMotions(project, view.definition)
         : undefined;
-    const keys = spatial
-      ? (["ux", "uy", "uz", "rx", "ry", "rz"] as const)
-      : (["ux", "uz", "ry"] as const);
+    const keys = displacementColumns[project.mode];
     const hasLocal = project.nodes.some(
       (node) => node.supportFrame && (showImposed || hasElasticSupport(node)),
     );
@@ -172,11 +163,8 @@ export function buildResultTable(
         const row: (string | number)[] = [node?.name ?? id, ...values(d)];
         if (hasLocal) {
           const frame = node?.supportFrame;
-          const basis = supportBasis(frame);
-          const u = supportToLocal({ x: d.ux, y: d.uy, z: d.uz }, basis);
-          const r = supportToLocal({ x: d.rx, y: d.ry, z: d.rz }, basis);
           row.push(
-            ...values({ ux: u.x, uy: u.y, uz: u.z, rx: r.x, ry: r.y, rz: r.z }),
+            ...values(localDisplacement(d, supportBasis(frame))),
             frame ? "Local" : "Global",
           );
         }
@@ -270,6 +258,9 @@ export function buildResultCsv(
 
 export default function Results({
   project,
+  tab,
+  onTab,
+  controls,
   forceMemberId,
   onForceMemberChange,
   view,
@@ -282,6 +273,9 @@ export default function Results({
   onInspectDiagnostic,
 }: {
   project: Project;
+  tab: string;
+  onTab: (tab: string) => void;
+  controls: SectionControls | null;
   forceMemberId: string;
   onForceMemberChange: (id: string) => void;
   view: ResultView;
@@ -294,7 +288,6 @@ export default function Results({
   onInspectDiagnostic?: (diagnostic: AnalysisDiagnostic) => void;
 }) {
   const { units } = useUnits();
-  const [tab, setTab] = useState("log");
   const [exportError, setExportError] = useState("");
   const { definition, result } = view;
   const caseOutput = view.kind === "case" ? view.result : null;
@@ -335,11 +328,12 @@ export default function Results({
             ["reactions", "Reações"],
             ["displacements", "Deslocamentos"],
             ["forces", "Esforços"],
+            ["section", "Consultar seção"],
           ].map(([key, label]) => (
             <button
               key={key}
               className={tab === key ? "active" : ""}
-              onClick={() => setTab(key)}
+              onClick={() => onTab(key)}
             >
               {key === "log" && <Terminal size={13} />} {label}
             </button>
@@ -394,7 +388,7 @@ export default function Results({
                   Saída OOFEM
                 </button>
               )}
-              {tab !== "log" && (
+              {tab !== "log" && tab !== "section" && (
                 <button
                   onClick={() => {
                     download(
@@ -412,109 +406,115 @@ export default function Results({
           )}
         </div>
       </div>
-      <div className="results-body">
-        {exportError && (
-          <p className="help" role="alert">
-            {exportError}
-          </p>
-        )}
-        {tab === "log" ? (
-          <>
-            <div className="message-log">
-              <span className={running ? "working" : "log-dot"} />
-              <pre role="status">
-                {cancelling
-                  ? "Cancelando execução do OOFEM…"
-                  : running
-                    ? "OOFEM em execução…"
-                    : logMessage}
-              </pre>
-            </div>
-            {diagnostics.length > 0 && (
-              <div className="analysis-diagnostics" aria-label="Diagnósticos">
-                {diagnostics.map((diagnostic) => (
-                  <article key={diagnostic.id}>
-                    <strong>
-                      {diagnostic.severity === "erro" ? "Erro" : "Aviso"} ·{" "}
-                      {diagnostic.stage}
-                    </strong>
-                    <p>{diagnostic.message}</p>
-                    <p>{diagnostic.action}</p>
-                    {diagnostic.objects.length > 0 && diagnosticsNavigable && (
-                      <button
-                        type="button"
-                        onClick={() => onInspectDiagnostic?.(diagnostic)}
-                      >
-                        Inspecionar {diagnostic.objects.length} objeto(s)
-                      </button>
-                    )}
-                    {diagnostic.objects.length > 0 && !diagnosticsNavigable && (
-                      <small>
-                        Este diagnóstico pertence a uma revisão anterior do
-                        modelo.
-                      </small>
-                    )}
-                  </article>
-                ))}
+      {tab === "section" && controls ? (
+        <SectionConsultation project={project} controls={controls} />
+      ) : (
+        <div className="results-body">
+          {exportError && (
+            <p className="help" role="alert">
+              {exportError}
+            </p>
+          )}
+          {tab === "log" ? (
+            <>
+              <div className="message-log">
+                <span className={running ? "working" : "log-dot"} />
+                <pre role="status">
+                  {cancelling
+                    ? "Cancelando execução do OOFEM…"
+                    : running
+                      ? "OOFEM em execução…"
+                      : logMessage}
+                </pre>
               </div>
-            )}
-          </>
-        ) : !result && view.kind === "combination" ? (
-          <div className="no-results">{view.problem.replace("\n", " ")}</div>
-        ) : !result ? (
-          <div className="no-results">
-            Execute uma análise para consultar{" "}
-            {tab === "forces"
-              ? "os esforços"
-              : tab === "reactions"
-                ? "as reações"
-                : "os deslocamentos"}{" "}
-            do caso <b>{definition.name}</b>.
-          </div>
-        ) : (
-          <table>
-            {(project.members.some((m) => m.offsets) ||
-              (tab !== "forces" &&
-                project.nodes.some((n) => n.foundation))) && (
-              <caption>
-                {tab === "forces"
-                  ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
-                  : tab === "reactions"
-                    ? "Ações dos apoios sobre a estrutura, com forças e momentos referidos ao nó."
-                    : headers.includes("Referencial do apoio")
-                      ? "Deslocamentos nos nós de lançamento e nas estações do trecho deformável. As colunas identificam o referencial."
-                      : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
-              </caption>
-            )}
-            <thead>
-              <tr>
-                {headers.map((h) => (
-                  <th key={h}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
-                  {r.map((v, j) => (
-                    <td key={j}>
-                      {typeof v === "number"
-                        ? formatResult(
-                            v,
-                            tab === "displacements" &&
-                              headers[j].startsWith("U")
-                              ? resultFractionDigits("displacement", units)
-                              : 5,
-                          )
-                        : v}
-                    </td>
+              {diagnostics.length > 0 && (
+                <div className="analysis-diagnostics" aria-label="Diagnósticos">
+                  {diagnostics.map((diagnostic) => (
+                    <article key={diagnostic.id}>
+                      <strong>
+                        {diagnostic.severity === "erro" ? "Erro" : "Aviso"} ·{" "}
+                        {diagnostic.stage}
+                      </strong>
+                      <p>{diagnostic.message}</p>
+                      <p>{diagnostic.action}</p>
+                      {diagnostic.objects.length > 0 &&
+                        diagnosticsNavigable && (
+                          <button
+                            type="button"
+                            onClick={() => onInspectDiagnostic?.(diagnostic)}
+                          >
+                            Inspecionar {diagnostic.objects.length} objeto(s)
+                          </button>
+                        )}
+                      {diagnostic.objects.length > 0 &&
+                        !diagnosticsNavigable && (
+                          <small>
+                            Este diagnóstico pertence a uma revisão anterior do
+                            modelo.
+                          </small>
+                        )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : !result && view.kind === "combination" ? (
+            <div className="no-results">{view.problem.replace("\n", " ")}</div>
+          ) : !result ? (
+            <div className="no-results">
+              Execute uma análise para consultar{" "}
+              {tab === "forces" || tab === "section"
+                ? "os esforços"
+                : tab === "reactions"
+                  ? "as reações"
+                  : "os deslocamentos"}{" "}
+              do caso <b>{definition.name}</b>.
+            </div>
+          ) : (
+            <table>
+              {(project.members.some((m) => m.offsets) ||
+                (tab !== "forces" &&
+                  project.nodes.some((n) => n.foundation))) && (
+                <caption>
+                  {tab === "forces"
+                    ? "Esforços nos eixos locais. As coordenadas globais identificam a seção. x/L vai da face i (0) à face j (1) do trecho deformável."
+                    : tab === "reactions"
+                      ? "Ações dos apoios sobre a estrutura, com forças e momentos referidos ao nó."
+                      : headers.includes("Referencial do apoio")
+                        ? "Deslocamentos nos nós de lançamento e nas estações do trecho deformável. As colunas identificam o referencial."
+                        : "Deslocamentos globais nos nós de lançamento e nas estações do trecho deformável."}
+                </caption>
+              )}
+              <thead>
+                <tr>
+                  {headers.map((h) => (
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    {r.map((v, j) => (
+                      <td key={j}>
+                        {typeof v === "number"
+                          ? formatResult(
+                              v,
+                              tab === "displacements" &&
+                                headers[j].startsWith("U")
+                                ? resultFractionDigits("displacement", units)
+                                : 5,
+                            )
+                          : v}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -1,10 +1,13 @@
 import type { Point3 } from "./geometry";
-import type { Slab, SlabEdge } from "./model";
+import type { Slab } from "./model";
+import { meshPolygon } from "./polygonMesh";
+import type { XY } from "./slabPolygon";
 
 export type SlabDof = 3 | 4 | 5;
-interface SlabNode extends Point3 {
+export interface SlabNode extends Point3 {
   number: number;
   restraints: SlabDof[];
+  tangent?: XY; // Local x along a simply supported oblique edge, local z = global Z.
 }
 export interface SlabElement {
   number: number;
@@ -13,10 +16,11 @@ export interface SlabElement {
 export interface SlabMesh {
   nodes: SlabNode[];
   elements: SlabElement[];
-  edges: Record<SlabEdge, number[]>;
+  edges: Record<string, number[]>;
 }
 
 export function meshSlab(slab: Slab, z: number): SlabMesh {
+  if (slab.polygon) return meshPolygon(slab.polygon, z);
   const { divisionsX: nx, divisionsY: ny, supports } = slab;
   const number = (i: number, j: number) => j * (nx + 1) + i + 1;
   const nodes: SlabNode[] = [];

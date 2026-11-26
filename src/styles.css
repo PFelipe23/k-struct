@@ -1038,6 +1038,21 @@ button.primary {
 .drawing-select .slab-plan {
   cursor: pointer;
 }
+.slab-trace-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+.slab-contour-fields { display: grid; gap: 6px; }
+.slab-contour-fields p { margin: 2px 0; }
+.slab-contour-fields .coordinate-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.slab-contour-fields .coordinate-fields input { width: 100%; min-width: 0; }
+.slab-contour-fields [role=alert], .slab-trace-controls [role=alert] { color: var(--danger); }
 .slab-mesh,
 .slab-supported-edge,
 .slab-free-edge,
@@ -1045,6 +1060,7 @@ button.primary {
   fill: none;
   pointer-events: none;
 }
+.drawing-select .slab-plan polyline { pointer-events: stroke; }
 .slab-mesh {
   stroke: var(--muted);
   stroke-width: 0.65;
@@ -1256,6 +1272,34 @@ button.primary {
 .envelope-results .results-heading {
   gap: 8px;
   padding-left: 10px;
+}
+.section-position {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.section-position input {
+  width: 8em;
+  font-size: 11px;
+}
+.section-position [role="alert"] {
+  color: var(--danger);
+  font-size: 10px;
+}
+.section-reading {
+  margin: 4px 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.section-consultation .governing-force {
+  color: var(--violet);
+  font-weight: 600;
+}
+.envelope-toolbar {
+  flex: none;
+  flex-wrap: wrap;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--line);
 }
 .envelope-title {
   overflow: hidden;
@@ -2545,3 +2589,104 @@ button.primary {
 }
 .foundation-table th:first-child { text-align: left; }
 .foundation-dialog dt { font-weight: 600; }
+
+.case-queue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 7px 19px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line-strong);
+}
+.case-queue > div {
+  min-width: 0;
+  max-height: 80px;
+  overflow: auto;
+}
+.case-queue-message { white-space: pre-line; }
+.case-queue ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 4px 0 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.load-editor.family-modal {
+  width: 820px;
+}
+.family-editor {
+  display: grid;
+  gap: 12px;
+}
+.family-editor h3,
+.family-editor p {
+  margin: 0;
+}
+.family-editor p,
+.family-editor small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.family-editor label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.family-editor input:not([type="checkbox"]),
+.family-editor select {
+  width: 100%;
+  min-width: 0;
+}
+.family-editor table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.family-editor th,
+.family-editor td {
+  padding: 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--control-border);
+}
+.family-table-wrap {
+  overflow-x: auto;
+}
+.family-settings,
+.family-proposal {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+}
+.family-settings legend label,
+.family-row-title label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.family-row-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.family-expression {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.family-identity,
+.family-terms {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+}
+.family-edit-line {
+  display: grid;
+  gap: 8px;
+}
+.family-editor .launch-error {
+  color: var(--danger);
+}

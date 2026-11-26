@@ -1,3 +1,9 @@
+import CombinationFamilyEditor from "./CombinationFamilyEditor";
+import {
+  parseCoefficient as parseFactor,
+  sameFormula,
+  type FamilyProfile,
+} from "../domain/combinationFamilies";
 import WindStrips from "./WindStrips";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
@@ -7,6 +13,7 @@ import {
   uid,
   type Project,
   type ResultEnvelope,
+  type ResultCombination,
 } from "../domain/model";
 import { selfWeightSummary } from "../domain/selfWeight";
 
@@ -17,7 +24,11 @@ export type LoadDefinitionsPage =
   | "envelopes";
 type Definitions = Pick<
   Project,
-  "loadPatterns" | "analysisCases" | "resultCombinations" | "resultEnvelopes"
+  | "loadPatterns"
+  | "analysisCases"
+  | "resultCombinations"
+  | "resultEnvelopes"
+  | "combinationProfile"
 >;
 type DefinitionSelection = {
   patternId: string;
@@ -30,9 +41,22 @@ type DraftDefinition = {
   id: string;
   name: string;
   factors: DraftFactor[];
+  generation?: ResultCombination["generation"];
 };
-const parseFactor = (value: string) =>
-  value.trim() ? Number(value.replace(",", ".")) : NaN;
+const draftCombination = ({
+  id,
+  name,
+  factors,
+  generation,
+}: ResultCombination): DraftDefinition => ({
+  id,
+  name,
+  ...(generation && { generation }),
+  factors: factors.map(({ caseId, factor }) => ({
+    sourceId: caseId,
+    factor: String(factor),
+  })),
+});
 const formatSI = (value: number) =>
   value.toLocaleString("pt-BR", {
     useGrouping: false,
@@ -75,14 +99,11 @@ export default function LoadDefinitions({
     })),
   );
   const [combinations, setCombinations] = useState<DraftDefinition[]>(() =>
-    project.resultCombinations.map(({ id, name, factors }) => ({
-      id,
-      name,
-      factors: factors.map(({ caseId, factor }) => ({
-        sourceId: caseId,
-        factor: String(factor),
-      })),
-    })),
+    project.resultCombinations.map(draftCombination),
+  );
+  const [generatorOpen, setGeneratorOpen] = useState(false);
+  const [profile, setProfile] = useState<FamilyProfile | undefined>(
+    project.combinationProfile,
   );
   const [envelopes, setEnvelopes] = useState(project.resultEnvelopes);
   const [patternId, setPatternId] = useState(initialPatternId);
@@ -197,6 +218,11 @@ export default function LoadDefinitions({
         return;
       }
     }
+    if (editingCase && profile)
+      setProfile({
+        ...profile,
+        actions: profile.actions.filter((a) => a.caseId !== definitionId),
+      });
     const next = definitions.filter((item) => item.id !== definitionId);
     setDefinitions(next);
     setDefinitionId(next[0]?.id ?? "");
@@ -243,19 +269,19 @@ export default function LoadDefinitions({
     );
     setError("");
   };
+  const resultCombinations: Project["resultCombinations"] = combinations.map(
+    (item) => ({
+      ...item,
+      name: item.name.trim(),
+      type: "linear",
+      factors: item.factors.map(({ sourceId, factor }) => ({
+        caseId: sourceId,
+        factor: parseFactor(factor),
+      })),
+    }),
+  );
   const apply = (event: FormEvent) => {
     event.preventDefault();
-    const resultCombinations: Project["resultCombinations"] = combinations.map(
-      (item) => ({
-        ...item,
-        name: item.name.trim(),
-        type: "linear",
-        factors: item.factors.map(({ sourceId, factor }) => ({
-          caseId: sourceId,
-          factor: parseFactor(factor),
-        })),
-      }),
-    );
     const loadPatterns = patterns.map((item) => ({
       ...item,
       name: item.name.trim(),
@@ -299,7 +325,13 @@ export default function LoadDefinitions({
       return;
     }
     const problem = onApply(
-      { loadPatterns, analysisCases, resultCombinations, resultEnvelopes },
+      {
+        loadPatterns,
+        analysisCases,
+        resultCombinations,
+        resultEnvelopes,
+        combinationProfile: profile,
+      },
       {
         patternId,
         caseId,
@@ -314,15 +346,34 @@ export default function LoadDefinitions({
   return (
     <dialog
       ref={dialog}
-      className="modal launch-modal load-editor"
+      className={`modal launch-modal load-editor${generatorOpen ? " family-modal" : ""}`}
       aria-labelledby="load-editor-title"
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        if (generatorOpen) setGeneratorOpen(false);
+        else onClose();
       }}
     >
-      <h2 id="load-editor-title">Padrões, casos, combinações e envelopes</h2>
-      <form onSubmit={apply}>
+      <h2 id="load-editor-title">
+        {generatorOpen
+          ? "Gerar famílias ELU/ELS"
+          : "Padrões, casos, combinações e envelopes"}
+      </h2>
+      {generatorOpen && (
+        <CombinationFamilyEditor
+          model={{ loadPatterns: patterns, analysisCases, resultCombinations }}
+          initialProfile={profile}
+          onCancel={() => setGeneratorOpen(false)}
+          onAccept={(next, accepted, firstId) => {
+            setCombinations(accepted.map(draftCombination));
+            setProfile(next);
+            setCombinationId(firstId ?? combinationId);
+            setGeneratorOpen(false);
+            setError("");
+          }}
+        />
+      )}
+      <form hidden={generatorOpen} onSubmit={apply}>
         <div className="guide-tabs" aria-label="Definições de carga">
           {(
             [
@@ -685,8 +736,35 @@ export default function LoadDefinitions({
                 </button>
               )}
             </div>
+            {!editingCase &&
+              (project.slabs.length ? (
+                <p className="help">
+                  Para lajes isoladas, os resultados são consultados por caso
+                  estático. O gerador de famílias está disponível para pórticos
+                  planos e espaciais.
+                </p>
+              ) : (
+                <button type="button" onClick={() => setGeneratorOpen(true)}>
+                  Gerar famílias ELU/ELS
+                </button>
+              ))}
             {definition ? (
               <>
+                {definition.generation && (
+                  <p className="help">
+                    Família {definition.generation.kind} · Origem da proposta:{" "}
+                    {definition.generation.source}.
+                    {!sameFormula(
+                      {
+                        ...resultCombinations.find(
+                          (c) => c.id === definition.id,
+                        )!,
+                        name: definition.generation.suggested.name,
+                      },
+                      definition.generation.suggested,
+                    ) && " Os fatores desta linha foram editados pelo usuário."}
+                  </p>
+                )}
                 <label>
                   {editingCase ? "Nome do caso" : "Nome da combinação"}
                   <input

@@ -32,10 +32,8 @@ import {
 import { resolveWorkPlaneSnap, type SnapCandidate } from "../domain/snap";
 import type { Project, SelectedObject, Selection } from "../domain/model";
 import type { MemberForceComponent } from "../solver/combinations";
-import type {
-  EnvelopeSection,
-  MemberEnvelopeResult,
-} from "../solver/envelopes";
+import type { MemberEnvelopeResult } from "../solver/envelopes";
+import type { SectionCursor, MemberDiagram } from "../solver/memberDiagram";
 import type { StructuralResult } from "../solver/oofem";
 import { pickGuideSpan } from "../domain/guideSpan";
 import { memberAxis, memberOnPlane } from "../domain/memberOffsets";
@@ -46,6 +44,7 @@ import { beamMeshLayout, nearestSection } from "../domain/beamMesh";
 import { ViewLayers, type LayerControls } from "./ViewLayers";
 import SelectionWindow from "./SelectionWindow";
 import { objectsInWindow } from "../domain/selection";
+import { slabRings } from "../domain/slabPolygon";
 import SlabPlan from "./SlabPlan";
 import type { SlabMap } from "./SlabResults";
 import { formatQuantity, fromSI, toSI } from "../units";
@@ -71,6 +70,8 @@ export type Tool =
   | "node"
   | "member"
   | "slab"
+  | "slabPolygon"
+  | "slabHole"
   | "pointLoad"
   | "distributedLoad";
 export type Display = "model" | "deformed" | MemberForceComponent;
@@ -86,11 +87,15 @@ interface Props {
   onPickLoad?: (id: string, point: Point3) => void;
   onSpan: (from: Point3, to: Point3) => void;
   result: StructuralResult | null;
-  envelope: {
-    result: MemberEnvelopeResult;
-    section: EnvelopeSection;
-    onSection: (section: EnvelopeSection) => void;
+  envelope: MemberEnvelopeResult | null;
+  sectionPlot: {
+    memberId: string;
+    t: number;
+    min: number;
+    max: number;
+    points: ReturnType<MemberDiagram["trace"]>;
   } | null;
+  onSection: (section: SectionCursor) => void;
   display: Display;
   slabMap: SlabMap | null;
   patternId: string;
@@ -98,6 +103,7 @@ interface Props {
   active: boolean;
   savedCamera: RefObject<PlaneCamera | null>;
   onActivate: () => void;
+  outline: Point3[];
   pending: Point3 | null;
   onPoint: (p: Point3) => void;
   onSelect: (s: Selection, additive: boolean) => void;
@@ -126,12 +132,15 @@ export default function WorkPlaneView({
   onSpan,
   onPickLoad,
   result,
-  envelope,
+  envelope: envelopeResult,
+  sectionPlot,
+  onSection,
   display,
   slabMap,
   patternId,
   resultPatterns,
   pending,
+  outline,
   onPoint,
   onSelect,
 }: Props & LayerControls) {
@@ -209,6 +218,7 @@ export default function WorkPlaneView({
           ),
         )
       : undefined;
+  const tracing = tool === "slabPolygon" || tool === "slabHole";
   const slabId = slab?.id;
   const selectSlab = useCallback(
     (event: MouseEvent<SVGGElement>) => {
@@ -241,6 +251,9 @@ export default function WorkPlaneView({
   const fit = () => {
     const points = [
       ...project.nodes,
+      ...(slab
+        ? slabRings(slab)[0].map((v) => ({ ...v, z: plane.offset }))
+        : []),
       ...floors.map((floor) => ({ ...floor.reference, z: plane.offset })),
       ...bars.flatMap((m) => {
         if (!m.offsets) return [];
@@ -251,12 +264,10 @@ export default function WorkPlaneView({
     const us = [
       ...points.map((n) => n[axisU]),
       ...uGuides.map((g) => g.position),
-      ...(slab ? [slab.x, slab.x + slab.lengthX] : []),
     ];
     const vs = [
       ...points.map((n) => n[axisV]),
       ...vGuides.map((g) => g.position),
-      ...(slab ? [slab.y, slab.y + slab.lengthY] : []),
     ];
     const minU = Math.min(0, ...us),
       maxU = Math.max(6, ...us);
@@ -306,11 +317,13 @@ export default function WorkPlaneView({
   }, [units.length]);
 
   const snapAnchor =
-    tool === "member" && pending && onPlane(pending, plane)
-      ? pending
-      : tool === "node" && lastNodeAnchor && onPlane(lastNodeAnchor, plane)
-        ? lastNodeAnchor
-        : null;
+    tracing && outline.length
+      ? outline.at(-1)!
+      : tool === "member" && pending && onPlane(pending, plane)
+        ? pending
+        : tool === "node" && lastNodeAnchor && onPlane(lastNodeAnchor, plane)
+          ? lastNodeAnchor
+          : null;
   const relativeAnchor = snapAnchor ?? planePoint(0, 0, plane);
 
   const sx = useCallback(
@@ -339,7 +352,7 @@ export default function WorkPlaneView({
       spatial,
       orthogonal,
       shiftKey: event.shiftKey,
-      tool,
+      tool: tracing ? "slab" : tool,
       anchor: snapAnchor,
       nodes: project.nodes,
       members: project.members,
@@ -361,7 +374,7 @@ export default function WorkPlaneView({
     ? Math.hypot(parsedDeltaU, parsedDeltaV)
     : NaN;
   const relativePreview: SnapCandidate | null =
-    (tool === "member" || tool === "node") &&
+    (tool === "member" || tool === "node" || tracing) &&
     hasRelativeBoth &&
     !(
       tool === "member" &&
@@ -447,9 +460,11 @@ export default function WorkPlaneView({
   const deformationScale = 60 / (maxU * camera.scale);
   const component =
     display === "model" || display === "deformed" ? null : display;
-  const envelopeResult = envelope?.result;
   const maxForce = useMemo(() => {
     let magnitude = 1;
+    if (sectionPlot)
+      for (const p of sectionPlot.points)
+        magnitude = Math.max(magnitude, Math.abs(p.max), Math.abs(p.min));
     if (!component) return magnitude;
     if (envelopeResult) {
       for (const stations of Object.values(envelopeResult)) {
@@ -468,7 +483,7 @@ export default function WorkPlaneView({
           magnitude = Math.max(magnitude, Math.abs(station[component]));
     }
     return magnitude;
-  }, [component, envelopeResult, result]);
+  }, [component, envelopeResult, result, sectionPlot]);
   const gridStep = camera.scale < 25 ? 2 : camera.scale > 120 ? 0.5 : 1;
   const grid = (center: number, pixels: number) => {
     const start =
@@ -818,51 +833,85 @@ export default function WorkPlaneView({
               sy(v + dv * t - (du / length) * offset),
             ] as const;
           };
+          const inspected = sectionPlot?.memberId === m.id ? sectionPlot : null;
           const band =
             envelopeStations && component && length >= tolerance
               ? {
-                  max: envelopeStations.map((s) =>
-                    forcePoint(s.t, s.ranges[component].max.forces[component]),
-                  ),
-                  min: envelopeStations.map((s) =>
-                    forcePoint(s.t, s.ranges[component].min.forces[component]),
-                  ),
+                  max: inspected
+                    ? inspected.points.map((p) => forcePoint(p.t, p.max))
+                    : envelopeStations.map((s) =>
+                        forcePoint(
+                          s.t,
+                          s.ranges[component].max.forces[component],
+                        ),
+                      ),
+                  min: inspected
+                    ? inspected.points.map((p) => forcePoint(p.t, p.min))
+                    : envelopeStations.map((s) =>
+                        forcePoint(
+                          s.t,
+                          s.ranges[component].min.forces[component],
+                        ),
+                      ),
                 }
               : null;
           const sectionAt = (event: { clientX: number; clientY: number }) => {
-            if (!band || !envelope || !envelopeStations) return;
+            const samples = envelopeStations ?? stations;
+            if (
+              !component ||
+              !samples?.length ||
+              length < tolerance ||
+              tool !== "select"
+            )
+              return;
             const bounds = ref.current!.getBoundingClientRect();
             const x = (event.clientX - bounds.left - sx(u)) / camera.scale;
             const y = (sy(v) - (event.clientY - bounds.top)) / camera.scale;
             const t = Math.min(1, Math.max(0, (x * du + y * dv) / length ** 2));
-            let index = nearestSection(envelopeStations, t);
-            const station = envelopeStations[index];
-            // On a jump both traces have the same abscissa. Pick the closer force ordinate.
-            if (
-              station.side &&
-              Math.abs(t - station.t) * length * camera.scale <= 2
-            ) {
-              const other = index + (station.side === "left" ? 1 : -1);
-              const toPointer = ([px, py]: readonly [number, number]) =>
-                Math.hypot(
-                  px + bounds.left - event.clientX,
-                  py + bounds.top - event.clientY,
+            let index = nearestSection(samples, t);
+            if (Math.abs(t - samples[index].t) * length * camera.scale > 2) {
+              onSection({ memberId: m.id, t });
+              return;
+            }
+            if (samples[index].side) {
+              const other = index + (samples[index].side === "left" ? 1 : -1);
+              const toCurve = (i: number) => {
+                const range = envelopeStations?.[i].ranges[component];
+                const values = range
+                  ? [range.min.forces[component], range.max.forces[component]]
+                  : [stations![i][component]];
+                return Math.min(
+                  ...values.map((v) => {
+                    const [px, py] = forcePoint(samples[i].t, v);
+                    return Math.hypot(
+                      px + bounds.left - event.clientX,
+                      py + bounds.top - event.clientY,
+                    );
+                  }),
                 );
-              const toCurve = (i: number) =>
-                Math.min(toPointer(band.min[i]), toPointer(band.max[i]));
+              };
               if (toCurve(other) < toCurve(index)) index = other;
             }
-            envelope.onSection({ memberId: m.id, index });
+            onSection({
+              memberId: m.id,
+              t: samples[index].t,
+              side: samples[index].side,
+            });
           };
           let diagram: string | undefined;
           if (stations && display !== "model" && length >= tolerance) {
-            diagram = stations
-              .map((s) => {
-                if (display === "deformed")
-                  return `${sx(u + du * s.t + s[dofU] * deformationScale)},${sy(v + dv * s.t + s[dofV] * deformationScale)}`;
-                return forcePoint(s.t, s[display]).join(",");
-              })
-              .join(" ");
+            diagram =
+              inspected && component
+                ? inspected.points
+                    .map((p) => forcePoint(p.t, p.max).join(","))
+                    .join(" ")
+                : stations
+                    .map((s) => {
+                      if (display === "deformed")
+                        return `${sx(u + du * s.t + s[dofU] * deformationScale)},${sy(v + dv * s.t + s[dofV] * deformationScale)}`;
+                      return forcePoint(s.t, s[display]).join(",");
+                    })
+                    .join(" ");
           }
           return (
             <g key={m.id}>
@@ -977,7 +1026,11 @@ export default function WorkPlaneView({
                 onClick={(e) => {
                   if (tool !== "select") return;
                   e.stopPropagation();
-                  if (band && !additiveSelection(e)) sectionAt(e);
+                  if (
+                    (band || (component && stations)) &&
+                    !additiveSelection(e)
+                  )
+                    sectionAt(e);
                   else
                     onSelect(
                       { kind: "member", id: m.id },
@@ -1149,9 +1202,29 @@ export default function WorkPlaneView({
                     fill="var(--geometry-result-fill)"
                     stroke="var(--geometry-result)"
                     strokeWidth="1.6"
-                    pointerEvents="none"
+                    className="member-force-diagram"
+                    pointerEvents={
+                      tool === "select" ? "visiblePainted" : "none"
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (additiveSelection(e))
+                        onSelect({ kind: "member", id: m.id }, true);
+                      else sectionAt(e);
+                    }}
                   />
                 ))}
+              {inspected && component && !band && length >= tolerance && (
+                <circle
+                  className="section-cursor"
+                  aria-label="Cursor da seção"
+                  cx={forcePoint(inspected.t, inspected.max)[0]}
+                  cy={forcePoint(inspected.t, inspected.max)[1]}
+                  r="4"
+                  fill="var(--geometry-result)"
+                  pointerEvents="none"
+                />
+              )}
               {band && (
                 <g
                   className="envelope-plot"
@@ -1168,10 +1241,9 @@ export default function WorkPlaneView({
                   />
                   {(["max", "min"] as const).map((bound) => {
                     const points = band[bound];
-                    const selectedPoint =
-                      envelope?.section.memberId === m.id
-                        ? points[envelope.section.index]
-                        : undefined;
+                    const selectedPoint = inspected
+                      ? forcePoint(inspected.t, inspected[bound])
+                      : undefined;
                     return (
                       <g key={bound} className={`envelope-${bound}-line`}>
                         <polyline
@@ -1528,6 +1600,36 @@ export default function WorkPlaneView({
               </g>
             );
           })()}
+        {tracing && outline.length > 0 && (
+          <g className="slab-trace" pointerEvents="none">
+            <polyline
+              fill="none"
+              stroke="var(--geometry-selected)"
+              strokeWidth="2"
+              points={outline.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ")}
+            />
+            {activeCandidate && (
+              <line
+                x1={sx(outline.at(-1)!.x)}
+                y1={sy(outline.at(-1)!.y)}
+                x2={sx(activeCandidate.u)}
+                y2={sy(activeCandidate.v)}
+                stroke="var(--geometry-selected)"
+                strokeDasharray="6 4"
+              />
+            )}
+            {outline.map((p, i) => (
+              <circle
+                key={i}
+                cx={sx(p.x)}
+                cy={sy(p.y)}
+                r={i === 0 ? 5 : 3}
+                fill="var(--geometry-node-fill)"
+                stroke="var(--geometry-selected)"
+              />
+            ))}
+          </g>
+        )}
         {pending &&
           (tool === "slab"
             ? cursor && (
@@ -1555,18 +1657,21 @@ export default function WorkPlaneView({
                 />
               ))}
       </svg>
-      {!project.nodes.length && !project.slabs.length && tool !== "slab" && (
-        <div className="empty-canvas">
-          <h2>Lance a primeira barra</h2>
-          <p>
-            Ative <b>Barra</b> e marque duas extremidades na malha.
-          </p>
-          <div>
-            <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+      {!project.nodes.length &&
+        !project.slabs.length &&
+        tool !== "slab" &&
+        !tracing && (
+          <div className="empty-canvas">
+            <h2>Lance a primeira barra</h2>
+            <p>
+              Ative <b>Barra</b> e marque duas extremidades na malha.
+            </p>
+            <div>
+              <kbd>B</kbd> desenhar barra <kbd>Esc</kbd> selecionar
+            </div>
           </div>
-        </div>
-      )}
-      {(tool === "member" || tool === "node") && (
+        )}
+      {(tool === "member" || tool === "node" || tracing) && (
         <form
           className="relative-input-bar"
           aria-label="Coordenadas relativas no plano"

@@ -1,6 +1,8 @@
 import { memo, useMemo } from "react";
 import type { MouseEvent } from "react";
-import type { Slab, SlabEdge } from "../domain/model";
+import type { Slab } from "../domain/model";
+import { slabRings, slabProperties, ringName } from "../domain/slabPolygon";
+import { materialSample } from "../domain/polygonMesh";
 import { meshSlab } from "../domain/slab";
 import {
   getSlabQuantityDefinition,
@@ -47,17 +49,21 @@ export default memo(function SlabPlan({
   const polygons = mesh.elements.map((element) =>
     element.nodes.map(pos).join(" "),
   );
-  const left = sx(slab.x),
-    right = sx(slab.x + slab.lengthX);
-  const bottom = sy(slab.y),
-    top = sy(slab.y + slab.lengthY);
+  const rings = slabRings(slab);
+  const outline = rings
+    .map(
+      (ring) => "M" + ring.map((v) => `${sx(v.x)},${sy(v.y)}`).join(" ") + "Z",
+    )
+    .join(" ");
+  const labelPoint = useMemo(() => {
+    const { centroid } = slabProperties(slab);
+    return slab.polygon ? materialSample(mesh, centroid).point : centroid;
+  }, [mesh, slab]);
   return (
     <g className="slab-plan" aria-label={`Laje ${slab.name}`} onClick={onClick}>
-      <rect
-        x={left}
-        y={top}
-        width={right - left}
-        height={bottom - top}
+      <path
+        d={outline}
+        fillRule="evenodd"
         fill={active ? "var(--selected-bg)" : "var(--surface-raised)"}
       />
       {map ? (
@@ -89,30 +95,55 @@ export default memo(function SlabPlan({
           d={polygons.map((points) => `M${points}Z`).join(" ")}
         />
       )}
-      {(Object.entries(mesh.edges) as [SlabEdge, number[]][]).map(
-        ([edge, ids]) => (
+      {rings.flatMap((ring, r) =>
+        ring.map((v, i) => (
           <polyline
-            key={edge}
-            points={`${pos(ids[0])} ${pos(ids.at(-1)!)}`}
-            className={
-              slab.supports[edge] ? "slab-supported-edge" : "slab-free-edge"
-            }
-          />
-        ),
+            key={v.edgeId}
+            points={mesh.edges[v.edgeId].map(pos).join(" ")}
+            className={v.supported ? "slab-supported-edge" : "slab-free-edge"}
+          >
+            <title>
+              {ringName(r)} · borda {i + 1} ·{" "}
+              {v.supported ? "apoio simples" : "livre"}
+            </title>
+          </polyline>
+        )),
       )}
-      {active && (
-        <rect
-          className="slab-selected-outline"
-          x={left - 4}
-          y={top - 4}
-          width={right - left + 8}
-          height={bottom - top + 8}
-        />
+      {active && <path className="slab-selected-outline" d={outline} />}
+      {slab.polygon &&
+        active &&
+        labels &&
+        !map &&
+        rings.flatMap((ring, r) =>
+          ring.map((vertex, i) => (
+            <text
+              key={vertex.edgeId}
+              className="node-label"
+              x={sx(vertex.x) + 5}
+              y={sy(vertex.y) - 5}
+              pointerEvents="none"
+            >
+              {r > 0 ? `A${r} · ` : ""}V{i + 1}
+            </text>
+          )),
+        )}
+      {map && slab.polygon && (
+        <circle
+          cx={sx(map.result.samplePoint.x)}
+          cy={sy(map.result.samplePoint.y)}
+          r={3.5}
+          fill="var(--geometry-selected)"
+          stroke="var(--text)"
+          pointerEvents="none"
+        >
+          <title>Ponto de consulta</title>
+        </circle>
       )}
       {labels && !map && (
         <text
-          x={(left + right) / 2}
-          y={bottom - 8}
+          x={sx(labelPoint.x)}
+          y={sy(labelPoint.y)}
+          pointerEvents="none"
           textAnchor="middle"
           className="node-label"
         >

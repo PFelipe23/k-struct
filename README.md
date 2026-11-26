@@ -16,12 +16,12 @@ O editor trabalha com projetos **planos XZ** ou **espaciais XYZ** e usa a mesma 
 - Escolher unidades de comprimento, seção, deslocamento, força, momento, carga distribuída e módulo de elasticidade em **Exibição → Unidades**. A escolha fica nas preferências locais.
 - Aplicar forças e momentos nos nós ou ao longo das barras, além de cargas uniformes. Em **Modelo → Carga concentrada**, clique na barra e ajuste a distância a partir de i ou a fração x/L (por exemplo, `1/3`). Escolha o padrão de cargas e o referencial global ou local. O inspetor permite editar e excluir cada ação. A malha cria ou reaproveita o nó de análise na posição indicada e conserva a barra física inteira. A tabela de esforços e o CSV identificam os lados i e j da seção. O peso próprio pode ser ativado por padrão em **Cargas**, com direção, gravidade e multiplicador.
 - Aplicar cargas distribuídas em todo o comprimento ou em parte da barra. Em **Modelo → Carga por trecho**, clique perto do início da carga, informe o início e o fim a partir de i (em distância ou x/L) e as intensidades nas duas pontas. Para um triângulo, deixe uma ponta com intensidade zero. Para um trapézio, use intensidades diferentes. Sinais opostos invertem as setas ao longo do trecho. O inspetor reúne as cargas do padrão ativo para edição.
-- Lançar uma laje retangular isolada em planta XY, editar apoios, pressão e malha e consultar mapas de flecha e momentos locais.
+- Lançar uma laje isolada em planta XY, por dois cantos ou por contorno poligonal com aberturas. Editar bordas, apoios, pressão e malha e consultar mapas de flecha e momentos.
 - No inspetor da barra, abra **Excentricidades e trechos rígidos** para deslocar o eixo de inserção em coordenadas globais e informar os comprimentos rígidos nas pontas i e j. As vistas mostram os braços e as faces. A tabela de esforços e o CSV identificam a posição da seção no espaço.
 - Importar no apoio de um nó espacial a matriz 6 × 6 de uma fundação do MolaStruct, conferir suas entradas e associar eixos e origem. A fundação fica disponível no projeto para análise offline.
 - Prescrever recalques e rotações em graus rígidos do apoio por padrão de carga. O painel de deslocamentos permite conferir o valor imposto e o calculado no caso ou na combinação.
 - Aplicar temperatura por barra e por padrão no inspetor, em **Ação térmica**. Informe a variação média e a diferença entre faces da seção em K. A vista indica a face mais quente. Para o material, use o coeficiente de dilatação linear α em 1/K.
-- Salvar e reabrir `.kstruct.json` no esquema v22, com migração dos projetos v1 a v21 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
+- Salvar e reabrir `.kstruct.json` no esquema v24, com migração dos projetos v1 a v23 na abertura. Desfazer e refazer até 50 edições e recuperar o último rascunho local.
 - Executar o OOFEM 3.0 integrado nos pacotes Windows e Linux, com diagnóstico, cancelamento e histórico local.
 - Resolver a estática linear com `Beam2d` ou `Beam3d`. Consultar os seis componentes de reações, deslocamentos e esforços no modelo espacial, além de deformada, diagramas, CSV e saída do OOFEM.
 - Invalidar resultados após alterações. Verificar conectividade, apoios de cada componente e equilíbrio global antes de apresentar resultados.
@@ -142,6 +142,14 @@ Para ajustar uma única barra, abra **Modificadores de rigidez** no inspetor. In
 
 O fluxo de laje usa um painel isolado por projeto e resultados por caso estático. As propriedades do painel e da malha são guardadas no arquivo. Edições, desfazer e refazer descartam os resultados da revisão anterior.
 
+### Laje poligonal com aberturas
+
+Em **Modelo → Laje poligonal**, marque os vértices na planta XY do pavimento. Para posicionar um vértice com precisão, informe ΔX e ΔY a partir do anterior. Feche o anel pelo primeiro vértice, por **Enter** ou por **Fechar contorno**. Use **Desfazer vértice** para corrigir o traçado ou **Esc** para cancelá-lo.
+
+Com o painel lançado, escolha **Abertura na laje**, desenhe o novo anel e feche-o. As bordas externas começam simplesmente apoiadas e as das aberturas começam livres. Para editar, selecione a laje, escolha o contorno e o vértice no inspetor. O vínculo corresponde à borda que vai desse vértice ao próximo. Ao inserir um vértice na borda, ambos os trechos recebem o vínculo anterior. **Desfazer** recupera cada edição, inclusive a malha retangular original quando se abre um furo em um retângulo existente.
+
+A pressão e o peso próprio atuam sobre a área líquida. Os mapas de resultados mostram apenas o material e identificam o ponto da consulta. Quando o centroide cai em um vazio, a tabela informa as coordenadas de um ponto material próximo. [Ensaio do painel em L com abertura](docs/VALIDATION.md#ks-41--painel-poligonal-com-abertura)
+
 ### Padrões, casos, combinações e envelopes
 
 Abra **Cargas e casos** para criar padrões como permanentes, sobrecarga ou vento Y e definir casos estáticos com os fatores de cada padrão. Em **Modelo**, selecione o padrão no qual deseja trabalhar e atribua as ações pelos campos de propriedades de cada nó ou barra.
@@ -150,11 +158,23 @@ Para gerar vento estático, abra **Cargas e casos → Padrões → Adicionar fai
 
 No desktop, escolha um caso estático em **Caso, combinação ou envelope** e clique em **Analisar**. Repita para os demais casos. O seletor alterna entre os resultados da revisão atual.
 
+Ao selecionar uma combinação ou envelope, a **Fila de casos** mostra os casos necessários em ordem de execução. **Analisar casos necessários** reaproveita os resultados da revisão atual e executa os pendentes em série. Depois de cancelar ou corrigir uma falha do motor, use o mesmo comando para retomar. Uma edição do modelo exige resultados da nova revisão.
+
 Para combinar os resultados, abra **Cargas e casos** → **Combinações lineares** e cadastre os casos e seus fatores. Informe ao menos um fator diferente de zero. Depois de aplicar as definições e analisar os casos com fatores diferentes de zero, selecione a combinação em **Caso, combinação ou envelope**. O KStruct exibe a composição, a deformada, os diagramas e as tabelas. Os CSVs identificam a origem das linhas e registram os IDs e fatores dos casos que compõem cada combinação.
 
 Na aba **Esforços** de um caso ou combinação, use **Barra** para filtrar as estações da tabela e do CSV. A opção inicial é **Todas as barras**. Quando dois nomes coincidem ou uma barra se chama “Todas as barras”, o seletor, a tabela e o CSV identificam as barras pelo ID seguido do nome, por exemplo, `[V2] Viga`. O filtro acompanha a troca de resultados do projeto e volta a **Todas as barras** se a barra selecionada for removida.
 
+Em **Cargas e casos → Combinações lineares → Gerar famílias ELU/ELS**, classifique os casos como permanentes ou variáveis. A tabela mostra os padrões e os fatores já aplicados em cada caso. Para duas direções alternativas de vento, por exemplo, atribua o mesmo grupo de exclusão. Informe os fatores da família para a ação permanente, a principal e as acompanhantes, e registre a origem desses valores. É possível cadastrar mais de uma família ELS ou ELU.
+
+Na prévia, confira a expressão por caso, edite os coeficientes ou dispense linhas. Use **Usar linhas selecionadas** e **Aplicar definições** para confirmar em uma única edição. A regeneração preserva as combinações manuais, os IDs usados pelos envelopes e as linhas editadas pelo usuário. **Usar proposta recalculada** permite substituir uma edição anterior. As famílias alimentam a fila e os envelopes dos pórticos planos e espaciais.
+
 Em **Cargas e casos** → **Envelopes**, dê um nome ao envelope e marque as combinações que participam. Depois de analisar seus casos, selecione o envelope e o componente de esforço. As curvas indicam o mínimo e o máximo com sinal nas estações da malha. Clique no diagrama ou escolha **Barra** e **Estação x/L** para consultar a combinação governante de cada extremo e todos os esforços que atuam simultaneamente naquela seção. O CSV inclui as estações de todas as barras para o componente em exibição, com IDs e fatores para rastrear cada extremo. Uma edição do projeto ou das definições descarta os resultados em memória.
+
+Para ler um diagrama de barra, abra **Consultar seção** em um caso ou combinação. Em um envelope, abra **Esforços nas barras**. Escolha a barra e a componente, informe **x** na unidade de comprimento ou **x/L** como decimal ou fração (por exemplo, `1/3`) e pressione Enter. O cursor e a tabela usam a mesma posição, medida da face i à face j do trecho deformável. Nos saltos, **Face** alterna entre os dois limites. Também é possível clicar no diagrama da vista de trabalho.
+
+**Ir ao mínimo** e **Ir ao máximo** percorrem a barra escolhida. **Trechos e faces** inclui os extremos internos dos trechos com lei de esforço conhecida. **Apenas amostras** restringe a busca às estações do OOFEM. A tabela indica a origem da leitura e, nos envelopes, a combinação e o vetor simultâneo de cada extremo. [Ensaios da consulta de diagramas](docs/VALIDATION.md#ks-37--consulta-de-diagramas)
+
+Para consultar um extremo nodal, selecione o envelope e abra **Reações de apoio** ou **Deslocamentos nodais**. Escolha o apoio ou nó, a componente e, em um apoio inclinado, o referencial. Cada linha mostra o mínimo ou máximo com sinal, a combinação que o produziu e as componentes simultâneas. **CSV** exporta a seleção nas unidades em uso. **Todos os apoios** inclui duas linhas por apoio, com a origem e os eixos de cada vetor. As reações são forças e momentos do apoio sobre a estrutura, aplicados no nó indicado. Para obter a ação da estrutura sobre a fundação, inverta o sinal das forças e dos momentos no mesmo ponto e referencial. [Ensaio dos envelopes nodais](docs/VALIDATION.md#ks-36--envelopes-nodais)
 
 Use `V` para selecionar, `N` para criar nó, `B` para criar barra, `L` para lançar laje, `Esc` para cancelar lançamento, `Delete` para excluir seleção, `Ctrl+Z` para desfazer, `Ctrl+Shift+Z` para refazer e `Ctrl+S` para salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
 

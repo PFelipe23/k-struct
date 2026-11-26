@@ -516,3 +516,109 @@ Abra uma viga biapoiada de 5 m em X, com rotações livres, deslocamento axial l
 O ensaio compara 2 e 8 elementos e a inversão de i/j. Para os deslocamentos em metros e a curvatura em m⁻¹, o erro absoluto deve ficar abaixo de 5 × 10⁻¹¹. Para a normal impedida admite-se 0,01 N. Para normal ou momento esperados nulos, exige-se menos de 10⁻⁵ N ou N·m. Um segundo padrão com fator −0,5 sobre o mesmo campo produz metade do alongamento e da flecha. Também são exercitados o campo nulo, α nulo e a alteração de EIy. Com braços rígidos de 0,5 m nas duas extremidades, o comprimento deformável cai para 4 m e o alongamento livre para 0,96 mm. A migração conserva as faixas de vento dos projetos v21. No ensaio de coluna de 3 m com ambas as ações, obtêm-se +0,72 mm de alongamento, −12 kN de reação horizontal e −18 kN·m de momento na base.
 
 Configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md). Execute `npm test -- tests/thermal-loads.test.ts` e `npm run test:e2e -- thermal-loads.spec.ts`. A regressão usa o executável real e confere os resultados importados. O teste de interface aplica e desfaz a temperatura, salva e reabre o projeto e consulta o deslocamento.
+
+## KS-34 — Fila de casos estáticos
+
+Abra o [pórtico em L](../examples/portico-em-l-envelopes.kstruct.json), selecione **Envelope** e clique em **Analisar casos necessários**. A fila executa EL e CP uma vez cada na ordem do projeto. Se EL já foi analisado na mesma revisão, só CP inicia. Com ambos disponíveis, o comando não faz chamadas nativas.
+
+No envelope, selecione V1 na estação x/L = 0,5. O máximo de My é 11,99 kN·m, governado por CF · Flexão. O teste compara todas as células da tabela desse extremo e do mínimo exibido com as da execução manual dos dois casos, na mesma unidade e precisão de exibição. As tolerâncias numéricas seguem o [benchmark de envelopes](#envelopes-de-esforços).
+
+Com o [OOFEM 3.0 configurado](OOFEM.md), execute `npm run test:e2e -- results.spec.ts -g 'fila serial|pórtico em L com fila'`. A ponte controlada cobre clique repetido, fator zero, dependências duplicadas, cancelamento entre casos e com o motor ativo, falha no segundo caso, histórico e edição antes de uma resposta tardia. O segundo ensaio usa o motor real para comparar fila e execução manual.
+
+## KS-35 — famílias editáveis de ELU e ELS
+
+O ensaio usa coeficientes ilustrativos informados pelo usuário. Lance a viga biapoiada de referência de 6 m e crie três padrões de carga uniforme em −Z, de 1, 2 e 4 kN/m. Crie os casos G, Q1 e Q2 com um padrão por caso, todos com fator 1. No gerador de **Combinações lineares**, classifique G como permanente e Q1 e Q2 como variáveis. Atribua ao ELU os coeficientes 1,2 / 1,5 / 0,75 e ao ELS os coeficientes 1 / 1 / 0,3, na ordem permanente / principal / acompanhante.
+
+| Família e principal | Expressão por caso       | Carga resultante em −Z (kN/m) | Reação em cada apoio (kN) | Momento no meio do vão (kN·m) |
+| ------------------- | ------------------------ | ----------------------------: | ------------------------: | ----------------------------: |
+| ELU, Q1             | 1,2 G + 1,5 Q1 + 0,75 Q2 |                           7,2 |                      21,6 |                          32,4 |
+| ELU, Q2             | 1,2 G + 0,75 Q1 + 1,5 Q2 |                           8,7 |                      26,1 |                         39,15 |
+| ELS, Q1             | G + Q1 + 0,3 Q2          |                           4,2 |                      12,6 |                          18,9 |
+| ELS, Q2             | G + 0,3 Q1 + Q2          |                           5,6 |                      16,8 |                          25,2 |
+
+Para cada intensidade q, as referências são R = qL/2 e M = qL²/8. Com Q1 e Q2 no mesmo grupo, a prévia de ELU passa a 1,2 G + 1,5 Q1 e 1,2 G + 1,5 Q2. Inserir a outra variável na linha editada deve apontar a exclusão. Atribuir o mesmo padrão a dois casos ativos deve identificar o padrão contado duas vezes. Uma combinação manual idêntica também aparece na validação.
+
+Para reproduzir a comparação numérica, configure `OOFEM_BIN` conforme [Configuração do OOFEM](OOFEM.md) e execute `npm test -- tests/combination-families.test.ts`. O teste resolve os três casos no OOFEM 3.0 e compara o ELU de principal Q1 com um quarto caso independente submetido diretamente com os fatores 1,2, 1,5 e 0,75. A flecha central esperada é −6,075 mm. As reações analíticas e o momento central desse ensaio usam tolerância absoluta de 0,02 N ou N·m, e os deslocamentos, de 5 × 10⁻⁹ m. Na comparação entre esforços ao longo da barra, a impressão nativa `%.4e` limita cada valor a cinco algarismos significativos. A tolerância soma os meios incrementos de arredondamento do caso direto e das parcelas ponderadas, mais 10⁻⁷ N ou N·m para resíduos próximos de zero.
+
+Execute `npm run test:e2e -- results.spec.ts --grep 'gera ELU/ELS'` para reproduzir a edição e dispensa de linhas, desfazer/refazer, salvar, reabrir e regenerar. Com o executável configurado, a fila resolve G, Q1 e Q2 uma vez cada e a interface mostra as duas reações de 21,6 kN. O teste de domínio verifica também a preservação do envelope manual e os IDs das combinações regeneradas.
+
+## KS-36 — Envelopes nodais
+
+Em **Reações de apoio** e **Deslocamentos nodais**, cada extremo é procurado por componente no referencial solicitado. A origem é a combinação linear da qual provêm todas as componentes daquela linha. A primeira combinação na ordem do envelope vence o empate exato. A regra de extremos por componente é descrita no [CSI Analysis Reference Manual, Load Combinations, Types of Combos](https://docs.csiamerica.com/manuals/sap2000/CSiRefer.pdf).
+
+No ensaio controlado, as duas combinações têm o mesmo nome e IDs distintos. Os dois apoios também têm o mesmo nome, e o segundo caso os entrega em ordem inversa.
+
+| Combinação | Fx (kN) | Fy (kN) | Fz (kN) | Mx (kN·m) | My (kN·m) | Mz (kN·m) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | 10 | 2 | 30 | −3 | 7 | −2 |
+| B | −4 | 20 | 12 | 5 | −6 | −2 |
+
+No primeiro apoio, o máximo de Fx recupera a linha A inteira e o máximo de Fy recupera B. Com o eixo local x na direção (0,6, 0,8, 0), as projeções de Fx são +7,6 kN e +13,6 kN. O máximo local recupera B, com força (13,6, 15,2, 12) kN e momento (−1,8, −7,6, −2) kN·m. O momento Mz empata em −2 kN·m. A inversão da ordem do envelope troca a origem desse empate.
+
+**Viga XZ.** A viga biapoiada de 6 m recebe −10 kN/m. Para os fatores +1 e −2, cada apoio tem reação Fz máxima de +30 kN e mínima de −60 kN, por equilíbrio. No nó inicial, Ry varia de −9 a +4,5 mrad e, no nó final, de −4,5 a +9 mrad. A rotação de extremidade tem módulo |q|L³/(24EI). O teste numérico admite 0,02 N nas reações verticais e 10⁻¹⁰ rad nas rotações.
+
+**Pórtico XYZ.** O modelo de nove nós e três engastes do benchmark espacial recebe o padrão distribuído G e o padrão nodal W. O solver resolve G e W e, em duas execuções independentes, A = 1,2 G + 0,8 W e B = 0,7 G − 1,1 W. O teste confronta ambos os extremos de cada uma das seis componentes com esses casos diretos e verifica o vetor inteiro da origem identificada. Em N7, B governa o máximo de Fy global (+4,236867 kN), enquanto A governa o máximo de Fy local (+3,468888 kN). No CSV global de Fx máximo, N8 recebe B (+2,261141 kN) e N9 recebe A (+2,360680 kN).
+
+Na comparação das saídas impressas, S representa a norma do trio de componentes do caso direto mais a soma das normas dos trios de G e W ponderadas pelos módulos dos fatores. Calcula-se S separadamente para forças, momentos, translações e rotações. A tolerância das reações é 10⁻⁷ + 5,1 × 10⁻⁵ S, em N ou N·m. Para deslocamentos e rotações é 10⁻¹² + 5,1 × 10⁻⁹ S, em m ou rad. O termo proporcional cobre o arredondamento da impressão nativa, inclusive após a projeção.
+
+Configure o executável OOFEM 3.0 em `OOFEM_BIN` e execute os dois ensaios.
+
+```sh
+npm test -- tests/nodal-envelopes.test.ts
+npm run test:e2e -- results.spec.ts --grep 'envelope nodal'
+```
+
+No navegador, o ensaio percorre a fila, consulta nó e apoio, alterna o referencial e compara o CSV antes e depois das trocas kN → N, kN·m → N·m e mm → m. As rotações continuam em mrad. Uma edição da carga retira a tabela e o CSV até a nova análise. [Configuração do OOFEM](OOFEM.md)
+
+## KS-37 — Consulta de diagramas
+
+O comprimento L vai da face i à face j do trecho deformável. No campo x, a distância acompanha a unidade de comprimento selecionada. O campo x/L aceita decimais e frações. A estação de um salto possui duas leituras na mesma abscissa. Uma carga concentrada pode produzir salto no cortante, e um binário concentrado pode produzir salto no momento. A orientação local segue a conectividade i → j. A convenção de indicar a posição a partir da ponta i também aparece na documentação do SAP2000. [Convenções das forças internas em barras](https://docs.csiamerica.com/help-files/sap/Output/Frame_Element_Internal_Forces_Output_Conventions.htm)
+
+**Cálculo.** O OOFEM fornece os esforços de extremidade. Entre duas faces consecutivas, a intensidade distribuída é constante ou linear. O normal e os cortantes são polinômios de grau até dois. As duas ordenadas nativas e o gradiente da intensidade fixam seus coeficientes. O momento fletor é linear em um trecho sem carga transversal. Em um trecho carregado, é de grau até três e fica determinado pelos dois momentos e pelas duas derivadas fornecidas pelos cortantes de extremidade. Nos eixos locais espaciais, dMy/dx = Vz e dMz/dx = −Vy. No plano, dM/dx = V. O domínio dos polinômios termina em cada face da malha. [Relações de equilíbrio por integração](https://engineeringstatics.org/integration_method.html)
+
+A busca compara as duas pontas de cada trecho, as faces dos saltos e as raízes internas da derivada do esforço consultado. No envelope, cada combinação fornece seus próprios candidatos. A leitura na posição vencedora recupera todas as componentes simultâneas daquela origem. Em um resultado que só disponha de estações, a consulta identifica a amostra efetiva. O desenho usa pontos intermediários para traçar as curvas. O CSV de estações continua a exportar as amostras do solver.
+
+| Ensaio | Referência de conferência |
+| --- | --- |
+| Viga biapoiada, 6 m, força de 12 kN para baixo a 2 m | Lado i com V = +8 kN, lado j com V = −4 kN e M = +16 kN·m nas duas faces. 2 m, 200 cm e x/L = 1/3 consultam o mesmo corte. Invertida a conectividade, o corte fica a 4 m da nova origem, V passa de −4 para +8 kN e M local vale −16 kN·m. |
+| Viga biapoiada, 6 m, carga uniforme de 10 kN/m | M máximo = qL²/8 = 45 kN·m em x = 3 m. Nas malhas de 3, 5 e 8 divisões, os maiores momentos amostrados são 40, 43,2 e 45 kN·m. |
+| Carga triangular de 0 a 6 kN/m em 6 m | O máximo está em x/L = 1/√3 e vale 13,8564 kN·m. A regressão admite 5 × 10⁻⁵ em x/L e 0,6 N·m no momento, considerando a precisão de impressão das forças de extremidade. |
+| Envelope com carga uniforme e combinação de momento constante | A segunda combinação tem 42 kN·m e tração de 5 kN. Governa nas duas estações em x = 2 e 4 m. Entre elas, a primeira combinação governa com 45 kN·m em x = 3 m e normal nulo. |
+| Balanço espacial com rotação da seção, peso próprio e carga variável local | As seis componentes em três seções da malha de 3 divisões são confrontadas com as estações coincidentes de uma análise independente com 12 divisões. Tolerância absoluta por componente de 0,02 + 1,1 × 10⁻⁴ vezes o módulo da referência, em N ou N·m. |
+
+A viga com força concentrada usa tolerância de 0,0005 N ou N·m nas faces. Para a viga uniformemente carregada, o teste admite 0,005 N·m no momento máximo e 5 × 10⁻⁹ em x/L. A superposição de +2 kN/m com a carga triangular de 0 a −6 kN/m leva o cortante máximo a +2 kN em x = 2 m. Com quatro subdivisões, a maior amostra vale +1,875 kN. Há ensaios adicionais para o salto de um binário de 6 kN·m, os limites de carregamentos parciais e uma barra inclinada com braços rígidos e 7 m de comprimento deformável.
+
+Com o OOFEM 3.0 indicado em `OOFEM_BIN`, execute os testes abaixo. No navegador, o roteiro cobre cursor, entrada inválida, unidades, frações, faces, troca de combinação governante e invalidação por edição da carga. [Configuração do OOFEM](OOFEM.md)
+
+```sh
+npm test -- tests/member-diagram.test.ts
+npm run test:e2e -- results.spec.ts --grep 'consulta o diagrama|extremo calculado'
+```
+
+
+## KS-41 · painel poligonal com abertura
+
+Na planta XY, lance o exterior por (0, 0), (6, 0), (6, 2), (3, 2), (3, 4) e (0, 4) em metros. Abra o retângulo entre X = 1 e 2 m e Y = 0,5 e 1,5 m. Adote 0,10 m de espessura, E = 30 GPa, ν = 0,20, apoio simples em todas as bordas externas e bordas livres na abertura. Aplique −5 kN/m² em Z. Com quatro divisões por lado de cada triângulo inicial, o ensaio tem 100 nós e 160 elementos DKT.
+
+O exterior mede 18 m² e a abertura mede 1 m². O centroide da área líquida está em X = 43,5/17 m e Y = 29/17 m. Sobre os 17 m² atuam −85 kN. As reações abaixo incluem as forças verticais e os momentos nodais de apoio, tomados em torno de (0, 0) no plano.
+
+| Grandeza | Equilíbrio analítico | OOFEM 3.0 | Tolerância absoluta |
+| --- | ---: | ---: | ---: |
+| Soma das áreas | 17 m² | 17 m² na malha | 10⁻¹¹ m² |
+| Reação em Z | +85 kN | +84,99951 kN | 0,002 kN |
+| Momento das reações em X | +145 kN·m | +144,99888 kN·m | 0,004 kN·m |
+| Momento das reações em Y | −217,5 kN·m | −217,49808 kN·m | 0,004 kN·m |
+
+A cobertura é conferida recortando cada triângulo pelos retângulos do furo e do recorte externo. A área de interseção deve ser inferior a 10⁻¹² m² em ambos. Um painel quadrado com furo central exercita a consulta em um ponto material quando o centroide cai na abertura.
+
+O ensaio de apoio oblíquo gira o triângulo (0, 0), (4, 0), (0, 3) no plano, com cosseno 0,8 e seno 0,6. Os catetos são simplesmente apoiados e a hipotenusa é livre. Comparam-se todos os nós correspondentes antes e depois do giro. A flecha se conserva e os vetores globais de rotações e reações acompanham a rotação do painel. Os limites são 10⁻⁹ m ou rad para deslocamentos e rotações, 0,2 N para forças e 0,05 N·m para momentos de apoio. As verificações retangulares de QDKT e DKT continuam comparando flecha, Mx e My com a série de Navier e a soma das reações com 60 kN. [Referência QDKT](#placa-retangular-simplesmente-apoiada) · [Referência DKT](#laje-retangular-isolada)
+
+Com `OOFEM_BIN` apontando para o executável fixado, rode na raiz do repositório.
+
+```sh
+npm run check
+npm run build
+npm run test:e2e
+```
+
+Para repetir só as verificações de placas, execute `npm test -- tests/polygon-slab.test.ts tests/plate.integration.test.ts tests/oofem.integration.test.ts` e `npm run test:e2e -- slab.spec.ts`. O ensaio de interface desenha, fecha, corrige e cancela anéis na planta, edita vértice e apoio, desfaz, salva e reabre o painel. A ponte de teste entrega a entrada gerada pelo editor ao executável real e devolve a saída para a consulta dos mapas.

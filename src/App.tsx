@@ -34,6 +34,7 @@ import {
   ListChecks,
   Table2,
   Square,
+  Pentagon,
   PanelLeft,
   PanelRight,
   Scissors,
@@ -60,6 +61,9 @@ import {
 import {
   addMember,
   addSlab,
+  addPolygonSlab,
+  addSlabOpening,
+  newSlabRing,
   inspectNodeCoordinateChanges,
 } from "./domain/editing";
 import {
@@ -72,6 +76,7 @@ import {
   type Point3,
   type WorkPlane,
 } from "./domain/geometry";
+import { maxSlabVertices } from "./domain/slabPolygon";
 import MemberPointLoadDialog from "./components/MemberPointLoadDialog";
 import MemberDistributedLoadDialog from "./components/MemberDistributedLoadDialog";
 import type { MemberLoadSelection } from "./components/memberLoadInput";
@@ -121,18 +126,24 @@ import SlabResults, {
   slabDisplays,
   type SlabDisplay,
 } from "./components/SlabResults";
-import EnvelopeResults from "./components/EnvelopeResults";
+import EnvelopeResults, {
+  type EnvelopeView,
+} from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
 import LoadDefinitions, {
   type LoadDefinitionsPage,
 } from "./components/LoadDefinitions";
 import { version } from "../package.json";
-import { combineLinearResults } from "./solver/combinations";
 import {
-  evaluateMemberEnvelope,
-  type EnvelopeSection,
-  type MemberEnvelopeResult,
+  prepareMemberDiagram,
+  type SectionCursor,
+} from "./solver/memberDiagram";
+import { combineLinearResults, requiredCaseIds } from "./solver/combinations";
+import {
+  envelopeCombinations,
+  evaluateEnvelope,
+  type EnvelopeResult,
 } from "./solver/envelopes";
 import {
   exportOofem,
@@ -161,6 +172,8 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v24") ??
+      localStorage.getItem("kstruct.draft.v23") ??
       localStorage.getItem("kstruct.draft.v22") ??
       localStorage.getItem("kstruct.draft.v21") ??
       localStorage.getItem("kstruct.draft.v20") ??
@@ -273,18 +286,33 @@ export default function App() {
     guides: planeGuides,
     guide: activeGuide,
   } = viewPlane(planePanel);
+  const [outline, setOutline] = useState<Point3[]>([]);
+  const [outlineError, setOutlineError] = useState("");
+  const tracing = tool === "slabPolygon" || tool === "slabHole";
   const [pending, setPending] = useState<Point3 | null>(null),
     [display, setDisplay] = useState<Display | SlabDisplay>("model");
+  const clearPlacement = () => {
+    setPending(null);
+    setOutline([]);
+    setOutlineError("");
+  };
   const [caseResults, setCaseResults] = useState<Map<string, AnalysisResult>>(
     () => new Map(),
   );
   const modelRevision = useRef(0);
   const [activeRun, setActiveRun] = useState<{
-    id: string;
+    id: string | null;
     ready: boolean;
     cancelling: boolean;
   } | null>(null);
-  const activeRunId = useRef<string | null>(null);
+  const runLock = useRef<{ stop: boolean } | null>(null);
+  const [queue, setQueue] = useState<{
+    revision: number;
+    target: string;
+    caseId?: string;
+    failedId?: string;
+    message: string;
+  } | null>(null);
   const running = activeRun !== null;
   const [lastLog, setLastLog] = useState<RunLog | null>(null);
   const [analysisDiagnostics, setAnalysisDiagnostics] = useState<
@@ -317,8 +345,10 @@ export default function App() {
     kind: "combination" | "envelope";
     id: string;
   } | null>(null);
+  const [envelopeView, setEnvelopeView] = useState<EnvelopeView>("members");
+  const [resultTab, setResultTab] = useState("log");
   const [preferredSection, setPreferredSection] =
-    useState<EnvelopeSection | null>(null);
+    useState<SectionCursor | null>(null);
   const [forceMemberId, setForceMemberId] = useState("");
   if (forceMemberId && !p.members.some(({ id }) => id === forceMemberId))
     setForceMemberId("");
@@ -326,7 +356,7 @@ export default function App() {
     project: Project;
     envelope: ResultEnvelope;
     cases: ReadonlyMap<string, AnalysisResult>;
-    result: MemberEnvelopeResult | null;
+    result: EnvelopeResult | null;
     problem: string;
   } | null>(null);
   const analysisCase =
@@ -355,35 +385,36 @@ export default function App() {
   );
   const showSlabMap =
     plane.kind === "XY" && activeGuide.id === slab?.levelId ? slabMap : null;
-  const resultPatterns = useMemo(() => {
+  const requiredCases = useMemo(() => {
     const combinations = envelope
-      ? p.resultCombinations.filter((c) =>
-          envelope.combinationIds.includes(c.id),
-        )
+      ? envelopeCombinations(p, envelope)
       : combination
         ? [combination]
         : [];
-    const caseIds = new Set(
-      combinations.flatMap((c) =>
-        c.factors.filter((f) => f.factor !== 0).map((f) => f.caseId),
+    const ids = requiredCaseIds(combinations.flatMap(({ factors }) => factors));
+    return p.analysisCases.filter(({ id }) => ids.has(id));
+  }, [p, envelope, combination]);
+  const missingCases = requiredCases.filter(
+    ({ id }) => caseResults.get(id)?.caseId !== id,
+  );
+  const queueTarget = envelope
+    ? `envelope:${envelope.id}`
+    : `combination:${combination?.id}`;
+  const queueView =
+    queue?.revision === modelRevision.current && queue.target === queueTarget
+      ? queue
+      : null;
+  const resultPatterns = useMemo(
+    () =>
+      new Set(
+        (derived ? requiredCases : [analysisCase]).flatMap(({ factors }) =>
+          factors
+            .filter(({ factor }) => factor !== 0)
+            .map(({ patternId }) => patternId),
+        ),
       ),
-    );
-    const cases =
-      envelope || combination
-        ? p.analysisCases.filter((c) => caseIds.has(c.id))
-        : [analysisCase];
-    return new Set(
-      cases.flatMap((c) =>
-        c.factors.filter((f) => f.factor !== 0).map((f) => f.patternId),
-      ),
-    );
-  }, [
-    p.analysisCases,
-    p.resultCombinations,
-    analysisCase,
-    combination,
-    envelope,
-  ]);
+    [derived, requiredCases, analysisCase],
+  );
   const combined = useMemo(() => {
     if (!combination) return null;
     try {
@@ -405,12 +436,7 @@ export default function App() {
     }
     const controller = new AbortController();
     const context = { project: p, envelope, cases: caseResults };
-    void evaluateMemberEnvelope(
-      p,
-      envelope,
-      caseResults,
-      controller.signal,
-    ).then(
+    void evaluateEnvelope(p, envelope, caseResults, controller.signal).then(
       (result) => {
         if (!controller.signal.aborted)
           setCalculatedEnvelope({ ...context, result, problem: "" });
@@ -438,16 +464,6 @@ export default function App() {
       (item) =>
         item.kind === "member" && p.members.some(({ id }) => item.id === id),
     )?.id ?? p.members[0]?.id;
-  const section =
-    envelopeResult && sectionMemberId
-      ? {
-          memberId: sectionMemberId,
-          index:
-            preferredSection?.memberId === sectionMemberId
-              ? preferredSection.index
-              : 0,
-        }
-      : null;
   const beamDisplay = isSlabDisplay(display) ? "model" : display;
   const envelopeComponent =
     beamDisplay === "model" || beamDisplay === "deformed"
@@ -455,13 +471,67 @@ export default function App() {
         ? "my"
         : "m"
       : beamDisplay;
-  const showEnvelope = Boolean(envelopeResult) && tool === "select";
+  const showEnvelope =
+    Boolean(envelopeResult) && envelopeView === "members" && tool === "select";
   const result = envelope ? null : combined ? combined.result : caseResult;
   const visibleDisplay = showEnvelope
     ? envelopeComponent
     : result
       ? beamDisplay
       : "model";
+  const diagram = useMemo(() => {
+    if (!sectionMemberId || slab) return null;
+    const sources =
+      envelope && envelopeResult && envelopeView === "members"
+        ? envelopeCombinations(p, envelope)
+        : result && resultTab === "section"
+          ? [
+              combination ?? {
+                id: analysisCase.id,
+                name: analysisCase.name,
+                factors: [{ caseId: analysisCase.id, factor: 1 }],
+              },
+            ]
+          : null;
+    return (
+      sources && prepareMemberDiagram(p, sectionMemberId, sources, caseResults)
+    );
+  }, [
+    sectionMemberId,
+    slab,
+    envelope,
+    envelopeResult,
+    envelopeView,
+    p,
+    result,
+    resultTab,
+    combination,
+    analysisCase,
+    caseResults,
+  ]);
+  const reading = useMemo(
+    () =>
+      diagram?.read(
+        preferredSection?.memberId === diagram.memberId
+          ? preferredSection
+          : { t: 0 },
+        envelopeComponent,
+      ) ?? null,
+    [diagram, preferredSection, envelopeComponent],
+  );
+  const sectionPlot = useMemo(
+    () =>
+      diagram && reading
+        ? {
+            memberId: diagram.memberId,
+            t: reading.location.t,
+            min: reading.min.forces[envelopeComponent],
+            max: reading.max.forces[envelopeComponent],
+            points: diagram.trace(envelopeComponent, reading),
+          }
+        : null,
+    [diagram, reading, envelopeComponent],
+  );
   const defaultDiagram = slab ? "slab-uz" : spatial ? "deformed" : "m";
   const [loadEditor, setLoadEditor] = useState<LoadDefinitionsPage | null>(
     null,
@@ -477,7 +547,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v22", serialized);
+      localStorage.setItem("kstruct.draft.v24", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -532,9 +602,10 @@ export default function App() {
       (item) => `envelope:${item.id}` === value,
     );
     if (selectedEnvelope) {
+      setEnvelopeView("members");
       setDerivedChoice({ kind: "envelope", id: selectedEnvelope.id });
       setTool("select");
-      setPending(null);
+      clearPlacement();
       return;
     }
     const selectedCombination = p.resultCombinations.find(
@@ -579,18 +650,18 @@ export default function App() {
   const activatePanel = (panel: Panel) => {
     if (panel === activePanel) return;
     setActivePanel(panel);
-    setPending(null);
+    clearPlacement();
     if (
-      tool === "slab" &&
+      (tool === "slab" || tracing) &&
       (panel === "perspective" || viewPlane(panel).plane.kind !== "XY")
     )
       setTool("select");
   };
   const changeLayout = (next: Layout) => {
     setLayout(next);
-    setPending(null);
+    clearPlacement();
     setActivePanel("primary");
-    if (tool === "slab") setTool("select");
+    if (tool === "slab" || tracing) setTool("select");
     if (next === "planes" || next === "triple")
       setPlanes((v) =>
         v.primary.kind === "XY"
@@ -599,7 +670,16 @@ export default function App() {
       );
   };
   const changeTool = (t: Tool) => {
-    if (t === "slab" && (!spatial || plane.kind !== "XY" || slab)) return;
+    if (
+      (t === "slab" || t === "slabPolygon") &&
+      (!spatial || plane.kind !== "XY" || slab)
+    )
+      return;
+    if (
+      t === "slabHole" &&
+      (plane.kind !== "XY" || slab?.levelId !== activeGuide.id)
+    )
+      return;
     if (
       t !== "select" &&
       t !== "pointLoad" &&
@@ -608,7 +688,7 @@ export default function App() {
     )
       activatePanel("primary");
     setTool(t);
-    setPending(null);
+    clearPlacement();
     setDisplay("model");
   };
   const pickMemberLoad = (id: string, point: Point3) => {
@@ -635,17 +715,32 @@ export default function App() {
         primary: { kind: "XY", guideId: slab.levelId },
       }));
       setTool("select");
-      setPending(null);
+      clearPlacement();
     }
     setDisplay(value);
   };
-  const inspectSection = (target: EnvelopeSection) => {
+  const inspectSection = (target: SectionCursor) => {
+    if (!envelope) {
+      setResultTab("section");
+      setDisplay(envelopeComponent);
+    }
     selectObject({ kind: "member", id: target.memberId });
     setPreferredSection(target);
     setTool("select");
-    setPending(null);
+    clearPlacement();
   };
+  const sectionControls =
+    diagram && reading
+      ? {
+          diagram,
+          reading,
+          component: envelopeComponent,
+          onSection: inspectSection,
+          onComponent: showDisplay,
+        }
+      : null;
   const replace = (project: Project) => {
+    setResultTab("log");
     invalidateResults();
     current.current = project;
     dispatch({ type: "reset", project });
@@ -654,7 +749,7 @@ export default function App() {
     setLaunchSection("");
     setRollText("0");
     setSelection(project.slabs.map(({ id }) => ({ kind: "slab", id })));
-    setPending(null);
+    clearPlacement();
     setActivePanel("primary");
     setPlanes(initialPlanes(project.slabs[0]?.levelId));
     if (
@@ -699,21 +794,45 @@ export default function App() {
   const remove = () => {
     if (edit((p) => removeSelection(p, selection))) return;
     setSelection([]);
-    setPending(null);
+    clearPlacement();
+  };
+  const finishOutline = () => {
+    let id = "";
+    const error = edit((draft) => {
+      if (tool === "slabHole" && slab && slab.levelId === activeGuide.id) {
+        addSlabOpening(draft, slab.id, outline);
+        id = slab.id;
+      } else if (tool === "slabPolygon")
+        id = addPolygonSlab(draft, activeGuide.id, [
+          newSlabRing(outline, true),
+        ]).id;
+      else throw new Error("Ative a planta da laje para lançar a abertura.");
+    });
+    if (error) {
+      setOutlineError(error);
+      return;
+    }
+    selectObject({ kind: "slab", id });
+    changeTool("select");
   };
   const undo = () => {
+    if (tracing) {
+      setOutline((points) => points.slice(0, -1));
+      setOutlineError("");
+      return;
+    }
     if (!history.past.length) return;
     invalidateResults();
     dispatch({ type: "undo" });
     setSelection([]);
-    setPending(null);
+    clearPlacement();
   };
   const redo = () => {
     if (!history.future.length) return;
     invalidateResults();
     dispatch({ type: "redo" });
     setSelection([]);
-    setPending(null);
+    clearPlacement();
   };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -738,6 +857,29 @@ export default function App() {
         (e.target as HTMLElement).blur();
         setTimeout(() => void save(), 0);
         return;
+      }
+      if (
+        tracing &&
+        !(e.target as HTMLElement).closest("input,textarea,select")
+      ) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          changeTool("select");
+          return;
+        }
+        if (
+          e.key === "Backspace" ||
+          ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z")
+        ) {
+          e.preventDefault();
+          if (!e.shiftKey) undo();
+          return;
+        }
+        if (e.key === "Enter" && !(e.target as HTMLElement).closest("button")) {
+          e.preventDefault();
+          finishOutline();
+          return;
+        }
       }
       if (e.key === "Escape" && tool === "member") {
         changeTool("select");
@@ -794,6 +936,22 @@ export default function App() {
     }
   };
   const onPoint = (point: Point3) => {
+    if (tracing) {
+      if (
+        outline.length >= 3 &&
+        Math.hypot(point.x - outline[0].x, point.y - outline[0].y) < 1e-6
+      ) {
+        finishOutline();
+        return;
+      }
+      if (outline.length >= maxSlabVertices) {
+        setOutlineError(`Use até ${maxSlabVertices} vértices por painel.`);
+        return;
+      }
+      setOutlineError("");
+      setOutline((points) => [...points, point]);
+      return;
+    }
     if (tool === "node") {
       let id = "";
       const error = edit((p) => {
@@ -857,34 +1015,15 @@ export default function App() {
     }
     return error;
   };
-  const run = async () => {
-    if (activeRunId.current) return;
-    const snapshot = current.current;
-    const revision = modelRevision.current;
-    const modelIssues = diagnoseModel(snapshot);
-    setAnalysisDiagnostics(modelIssues);
-    setDiagnosticRevision(revision);
-    if (modelIssues.length) {
-      setDisplay("model");
-      setMessage(
-        `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.\n${modelIssues[0].message}`,
-      );
-      return;
-    }
-    const requestedCase =
-      snapshot.analysisCases.find((item) => item.id === caseId) ??
-      snapshot.analysisCases[0];
+  const runCase = async (
+    snapshot: Project,
+    revision: number,
+    requestedCase: Project["analysisCases"][number],
+  ) => {
     const id = uid();
-    activeRunId.current = id;
     setActiveRun({ id, ready: false, cancelling: false });
     let executionLogReceived = false;
-    setCaseResults((results) => {
-      const updated = new Map(results);
-      updated.delete(requestedCase.id);
-      return updated;
-    });
-    setDisplay("model");
-    setMessage(`Analisando ${requestedCase.name}…`);
+    let historyNotice = "";
     try {
       const { execution, input } = await analyze(
         snapshot,
@@ -899,54 +1038,154 @@ export default function App() {
       );
       setLastLog(execution.log);
       executionLogReceived = true;
-      const failedRunDiagnostics =
-        execution.log.summary.status !== "completed" ||
-        execution.output === null
-          ? diagnoseSolverFailure(
-              execution.log.summary.message,
-              execution.log.stdout,
-              execution.log.stderr,
-              input,
-            )
-          : [];
-      if (failedRunDiagnostics.length)
-        saveDiagnosticContext(id, snapshot, failedRunDiagnostics);
-      const historyNotice = execution.historyError
-        ? `\n${execution.historyError}`
+      historyNotice = execution.historyError
+        ? `
+${execution.historyError}`
         : "";
-      if (modelRevision.current !== revision) {
-        setAnalysisDiagnostics(failedRunDiagnostics);
-        setMessage(
-          `O modelo mudou durante a análise. Execute novamente para obter resultados atuais.${historyNotice}`,
-        );
-        return;
-      }
       if (
         execution.log.summary.status !== "completed" ||
         execution.output === null
       ) {
-        setAnalysisDiagnostics(failedRunDiagnostics);
-        setMessage(`${execution.log.summary.message}${historyNotice}`);
-        return;
+        const diagnostics = diagnoseSolverFailure(
+          execution.log.summary.message,
+          execution.log.stdout,
+          execution.log.stderr,
+          input,
+        );
+        if (diagnostics.length)
+          saveDiagnosticContext(id, snapshot, diagnostics);
+        if (modelRevision.current === revision)
+          setAnalysisDiagnostics(diagnostics);
+        return {
+          status:
+            execution.log.summary.status === "cancelled"
+              ? ("cancelled" as const)
+              : ("failed" as const),
+          message: execution.log.summary.message + historyNotice,
+        };
       }
-      const completed = parseOofemOutput(execution.output, input);
+      if (modelRevision.current !== revision)
+        return { status: "obsolete" as const, message: historyNotice };
+      const result = parseOofemOutput(execution.output, input);
       setAnalysisDiagnostics([]);
-      setCaseResults((results) =>
-        new Map(results).set(completed.caseId, completed),
-      );
-      showDisplay(defaultDiagram);
-      setMessage(
-        `Análise concluída · ${requestedCase.name}\nEquilíbrio global verificado. ${completed.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${historyNotice}`,
-      );
-    } catch (e) {
-      const failure = e instanceof Error ? e.message : String(e);
+      setCaseResults((results) => new Map(results).set(result.caseId, result));
+      return { status: "completed" as const, result, message: historyNotice };
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error);
       const diagnostics = diagnoseSolverFailure(failure, "", "");
-      setAnalysisDiagnostics(diagnostics);
+      if (modelRevision.current === revision)
+        setAnalysisDiagnostics(diagnostics);
       if (executionLogReceived)
         saveDiagnosticContext(id, snapshot, diagnostics);
-      setMessage(failure);
+      return { status: "failed" as const, message: failure + historyNotice };
+    }
+  };
+
+  const run = async (batch: boolean) => {
+    if (runLock.current) return;
+    const snapshot = current.current;
+    const revision = modelRevision.current;
+    const context = { revision, target: queueTarget };
+    const planned = batch ? missingCases : [analysisCase];
+    if (!planned.length) {
+      setQueue({
+        ...context,
+        message: "Todos os casos desta revisão já estão disponíveis.",
+      });
+      return;
+    }
+    const modelIssues = diagnoseModel(snapshot);
+    setAnalysisDiagnostics(modelIssues);
+    setDiagnosticRevision(revision);
+    if (modelIssues.length) {
+      setDisplay("model");
+      const problem = `Análise não iniciada. ${modelIssues.length} ${modelIssues.length === 1 ? "problema" : "problemas"}.
+${modelIssues[0].message}`;
+      setMessage(problem);
+      if (batch) setQueue({ ...context, message: problem });
+      return;
+    }
+
+    const lock = { stop: false };
+    runLock.current = lock;
+    if (!batch) {
+      setCaseResults((results) => {
+        const updated = new Map(results);
+        updated.delete(caseId);
+        return updated;
+      });
+    }
+    setDisplay("model");
+
+    const warnings: string[] = [];
+    try {
+      for (const [index, requestedCase] of planned.entries()) {
+        if (batch && index > 0) {
+          setActiveRun({ id: null, ready: true, cancelling: false });
+          setQueue({
+            ...context,
+            message: `${index} de ${planned.length} casos da fila concluídos.`,
+          });
+          // Let input and model edits reach the queue before reserving the next native slot.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+        if (modelRevision.current !== revision || lock.stop) break;
+
+        if (batch)
+          setQueue({
+            ...context,
+            caseId: requestedCase.id,
+            message: `Executando ${index + 1} de ${planned.length} · ${requestedCase.name}`,
+          });
+        setMessage(`Analisando ${requestedCase.name}…`);
+        const outcome = await runCase(snapshot, revision, requestedCase);
+        if (modelRevision.current !== revision) {
+          break;
+        }
+        if (outcome.status !== "completed") {
+          setMessage(outcome.message);
+          if (batch)
+            setQueue({
+              ...context,
+              failedId:
+                outcome.status === "failed" ? requestedCase.id : undefined,
+              message: [
+                `${requestedCase.name} · ${outcome.message} Use Analisar casos necessários para retomar.`,
+                ...warnings,
+              ].join("\n"),
+            });
+          return;
+        }
+        if (!batch) {
+          showDisplay(defaultDiagram);
+          setMessage(
+            `Análise concluída · ${requestedCase.name}
+Equilíbrio global verificado. ${outcome.result.slab ? "Consulte a flecha e os mapas de momentos." : "Consulte reações, deslocamentos e esforços."}${outcome.message}`,
+          );
+          return;
+        }
+        if (outcome.message)
+          warnings.push(`${requestedCase.name} · ${outcome.message.trim()}`);
+      }
+      if (modelRevision.current !== revision) {
+        const obsolete =
+          "O modelo mudou durante a análise. Execute novamente para obter resultados atuais.";
+        setMessage(obsolete);
+        if (batch)
+          setQueue({
+            target: queueTarget,
+            revision: modelRevision.current,
+            message: obsolete,
+          });
+      } else {
+        const status = lock.stop
+          ? "Fila interrompida. Use Analisar casos necessários para retomar."
+          : "Casos necessários concluídos.";
+        if (!lock.stop) showDisplay(defaultDiagram);
+        setQueue({ ...context, message: [status, ...warnings].join("\n") });
+      }
     } finally {
-      activeRunId.current = null;
+      runLock.current = null;
       setActiveRun(null);
     }
   };
@@ -966,7 +1205,7 @@ export default function App() {
     }
     setTab("Modelo");
     setTool("select");
-    setPending(null);
+    clearPlacement();
     const selectedSlab = available.find(({ kind }) => kind === "slab");
     if (spatial && selectedSlab) {
       const item = p.slabs.find(({ id }) => id === selectedSlab.id);
@@ -991,13 +1230,16 @@ export default function App() {
     setMessage(diagnostic.action);
   };
   const cancel = async () => {
-    if (!activeRun?.ready || activeRun.cancelling) return;
+    const lock = runLock.current;
+    if (!lock || !activeRun?.ready || activeRun.cancelling) return;
+    lock.stop = true;
     const { id } = activeRun;
     setActiveRun({ ...activeRun, cancelling: true });
+    if (!id) return;
     try {
       if (await cancelAnalysis(id)) return;
     } catch (e) {
-      if (activeRunId.current === id) setMessage(String(e));
+      if (runLock.current === lock) setMessage(String(e));
     }
     setActiveRun((active) =>
       active?.id === id ? { ...active, cancelling: false } : active,
@@ -1057,7 +1299,7 @@ export default function App() {
           <button
             title="Desfazer (Ctrl+Z)"
             aria-label="Desfazer"
-            disabled={!history.past.length}
+            disabled={tracing ? !outline.length : !history.past.length}
             onClick={undo}
           >
             <Undo2 size={17} />
@@ -1065,7 +1307,7 @@ export default function App() {
           <button
             title="Refazer (Ctrl+Shift+Z)"
             aria-label="Refazer"
-            disabled={!history.future.length}
+            disabled={tracing || !history.future.length}
             onClick={redo}
           >
             <Redo2 size={17} />
@@ -1147,6 +1389,29 @@ export default function App() {
                     <Square size={21} />
                     <span>Laje</span>
                     <kbd>L</kbd>
+                  </button>
+                )}
+                {spatial && (
+                  <button
+                    className={`tool-button ${tracing ? "active" : ""}`}
+                    aria-pressed={tracing}
+                    disabled={
+                      plane.kind !== "XY" ||
+                      (!!slab && slab.levelId !== activeGuide.id)
+                    }
+                    title={
+                      slab
+                        ? "Traçar abertura e analisar o painel com triângulos DKT"
+                        : "Traçar o contorno da laje na planta XY"
+                    }
+                    onClick={() =>
+                      changeTool(
+                        tracing ? "select" : slab ? "slabHole" : "slabPolygon",
+                      )
+                    }
+                  >
+                    <Pentagon size={21} />
+                    <span>{slab ? "Abertura na laje" : "Laje poligonal"}</span>
                   </button>
                 )}
                 <button
@@ -1244,7 +1509,7 @@ export default function App() {
                   <select
                     value={memberMode}
                     onChange={(e) => {
-                      setPending(null);
+                      clearPlacement();
                       setMemberMode(e.target.value as typeof memberMode);
                     }}
                   >
@@ -1392,7 +1657,9 @@ export default function App() {
               </b>
               <span>
                 {slab
-                  ? `Placa delgada DKT · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
+                  ? slab.polygon
+                    ? "Placa triangular DKT · contornos e aberturas"
+                    : `Placa ${slab.formulation.toUpperCase()} · ${slab.divisionsX} × ${slab.divisionsY} subdivisões`
                   : `Euler–Bernoulli · ${p.mesh.segmentsPerMember} subdivisões regulares por barra`}
               </span>
               <span>
@@ -1533,7 +1800,7 @@ export default function App() {
           <button
             className="run-button"
             disabled={running || Boolean(derived)}
-            onClick={() => void run()}
+            onClick={() => void run(false)}
           >
             <Play size={15} fill="currentColor" />
             {running ? "Analisando…" : "Analisar"}
@@ -1552,6 +1819,37 @@ export default function App() {
           )}
         </div>
       </div>
+      {derived && (
+        <section className="case-queue" aria-label="Fila de casos">
+          <button
+            type="button"
+            onClick={() => void run(true)}
+            disabled={running}
+          >
+            Analisar casos necessários
+          </button>
+          <div>
+            <div aria-live="polite" className="case-queue-message">
+              {queueView?.message ||
+                `${requiredCases.length - missingCases.length} de ${requiredCases.length} casos disponíveis nesta revisão.`}
+            </div>
+            <ol aria-label="Ordem de execução">
+              {requiredCases.map((item) => (
+                <li key={item.id}>
+                  {item.name} [{item.id}] ·{" "}
+                  {queueView?.caseId === item.id
+                    ? "Em execução"
+                    : queueView?.failedId === item.id
+                      ? "Falhou"
+                      : caseResults.get(item.id)?.caseId === item.id
+                        ? "Disponível para reaproveitar"
+                        : "Pendente"}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
       <div className="workspace">
         {left && (
           <aside className="explorer">
@@ -1720,7 +2018,7 @@ export default function App() {
             <button
               className="selection-trigger"
               onClick={() => {
-                setPending(null);
+                clearPlacement();
                 setTool("select");
                 setLaunchDialog("selection");
               }}
@@ -1787,29 +2085,48 @@ export default function App() {
                   : selection.length
               }
               onPlane={(kind) => {
-                setPending(null);
+                clearPlacement();
                 setPlanes((v) => ({
                   ...v,
                   [planePanel]: { kind, guideId: "" },
                 }));
-                if (tool === "slab") changeTool("select");
+                if (tool === "slab" || tracing) changeTool("select");
               }}
               onGuide={(id) => {
+                if (tracing) changeTool("select");
                 setPlanes((v) => ({
                   ...v,
                   [planePanel]: { kind: plane.kind, guideId: id },
                 }));
-                setPending(null);
+                clearPlacement();
               }}
               toggleOrtho={() => setOrthogonal((v) => !v)}
               editGuides={() => {
-                setPending(null);
+                clearPlacement();
                 setLaunchDialog("guides");
               }}
               selectPlane={selectPlane}
               replicate={() => setLaunchDialog("replicate")}
               connect={() => setLaunchDialog("mesh")}
             />
+          )}
+          {tracing && (
+            <div className="slab-trace-controls" aria-label="Traçado da laje">
+              <span>
+                {tool === "slabHole" ? "Abertura" : "Contorno externo"} ·{" "}
+                {outline.length} vértices
+              </span>
+              <button disabled={outline.length < 3} onClick={finishOutline}>
+                Fechar contorno
+              </button>
+              <button disabled={!outline.length} onClick={undo}>
+                Desfazer vértice
+              </button>
+              <button onClick={() => changeTool("select")}>
+                Cancelar traçado
+              </button>
+              {outlineError && <span role="alert">{outlineError}</span>}
+            </div>
           )}
           <div className={`viewports ${layout}`}>
             {(
@@ -1840,14 +2157,12 @@ export default function App() {
                   quick={active && tool === "member" && memberMode === "span"}
                   result={result}
                   envelope={
-                    showEnvelope && envelopeResult && section
-                      ? {
-                          result: envelopeResult,
-                          section,
-                          onSection: inspectSection,
-                        }
+                    showEnvelope && envelopeResult
+                      ? envelopeResult.members
                       : null
                   }
+                  sectionPlot={sectionPlot}
+                  onSection={inspectSection}
                   display={visibleDisplay}
                   slabMap={
                     view.plane.kind === "XY" && view.guide.id === slab?.levelId
@@ -1867,6 +2182,7 @@ export default function App() {
                   }
                   onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                   onSpan={placeMember}
+                  outline={active && tracing ? outline : []}
                   pending={active ? pending : null}
                   onPoint={onPoint}
                   onSelect={selectObject}
@@ -1932,20 +2248,30 @@ export default function App() {
             />
           ) : envelope ? (
             <EnvelopeResults
+              view={envelopeView}
+              onView={setEnvelopeView}
               key={envelope.id}
               project={p}
               envelope={envelope}
               result={envelopeResult}
               component={envelopeComponent}
-              section={section}
+              controls={sectionControls}
               problem={envelopeState?.problem ?? "Calculando envelope…"}
-              onSection={inspectSection}
             />
           ) : (
             <Results
               project={p}
               forceMemberId={forceMemberId}
-              onForceMemberChange={setForceMemberId}
+              tab={resultTab}
+              onTab={(tab) => {
+                setResultTab(tab);
+                if (tab === "section") showDisplay(envelopeComponent);
+              }}
+              controls={sectionControls}
+              onForceMemberChange={(id) => {
+                setForceMemberId(id);
+                if (id) selectObject({ kind: "member", id });
+              }}
               view={
                 combination && combined
                   ? {
@@ -2004,21 +2330,23 @@ export default function App() {
             ? "Clique na barra na posição da força ou do momento"
             : tool === "distributedLoad"
               ? "Clique na barra para indicar o início da carga por trecho"
-              : tool === "slab"
-                ? pending
-                  ? "Marque o canto oposto da laje · Esc para cancelar"
-                  : "Marque o primeiro canto da laje na planta XY"
-                : pending
-                  ? "Marque a segunda extremidade · Esc para cancelar"
-                  : tool === "member"
-                    ? memberMode === "span"
-                      ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
-                      : "Marque a primeira extremidade da barra"
-                    : tool === "node"
-                      ? "Clique na malha para inserir um nó"
-                      : selection.length > 1
-                        ? `${selection.length} objetos selecionados`
-                        : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
+              : tracing
+                ? "Marque os vértices em sequência · Enter ou primeiro vértice para fechar · Esc para cancelar"
+                : tool === "slab"
+                  ? pending
+                    ? "Marque o canto oposto da laje · Esc para cancelar"
+                    : "Marque o primeiro canto da laje na planta XY"
+                  : pending
+                    ? "Marque a segunda extremidade · Esc para cancelar"
+                    : tool === "member"
+                      ? memberMode === "span"
+                        ? "Aponte para um eixo no interior do vão, afastado dos cruzamentos"
+                        : "Marque a primeira extremidade da barra"
+                      : tool === "node"
+                        ? "Clique na malha para inserir um nó"
+                        : selection.length > 1
+                          ? `${selection.length} objetos selecionados`
+                          : "Selecione um objeto · Ctrl ou Shift para seleção múltipla"}
         </span>
         <span>
           {units.force} · {units.length} · rad <i />{" "}
@@ -2103,6 +2431,8 @@ export default function App() {
               project.analysisCases = definitions.analysisCases;
               project.resultCombinations = definitions.resultCombinations;
               project.resultEnvelopes = definitions.resultEnvelopes;
+              if (definitions.combinationProfile)
+                project.combinationProfile = definitions.combinationProfile;
             });
             if (problem) return problem;
             setPatternId(next.patternId);
@@ -2115,8 +2445,9 @@ export default function App() {
                   : null,
             );
             if (next.envelopeId) {
+              setEnvelopeView("members");
               setTool("select");
-              setPending(null);
+              clearPlacement();
             }
             setDisplay("model");
             setMessage("Definições de carga aplicadas.");

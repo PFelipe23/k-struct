@@ -58,7 +58,7 @@ describe("projeto versionado e edição", () => {
     };
     const p = parseProject(JSON.stringify(legacy));
     expect(p.mode).toBe("planar");
-    expect(p.schemaVersion).toBe(22);
+    expect(p.schemaVersion).toBe(24);
     expect(p.resultCombinations).toEqual([]);
     expect(p.resultEnvelopes).toEqual([]);
     expect(p.nodes.map((n) => n.id)).toEqual(["A", "B"]);
@@ -204,6 +204,8 @@ describe("laje retangular isolada", () => {
     expect(exportOofem(imported, "EL").deck).toContain(
       "qdktplate 1 nodes 4 11 10 1 2",
     );
+    if (panel.polygon)
+      throw new Error("O painel legado deve preservar a malha retangular.");
     panel.supports.xMin = false;
     expect(analysisErrors(imported).join(" ")).toMatch(/quatro bordas/);
   });

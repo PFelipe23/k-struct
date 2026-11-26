@@ -1,3 +1,9 @@
+import {
+  normalizeRings,
+  slabRings,
+  type SlabRing,
+  type XY,
+} from "./slabPolygon";
 import { rebaseThermal } from "./thermalLoads";
 import {
   distributedLoadError,
@@ -32,7 +38,8 @@ import {
   uid,
   type Member,
   type Project,
-  type Slab,
+  type RectangleSlab,
+  type PolygonSlab,
 } from "./model";
 
 export function inspectNodeCoordinateChanges(
@@ -168,26 +175,11 @@ export function reverseMember(p: Project, id: string) {
   // Uniform loads are global, and groups and sections refer to the same ID.
 }
 
-export function addSlab(
-  p: Project,
-  levelId: string,
-  from: Point3,
-  to: Point3,
-): Slab {
-  const level = p.guides.z.find((item) => item.id === levelId);
-  if (
-    p.mode !== "spatial" ||
-    !level ||
-    from.z !== level.position ||
-    to.z !== level.position
-  )
+function slabDefaults(p: Project, levelId: string) {
+  if (p.mode !== "spatial" || !p.guides.z.some((level) => level.id === levelId))
     throw new Error("Lance a laje na planta XY de um pavimento.");
   if (p.slabs.length)
     throw new Error("Este projeto já contém uma laje isolada.");
-  const lengthX = Math.abs(to.x - from.x);
-  const lengthY = Math.abs(to.y - from.y);
-  if (lengthX < tolerance || lengthY < tolerance)
-    throw new Error("Marque dois cantos opostos para definir um retângulo.");
   const concrete = { E: 30e9, nu: 0.2, density: 2500, alpha: 0 };
   let material = p.materials.find(
     (item) =>
@@ -200,16 +192,79 @@ export function addSlab(
     material = { id: uid(), name: "Concreto", ...concrete };
     p.materials.push(material);
   }
-  const slab: Slab = {
+  return {
     id: uid(),
     name: "L1",
     levelId,
+    thickness: 0.1,
+    materialId: material.id,
+  };
+}
+
+export function newSlabRing(points: XY[], supported: boolean): SlabRing {
+  return points.map(({ x, y }) => ({ x, y, edgeId: uid(), supported }));
+}
+
+export function addPolygonSlab(
+  p: Project,
+  levelId: string,
+  rings: SlabRing[],
+): PolygonSlab {
+  const polygon = { rings: normalizeRings(rings), refinements: 2 };
+  const slab: PolygonSlab = {
+    ...slabDefaults(p, levelId),
+    formulation: "dkt",
+    polygon,
+  };
+  p.slabs.push(slab);
+  return slab;
+}
+
+export function addSlabOpening(p: Project, slabId: string, points: XY[]) {
+  const index = p.slabs.findIndex((s) => s.id === slabId);
+  const slab = p.slabs[index];
+  if (!slab)
+    throw new Error("Selecione a laje do pavimento para traçar a abertura.");
+  const rings = normalizeRings([
+    ...slabRings(slab),
+    newSlabRing(points, false),
+  ]);
+  const { id, name, levelId, thickness, materialId } = slab;
+  p.slabs[index] = {
+    id,
+    name,
+    levelId,
+    thickness,
+    materialId,
+    formulation: "dkt",
+    polygon: { rings, refinements: slab.polygon?.refinements ?? 2 },
+  };
+}
+
+export function addSlab(
+  p: Project,
+  levelId: string,
+  from: Point3,
+  to: Point3,
+): RectangleSlab {
+  const level = p.guides.z.find((item) => item.id === levelId);
+  if (
+    p.mode !== "spatial" ||
+    !level ||
+    from.z !== level.position ||
+    to.z !== level.position
+  )
+    throw new Error("Lance a laje na planta XY de um pavimento.");
+  const lengthX = Math.abs(to.x - from.x);
+  const lengthY = Math.abs(to.y - from.y);
+  if (lengthX < tolerance || lengthY < tolerance)
+    throw new Error("Marque dois cantos opostos para definir um retângulo.");
+  const slab: RectangleSlab = {
+    ...slabDefaults(p, levelId),
     x: Math.min(from.x, to.x),
     y: Math.min(from.y, to.y),
     lengthX,
     lengthY,
-    thickness: 0.1,
-    materialId: material.id,
     formulation: "qdkt",
     divisionsX: 8,
     divisionsY: 6,
