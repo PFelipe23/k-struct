@@ -814,11 +814,11 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem("kstruct.draft.v29") ?? "{}")
+          JSON.parse(localStorage.getItem("kstruct.draft.v30") ?? "{}")
             .schemaVersion,
       ),
     )
-    .toBe(29);
+    .toBe(30);
   expect(
     await page.evaluate(
       () =>
@@ -993,4 +993,127 @@ test("KS-45 · gira a cobertura, reabre o modelo e consulta os dois referenciais
   await expect(table).toHaveCount(0);
   await solve();
   expect(await deflection()).toBeCloseTo(0.2034, 3);
+});
+
+test("KS-46 · aplica pressão por cota e por vértice à parede e confere a reação na base", async ({
+  page,
+}) => {
+  test.setTimeout(75_000);
+  if (executable) await plateBridge(page);
+  await page.goto("/");
+  const source = await readFile(
+    "examples/parede-pressao-hidrostatica.kstruct.json",
+    "utf8",
+  );
+  await openProjectInBrowser(page, "parede.kstruct.json", source);
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  const edit = button("Parede do reservatório · Casca");
+  const dlg = page.getByRole("dialog", { name: "Painel espacial" });
+  await edit.click();
+  await expect(dlg.getByLabel("Distribuição da carga")).toHaveValue(
+    "elevation",
+  );
+  await expect(dlg.getByLabel("Pressão na cota inferior (kN/m²)")).toHaveValue(
+    "39.24",
+  );
+  await dlg.getByLabel("Cota Z superior (m)").fill("0");
+  await dlg.getByRole("button", { name: "Aplicar painel" }).click();
+  await expect(dlg.getByRole("alert")).toContainText("superior");
+  await dlg.getByLabel("Cota Z superior (m)").fill("4");
+  await dlg.getByLabel("Distribuição da carga").selectOption("vertices");
+  await dlg.getByLabel("Direção da carga").selectOption("X");
+  for (const corner of ["A", "D"])
+    await dlg.getByLabel(corner + " (kN/m²)", { exact: true }).fill("-39,24");
+  await dlg.getByRole("button", { name: "Aplicar painel" }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(
+    page.getByRole("img", {
+      name: "Parede do reservatório · carga superficial",
+    }),
+  ).toBeVisible();
+  const loads3d = page
+    .getByRole("region", { name: "Perspectiva 3D" })
+    .getByRole("button", { name: "Cargas", exact: true });
+  if ((await loads3d.getAttribute("aria-pressed")) === "false")
+    await loads3d.click();
+  await expect(
+    page.locator(".scene-label").filter({ hasText: /X global.*kN\/m²/ }),
+  ).toHaveCount(1);
+  await button("Desfazer").click();
+  await edit.click();
+  await expect(dlg.getByLabel("Distribuição da carga")).toHaveValue(
+    "elevation",
+  );
+  await dlg.getByRole("button", { name: "Cancelar" }).click();
+  await button("Refazer").click();
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const saved = await readFile((await (await download).path())!, "utf8");
+  const p = parseProject(saved);
+  expect(p.loadPatterns[0].panelActions![0]).toMatchObject({
+    pressure: 0,
+    direction: "X",
+    distribution: {
+      mode: "vertices",
+      values: { A: -39240, B: 0, C: 0, D: -39240 },
+    },
+  });
+  await openProjectInBrowser(page, "parede-vertices.kstruct.json", saved);
+  await button("Análise").click();
+  const output = page.waitForEvent("download");
+  await button("Entrada OOFEM").click();
+  expect(await readFile((await (await output).path())!, "utf8")).toBe(
+    exportOofem(p, "EL").deck,
+  );
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  await button("Analisar").click();
+  await page.waitForFunction(
+    () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+  );
+  await page.evaluate(() =>
+    (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+  );
+  const results = page.getByRole("region", {
+    name: "Resultados dos painéis espaciais",
+  });
+  await expect(results).toContainText(/Força aplicada em XYZ.*-235[,.]44/);
+  await expect(results).toContainText(/Momento dos apoios em XYZ.*313[,.]92/);
+  await edit.click();
+  await dlg.getByLabel("A (kN/m²)", { exact: true }).fill("-30");
+  await dlg.getByRole("button", { name: "Aplicar painel" }).click();
+  await expect(results.getByRole("table")).toHaveCount(0);
+});
+
+test("KS-46 · configura as quatro pressões de uma laje em planta e recupera a carga uniforme ao desfazer", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const p = slabBenchmarkProject();
+  await openProjectInBrowser(page, "laje.kstruct.json", serializeProject(p));
+  await page.getByLabel("Pavimento ativo").selectOption("level1");
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: p.slabs[0].name, exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Configurar carga superficial" })
+    .click();
+  const dlg = page.getByRole("dialog", { name: "Carga superficial da laje" });
+  await dlg.getByLabel("Distribuição da carga").selectOption("vertices");
+  await dlg.getByLabel("A (kN/m²)", { exact: true }).fill("3");
+  await dlg.getByRole("button", { name: "Aplicar carga superficial" }).click();
+  await expect(
+    page.getByRole("img", { name: p.slabs[0].name + " · carga superficial" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Desfazer", exact: true }).click();
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: p.slabs[0].name, exact: true })
+    .click();
+  await expect(page.getByLabel("Pressão pZ", { exact: true })).toHaveValue(
+    "-5",
+  );
 });

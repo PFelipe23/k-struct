@@ -11,6 +11,7 @@ import {
   tolerance,
   type Point3,
 } from "./geometry";
+import { pressureSpecError, pressureVector } from "./surfacePressure";
 import { panelTrig, panelStiffnessError } from "./panelStiffness";
 import type { PanelEdge, Project, SurfacePanel } from "./model";
 
@@ -75,6 +76,7 @@ export function panelModelErrors(p: Project) {
     errors: string[] = [];
   if (panels.length && p.mode !== "spatial")
     errors.push("Painéis espaciais exigem um projeto XYZ.");
+  const normals = new Map<string, Point3>();
   for (const panel of panels) {
     const mat = p.materials.find((m) => m.id === panel.materialId);
     if (!mat) errors.push(`${panel.name} · material inexistente.`);
@@ -85,12 +87,40 @@ export function panelModelErrors(p: Project) {
     if (new Set(panel.fixed).size !== panel.fixed.length)
       errors.push(`${panel.name} · engaste repetido na mesma borda.`);
     try {
-      panelGeometry(panel);
+      normals.set(panel.id, panelGeometry(panel).axes[2]);
     } catch (e) {
       errors.push((e as Error).message);
     }
   }
   for (const pat of p.loadPatterns) {
+    for (const action of pat.panelActions ?? []) {
+      const reason = pressureSpecError(action, action.pressure, [
+        "A",
+        "B",
+        "C",
+        "D",
+      ]);
+      if (reason) errors.push(pat.name + " · " + reason);
+      const panel = panels.find((p) => p.id === action.panelId);
+      const normal = normals.get(action.panelId);
+      if (
+        panel &&
+        normal &&
+        (action.distribution || action.direction) &&
+        panel.kind !== "shell"
+      ) {
+        const dir = pressureVector(action.direction, normal);
+        const unsupported =
+          panel.kind === "membrane"
+            ? Math.abs(dot(dir, normal))
+            : length(cross(dir, normal));
+        if (unsupported > 1e-10)
+          errors.push(
+            panel.name +
+              " · a formulação não representa essa direção de carga superficial.",
+          );
+      }
+    }
     const ids = pat.panelActions?.map((a) => a.panelId) ?? [];
     if (
       ids.some((id) => !panels.some((s) => s.id === id)) ||

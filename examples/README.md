@@ -23,3 +23,7 @@ Abra o modelo no KStruct com **Abrir projeto** e clique em **Analisar**. A carga
 ## Cobertura com rigidez direcional
 
 Abra a cobertura no KStruct desktop e clique em **Analisar**. O fator de flexão M11 vale 4. Em **Cobertura · Casca → Orientação e rigidez**, altere o ângulo de 0° para 90° e analise novamente. A direção de maior rigidez passa do vão de 6 m para o de 3 m. A flecha central passa de −0,2037 mm para −0,0599 mm. Selecione **Referencial do painel → Eixos geométricos** para comparar momentos na mesma direção antes e depois do giro. [Projeto](cobertura-direcional.kstruct.json) · [Comparação com Ritz](../docs/VALIDATION.md#ks-45--rigidez-direcional-dos-painéis)
+
+## Parede com pressão hidrostática
+
+Abra o modelo e clique em **Analisar**. Em **Resultados dos painéis espaciais**, confira a força aplicada em X de −235,44 kN e o momento aplicado em Y de −313,92 kN·m. Para baixar o nível da água para 2,30 m, abra **Parede do reservatório · Casca → Carga superficial**, informe 2,30 m na cota superior e 22,563 kN/m² na pressão inferior. Mantenha zero na pressão superior e analise novamente. [Projeto](parede-pressao-hidrostatica.kstruct.json) · [Referência analítica](../docs/VALIDATION.md#ks-46--pressão-hidrostática-e-carga-superficial-variável)

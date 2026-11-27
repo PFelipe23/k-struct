@@ -1,3 +1,10 @@
+import { SlabPressureDialog } from "./SurfacePressureFields";
+import {
+  directionNames,
+  slabPressureVertices,
+  remapSlabPressures,
+  type PressureSpec,
+} from "../domain/surfacePressure";
 import {
   emptyThermal,
   sectionExtents,
@@ -206,7 +213,13 @@ function SlabFields({
   const material = project.materials.find(({ id }) => id === slab.materialId)!;
   const updateSlab = (changes: Partial<Slab>) =>
     edit((draft) => {
-      Object.assign(draft.slabs.find(({ id }) => id === slab.id)!, changes);
+      const next = draft.slabs.find(({ id }) => id === slab.id)!;
+      Object.assign(next, changes);
+      if (
+        changes.polygon?.rings &&
+        changes.polygon.rings !== slab.polygon?.rings
+      )
+        remapSlabPressures(draft, slab, next);
     });
   const joint = project.slabJoint;
   const shared =
@@ -215,8 +228,19 @@ function SlabFields({
       : joint?.b.slabId === slab.id
         ? joint.b.edgeId
         : undefined;
-  const pressure =
-    pattern.pressure.find(({ slabId }) => slabId === slab.id)?.pz ?? 0;
+  const action = pattern.pressure.find((v) => v.slabId === slab.id);
+  const [areaOpen, setAreaOpen] = useState(false);
+  const vertices = slabPressureVertices(
+    slab,
+    project.guides.z.find((v) => v.id === slab.levelId)!.position,
+  );
+  const saveArea = (uniform: number, spec: PressureSpec) =>
+    edit((draft) => {
+      const pat = draft.loadPatterns.find((v) => v.id === pattern.id)!;
+      pat.pressure = pat.pressure.filter((v) => v.slabId !== slab.id);
+      if (uniform || spec.distribution)
+        pat.pressure.push({ slabId: slab.id, pz: uniform, ...spec });
+    });
   return (
     <>
       <label className="stack-field">
@@ -409,21 +433,41 @@ function SlabFields({
         onApply={(sizing) => updateSlab({ sizing })}
       />
       <h4>
-        Pressão uniforme <span>{pattern.name}</span>
+        Carga superficial <span>{pattern.name}</span>
       </h4>
-      <NumberField
-        label="Pressão pZ"
-        unit="kN/m²"
-        value={pressure / 1000}
-        onChange={(value) =>
-          edit((draft) => {
-            const pat = draft.loadPatterns.find(({ id }) => id === pattern.id)!;
-            pat.pressure = pat.pressure.filter((v) => v.slabId !== slab.id);
-            if (value !== 0)
-              pat.pressure.push({ slabId: slab.id, pz: value * 1000 });
-          })
-        }
-      />
+      {!action?.distribution && (
+        <NumberField
+          label="Pressão pZ"
+          unit="kN/m²"
+          value={(action?.pz ?? 0) / 1000}
+          onChange={(value) =>
+            saveArea(
+              value * 1000,
+              action?.direction ? { direction: action.direction } : {},
+            )
+          }
+        />
+      )}
+      {action?.distribution && (
+        <p>
+          {action.distribution.mode === "elevation"
+            ? "Por cota Z"
+            : "Por vértice"}{" "}
+          · {directionNames[action.direction ?? "normal"]}
+        </p>
+      )}
+      <button type="button" onClick={() => setAreaOpen(true)}>
+        Configurar carga superficial
+      </button>
+      {areaOpen && (
+        <SlabPressureDialog
+          vertices={vertices}
+          spec={action}
+          uniform={action?.pz ?? 0}
+          apply={saveArea}
+          close={() => setAreaOpen(false)}
+        />
+      )}
       <p className="help">
         Use pZ negativo para pressão descendente. O peso próprio pode ser
         ativado nas definições do padrão.

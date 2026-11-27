@@ -54,6 +54,8 @@ import {
   type Point3,
 } from "./geometry";
 
+import { pressureSpecError, slabPressureVertices } from "./surfacePressure";
+
 const id = z
   .string()
   .min(1)
@@ -755,13 +757,49 @@ const surfacePanel = panelV28.extend({
   angleDeg: finite.optional(),
   stiffness: panelFactors.optional(),
 });
-export const projectSchema = projectV28.extend({
+const projectV29 = projectV28.extend({
   schemaVersion: z.literal(29),
   surfacePanels: z.array(surfacePanel).max(2).optional(),
 });
+const distribution = z.discriminatedUnion("mode", [
+  z
+    .strictObject({
+      mode: z.literal("elevation"),
+      z0: finite,
+      z1: finite,
+      p0: finite,
+      p1: finite,
+    })
+    .refine((d) => d.z1 > d.z0, "A cota superior deve superar a inferior."),
+  z.strictObject({
+    mode: z.literal("vertices"),
+    values: z.record(id, finite).refine((v) => Object.keys(v).length <= 128),
+  }),
+]);
+const areaAttributes = {
+  direction: z.enum(["normal", "X", "Y", "Z"]).optional(),
+  distribution: distribution.optional(),
+};
+const spatialAction = panelAction.extend(areaAttributes);
+export const projectSchema = projectV29.extend({
+  schemaVersion: z.literal(30),
+  loadPatterns: z
+    .array(
+      projectV29.shape.loadPatterns.element.extend({
+        pressure: z.array(slabPressureSchema.extend(areaAttributes)).max(2),
+        panelActions: z.array(spatialAction).max(2).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type PressureDistribution = z.infer<typeof distribution>;
+export type PressureDirection = NonNullable<
+  z.infer<typeof areaAttributes.direction>
+>;
 export type PanelFactors = z.infer<typeof panelFactors>;
 export type SurfacePanel = z.infer<typeof surfacePanel>;
-export type PanelAction = z.infer<typeof panelAction>;
+export type PanelAction = z.infer<typeof spatialAction>;
 export type PanelEdge = z.infer<typeof panelEdge>;
 export type SlabJoint = z.infer<typeof slabJointSchema>;
 export type SlabSizing = z.infer<typeof sizingSchema>;
@@ -850,7 +888,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 29,
+    schemaVersion: 30,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -932,10 +970,35 @@ function exceedsFileLimit(json: string) {
       new TextEncoder().encode(json).length > projectFileLimit)
   );
 }
+function normalizeSlabPressureVertices(data: Project) {
+  for (const slab of data.slabs)
+    if (slab.polygon) {
+      const original = slab.polygon.rings,
+        normalized = normalizeRings(original);
+      for (const [i, ring] of normalized.entries()) {
+        if (ring === original[i]) continue;
+        for (const pat of data.loadPatterns) {
+          const dist = pat.pressure.find(
+            (a) => a.slabId === slab.id,
+          )?.distribution;
+          if (dist?.mode !== "vertices") continue;
+          const byPoint = original[i].map((v) => ({
+            x: v.x,
+            y: v.y,
+            value: dist.values[v.edgeId] ?? 0,
+          }));
+          for (const v of ring)
+            dist.values[v.edgeId] = byPoint.find(
+              (w) => w.x === v.x && w.y === v.y,
+            )!.value;
+        }
+      }
+      slab.polygon.rings = normalized;
+    }
+}
 export function serializeProject(p: Project) {
   const data = projectSchema.parse(p);
-  for (const slab of data.slabs)
-    if (slab.polygon) slab.polygon.rings = normalizeRings(slab.polygon.rings);
+  normalizeSlabPressureVertices(data);
   const pretty = JSON.stringify(data, null, 2);
   if (!exceedsFileLimit(pretty)) return pretty;
   const compact = JSON.stringify(data);
@@ -1307,6 +1370,15 @@ export function parseProject(source: string): Project {
     const old = projectV28.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 29 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 29
+  ) {
+    const old = projectV29.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 30 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const panelFactorIssue = parsed.error.issues.find(
@@ -1357,11 +1429,10 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 29, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 30, com valores numéricos finitos.",
     );
   }
-  for (const slab of parsed.data.slabs)
-    if (slab.polygon) slab.polygon.rings = normalizeRings(slab.polygon.rings);
+  normalizeSlabPressureVertices(parsed.data);
   if (!parsed.data.slabJoint && parsed.data.slabs.length === 2)
     refreshJoint(parsed.data);
   const errors = referenceErrors(parsed.data);
@@ -1647,6 +1718,21 @@ export function referenceErrors(p: Project): string[] {
       errors.push(`${pat.name}: carga em nó inexistente.`);
     if (pat.uniform.some((l) => !p.members.some((m) => m.id === l.memberId)))
       errors.push(`${pat.name}: carga em barra inexistente.`);
+    for (const load of pat.pressure) {
+      const slab = p.slabs.find((s) => s.id === load.slabId);
+      if (!slab) continue;
+      if (load.direction === "X" || load.direction === "Y")
+        errors.push(
+          slab.name +
+            " · a laje horizontal em flexão aceita somente a normal ou Z global.",
+        );
+      const reason = pressureSpecError(
+        load,
+        load.pz,
+        slabPressureVertices(slab, 0).map((v) => v.id),
+      );
+      if (reason) errors.push(slab.name + " · " + reason);
+    }
     if (new Set(pat.pressure.map((l) => l.slabId)).size !== pat.pressure.length)
       errors.push(`${pat.name}: há duas pressões para a mesma laje no padrão.`);
     if (

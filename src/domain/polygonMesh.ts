@@ -15,7 +15,7 @@ const sideKey = (a: number, b: number) => (a < b ? `${a}/${b}` : `${b}/${a}`);
 
 // Earcut may bridge a hole along a line containing another boundary vertex.
 // Split both sides of every such edge before subdivision to keep matching nodes.
-function conformingTriangles(rings: SlabRing[], vertices: XY[]) {
+export function conformingTriangles(rings: SlabRing[], vertices: XY[]) {
   const paths = rings.map((ring) => ring.map((v) => new Vector2(v.x, v.y)));
   const pending = ShapeUtils.triangulateShape(
     paths[0],

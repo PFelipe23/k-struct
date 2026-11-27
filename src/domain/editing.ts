@@ -1,3 +1,4 @@
+import { remapSlabPressures } from "./surfacePressure";
 import { refreshJoint } from "./slabJoint";
 import {
   normalizeRings,
@@ -242,6 +243,7 @@ export function addSlabOpening(p: Project, slabId: string, points: XY[]) {
     ...(slab.sizing ? { sizing: slab.sizing } : {}),
     polygon: { rings, refinements: slab.polygon?.refinements ?? 2 },
   };
+  remapSlabPressures(p, slab, p.slabs[index]);
   refreshJoint(p);
 }
 

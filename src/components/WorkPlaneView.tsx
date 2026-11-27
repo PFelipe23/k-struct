@@ -1,3 +1,11 @@
+import { PressureProjection } from "./PressureProjection";
+import {
+  panelPressureVertices,
+  pressureAt,
+  pressureMarkers,
+  pressureStations,
+  pressureVector,
+} from "../domain/surfacePressure";
 import { SlabJointPlan } from "./SlabJointPlan";
 import { patternWind } from "../domain/wind";
 import ThermalLoadGlyph from "./ThermalLoadGlyph";
@@ -805,6 +813,39 @@ export default function WorkPlaneView({
               trace.push(interpolate(a, b, da / (da - db)));
           }
           if (trace.length < 2) return null;
+          const action =
+            layers.loads &&
+            patterns.panelActions?.find((a) => a.panelId === panel.id);
+          let distributionView;
+          if (action && (action.distribution || action.pressure)) {
+            const dir = pressureVector(action.direction, materialAxes[2]);
+            const vertices = panelPressureVertices(corners);
+            const at = pressureAt(
+              action.pressure,
+              action.distribution,
+              vertices,
+            );
+            const samples = face
+              ? pressureMarkers(vertices, action.pressure, action.distribution)
+              : pressureStations(trace[0], trace[1], action.distribution).map(
+                  (t) => {
+                    const point = interpolate(trace[0], trace[1], t);
+                    return { point, value: at(point) };
+                  },
+                );
+            distributionView = (
+              <PressureProjection
+                name={panel.name}
+                direction={dir}
+                samples={samples}
+                u={axisU}
+                v={axisV}
+                facing={dir[normal] * (plane.kind === "XZ" ? -1 : 1)}
+                sx={sx}
+                sy={sy}
+              />
+            );
+          }
           const cu = trace.reduce((v, p) => v + sx(p[axisU]), 0) / trace.length,
             cv = trace.reduce((v, p) => v + sy(p[axisV]), 0) / trace.length;
           const points = trace
@@ -830,6 +871,7 @@ export default function WorkPlaneView({
               ) : (
                 <polyline points={points} />
               )}
+              {distributionView}
               {showPanelAxes && (
                 <g
                   className="panel-plan-axes"
@@ -892,9 +934,8 @@ export default function WorkPlaneView({
             }
             pressure={
               layers.loads
-                ? (patterns.pressure.find(({ slabId }) => slabId === slab.id)
-                    ?.pz ?? 0)
-                : 0
+                ? patterns.pressure.find((a) => a.slabId === slab.id)
+                : undefined
             }
             onClick={(event) => {
               if (tool === "select") {

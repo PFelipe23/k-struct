@@ -742,3 +742,19 @@ A cobertura de 6 × 3 m tem espessura de 0,12 m, E = 30 GPa e ν = 0,20. As quat
 A solução independente de Ritz usa uma placa de Kirchhoff e 12 funções de Legendre por direção, multiplicadas por uma função que impõe deslocamento e inclinação nulos nas bordas. O OOFEM fornece U3 no nó central. Para comparar momentos no mesmo local, o ensaio tira a média dos 24 pontos de integração dos seis triângulos incidentes ao centro, sempre nos eixos geométricos fixos. Em todas as orientações, a malha 32 × 16 reduz o erro de flecha da malha 8 × 4 em mais de quatro vezes. O teste aceita até 0,9% para a flecha, 2,5% para os momentos ou 0,003 kN·m/m para momentos próximos de zero, e 0,8 N no equilíbrio vertical. [Cálculo de Ritz em Python e NumPy](../tests/fixtures/roof-ritz.py)
 
 A suíte também verifica extensão e flexão independentes em faixas inclinadas, cisalhamento e torção com sinal a 32° em um paralelogramo oblíquo, invariância da resposta isotrópica ao giro e transmissão de carga com peso próprio no encontro parede–laje. Para reproduzir, configure `OOFEM_BIN` e execute `npm test -- tests/panel-stiffness.test.ts`. Para conferir a referência, execute `python tests/fixtures/roof-ritz.py`.
+
+## KS-46 · pressão hidrostática e carga superficial variável
+
+O exemplo contém uma parede vertical de 3 m de largura e 4 m de altura, com engaste na base. A normal +3 aponta para −X. Para água com peso específico de 9,81 kN/m³, a pressão cresce de zero na superfície até 39,24 kN/m² no fundo. A força horizontal é $F=γbH^2/2$ e o momento de tombamento tem módulo $M=FH/3$. A linha de ação passa pelo meio da largura, a $H/3$ acima da base. [Modelo para abrir no KStruct](../examples/parede-pressao-hidrostatica.kstruct.json) · [Hidrostática de superfícies planas, Universidade de Manchester](https://personalpages.manchester.ac.uk/staff/gregory.f.lane-serff/teaching/PKS_hydr1_notes.pdf)
+
+| Altura molhada | Subdivisões na altura | Reação horizontal OOFEM / analítica (kN) | Momento de tombamento OOFEM / analítico (kN·m) | Altura calculada (m) |
+| ---: | ---: | ---: | ---: | ---: |
+| 4,00 m | 12 | 235,4403 / 235,4400 | 313,9200 / 313,9200 | 1,333332 |
+| 2,30 m | 1 | 77,8415 / 77,84235 | 59,6790 / 59,67914 | 0,766673 |
+| 2,30 m | 13 | 77,8422 / 77,84235 | 59,6792 / 59,67914 | 0,766669 |
+
+A segunda e a terceira linhas mantêm a altura física da parede em 4 m e zeram a carga acima de 2,30 m. O teste confere forças e momentos integrados antes da solução e os valores escritos pelo OOFEM. Para as reações admite 3 N na força, 3 N·m no tombamento e 0,05 mm na altura da linha de ação. No modelo completo, o momento aplicado em Y é −313,920 kN·m e o momento de reação em Y é +313,920 kN·m.
+
+Para conferir também o deslocamento, o ensaio de faixa usa a mesma parede em flexão com ν = 0. A solução cilíndrica de balanço dá $w(H)=-p_0H^4/(30D)$, com $D=Eh^3/12$. Para $h=0,25$ m, a flecha de referência vale −8,57211 mm. O OOFEM fornece −8,70217 mm na malha 8 × 4 e −8,58025 mm na malha 32 × 16, com diferença final de 0,095%.
+
+Uma segunda referência usa casca inclinada de área real 10 m² com +8 kN/m² no canto C e zero nos demais. Com fator de caso 1,5, a força global X vale +30 kN e a linha de ação passa a 2/3 de AB e de AD, medidos a partir de A. As placas DKT e QDKT de 4 × 3 m recebem ainda uma distribuição linear de −3 a +3 kN/m². O ensaio verifica força vertical nula e momento aplicado de −24 kN·m em Y. A suíte também verifica uma abertura, a transferência de carga para uma viga comum e a persistência do projeto. Com `OOFEM_BIN` configurado, execute `npm test -- tests/surface-pressure.test.ts`.
