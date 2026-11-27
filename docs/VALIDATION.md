@@ -799,3 +799,11 @@ OOFEM 3.0, revisão `214b161`. Os ensaios em `tests/section-cuts.test.ts` usam a
 A consulta bloqueia o total em coincidências físicas, em decomposições indeterminadas ou com parcela elementar ausente. Os testes cobrem a reabertura do corte salvo, reavaliação da geometria, tolerância em arestas internas, ponto tangente e corte vazio. O teste de interface usa uma saída de viga capturada do OOFEM.
 
 A recuperação de cortante por equilíbrio do tensor fletor também pode ser consultada no [código do DKT do OOFEM 3.0](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/dkt.C).
+
+## KS-51 · relatório de análise em PDF
+
+No desktop, abra a **Viga de referência** e analise o caso estático. A viga biapoiada de 6 m recebe −10 kN/m em Z. As reações analíticas são **30 kN** nos dois apoios, e o momento sagente em x/L = 0,5 é **45 kN·m**. Os mesmos valores aparecem nas tabelas do editor, no CSV e no texto extraído do PDF com o Poppler. A seção de execução registra o fechamento do equilíbrio, com resíduo e tolerância do leitor por componente para o pórtico.
+
+Em **Análise → Relatório PDF**, escolha o caso, as tabelas de reações, deslocamentos e esforços, a geometria e o diagrama de momento. Emita duas vezes na mesma revisão e compare o SHA-256 e as tabelas. A hora da emissão pode variar. Aumente a malha para 32 segmentos e inclua um caso pendente e uma combinação para conferir a paginação. A tabela de resultados repete o cabeçalho e a identificação de origem. Edite a intensidade da carga e abra o relatório novamente. O caso da análise anterior passa a indicar que a reanálise está pendente.
+
+Com o [OOFEM 3.0 configurado](OOFEM.md) e `pdftotext` do Poppler disponível, execute `npm test -- tests/analysis-report.test.ts`. O teste compara o texto de duas emissões, as reações, o momento, os cabeçalhos paginados, os avisos e os acentos. O ensaio `npm run test:e2e -- results.spec.ts -g KS-51` valida o fluxo do editor com IPC controlado, incluindo a seleção parcial de resultados e a ausência de gravação quando o diálogo é cancelado.

@@ -1,3 +1,5 @@
+import { AnalysisReportDialog } from "./components/AnalysisReportDialog";
+import { reportMesh, type ReportRun } from "./solver/reportRuns";
 import { SectionCutsDialog } from "./components/SectionCutsDialog";
 import { LoadPanelDialog, newLoadPanel } from "./components/LoadPanelDialog";
 import {
@@ -42,6 +44,7 @@ import {
   Library,
   GitBranch,
   History,
+  FileText,
   ListChecks,
   Table2,
   Square,
@@ -362,6 +365,10 @@ export default function App() {
     null,
   );
   const [showRunHistory, setShowRunHistory] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportRuns, setReportRuns] = useState<ReadonlyMap<string, ReportRun>>(
+    () => new Map(),
+  );
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque duas extremidades no plano de trabalho.",
   );
@@ -800,6 +807,7 @@ export default function App() {
         }
       : null;
   const replace = (project: Project) => {
+    setReportRuns(new Map());
     setResultTab("log");
     invalidateResults();
     current.current = project;
@@ -900,6 +908,7 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if (
         showCuts ||
+        showReport ||
         loadEditor ||
         memberLoadDraft ||
         launchDialog === "materials" ||
@@ -1086,6 +1095,19 @@ export default function App() {
     const id = uid();
     setActiveRun({ id, ready: false, cancelling: false });
     let executionLogReceived = false;
+    let reportRun: ReportRun = {
+      projectId: snapshot.id,
+      revision,
+      status: "failed",
+      detail: "",
+      warnings: [],
+    };
+    const rememberRun = () => {
+      if (current.current.id === snapshot.id)
+        setReportRuns((before) =>
+          new Map(before).set(requestedCase.id, reportRun),
+        );
+    };
     let historyNotice = "";
     try {
       const { execution, input } = await analyze(
@@ -1100,6 +1122,36 @@ export default function App() {
         },
       );
       setLastLog(execution.log);
+      const { summary, stdout, stderr } = execution.log;
+      reportRun = {
+        ...reportRun,
+        status: summary.status,
+        detail: summary.message,
+        summary,
+        mesh: reportMesh(input),
+        warnings: [
+          ...new Set(
+            [stdout, stderr]
+              .filter(Boolean)
+              .flatMap((text) => text.split(/\r?\n/))
+              .map((line) => line.trim())
+              .filter((line) => /^(warning|aviso|error|erro)\b/i.test(line)),
+          ),
+          ...[
+            execution.historyError,
+            execution.log.logTruncated
+              ? "Saída do motor truncada no histórico."
+              : null,
+          ].filter((v): v is string => !!v),
+        ],
+      };
+      if (execution.output === null && summary.status === "completed")
+        reportRun = {
+          ...reportRun,
+          status: "failed",
+          detail: "Execução sem saída válida.",
+        };
+      rememberRun();
       executionLogReceived = true;
       historyNotice = execution.historyError
         ? `
@@ -1135,6 +1187,8 @@ ${execution.historyError}`
       return { status: "completed" as const, result, message: historyNotice };
     } catch (error) {
       const failure = error instanceof Error ? error.message : String(error);
+      reportRun = { ...reportRun, status: "failed", detail: failure };
+      rememberRun();
       const diagnostics = diagnoseSolverFailure(failure, "", "");
       if (modelRevision.current === revision)
         setAnalysisDiagnostics(diagnostics);
@@ -1754,6 +1808,17 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
               </button>
               <small>SOLVER NATIVO</small>
             </div>
+            {desktop() && (
+              <div className="ribbon-group">
+                <button
+                  className="tool-button"
+                  onClick={() => setShowReport(true)}
+                >
+                  <FileText size={21} />
+                  <span>Relatório PDF</span>
+                </button>
+              </div>
+            )}
             {desktop() && (
               <div className="ribbon-group">
                 <button
@@ -2735,6 +2800,28 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
           }
           edit={edit}
           close={() => setShowCuts(false)}
+        />
+      )}
+      {showReport && (
+        <AnalysisReportDialog
+          project={p}
+          revision={modelRevision.current}
+          cases={caseResults}
+          runs={reportRuns}
+          initialScope={
+            combination ? "combination:" + combination.id : "case:" + caseId
+          }
+          memberId={
+            forceMemberId || selection.find((v) => v.kind === "member")?.id
+          }
+          warnings={
+            diagnosticRevision === modelRevision.current
+              ? analysisDiagnostics
+                  .filter((d) => d.stage === "modelo")
+                  .map((d) => d.message)
+              : undefined
+          }
+          close={() => setShowReport(false)}
         />
       )}
       {showRunHistory && (

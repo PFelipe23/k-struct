@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import {
   beamExample,
   parseProject,
@@ -38,7 +39,11 @@ async function bridge(
       const w = window as unknown as {
         isTauri: boolean;
         __TAURI_INTERNALS__: {
-          invoke: (cmd: string, args: InvokeArgs) => Promise<unknown>;
+          invoke: (
+            cmd: string,
+            args: InvokeArgs,
+            options?: { headers?: Record<string, string> },
+          ) => Promise<unknown>;
           transformCallback: () => number;
         };
         finishAnalysis?: (options?: {
@@ -46,6 +51,8 @@ async function bridge(
           cancelNext?: boolean;
         }) => void;
         solveQueueDeck: (deck: string) => Promise<string>;
+        reportPath?: string;
+        writeReport?: (bytes: number[], path: string) => Promise<void>;
       };
       const engine = {
         origin: "bundled",
@@ -67,7 +74,16 @@ async function bridge(
       w.isTauri = true;
       w.__TAURI_INTERNALS__ = {
         transformCallback: () => ++callbackId,
-        invoke: async (cmd, args) => {
+        invoke: async (cmd, args, options) => {
+          if (cmd === "plugin:dialog|save" && w.writeReport)
+            return w.reportPath ?? null;
+          if (cmd === "plugin:fs|write_file" && w.writeReport) {
+            await w.writeReport(
+              Array.from(args as unknown as Uint8Array),
+              decodeURIComponent(options?.headers?.path ?? ""),
+            );
+            return;
+          }
           if (cmd === "start_oofem") {
             const starts = JSON.parse(
               sessionStorage.getItem("e2e-case-starts") ?? "[]",
@@ -1766,4 +1782,89 @@ test("salva e reabre o corte físico, consulta os dois lados e invalida após ed
   await expect(dialog.getByText("Corte vazio.")).toBeVisible();
   await expect(dialog.getByText(/Analise os casos pendentes/)).toBeVisible();
   await expect(total).toHaveCount(0);
+});
+
+test("KS-51 · emite o relatório da revisão e trata o cancelamento da gravação", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  const executable = process.env.OOFEM_BIN;
+  const pdfPath = testInfo.outputPath("analise.pdf");
+  const writes: string[] = [];
+  await page.exposeFunction(
+    "writeReport",
+    async (bytes: number[], path: string) => {
+      expect(path).toBe(pdfPath);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, Buffer.from(bytes));
+      writes.push(path);
+    },
+  );
+  if (executable)
+    await page.exposeFunction("solveQueueDeck", (deck: string) =>
+      runDeck(deck, executable),
+    );
+  await bridge(page, { realSolver: !!executable });
+  await page.goto("/");
+  const p = beamExample();
+  p.analysisCases.push({
+    ...p.analysisCases[0],
+    id: "P",
+    name: "Ação pendente",
+  });
+  p.resultCombinations.push({
+    id: "C",
+    name: "Combinação pendente",
+    type: "linear",
+    factors: [{ caseId: "P", factor: 1 }],
+  });
+  await openProjectInBrowser(
+    page,
+    "relatorio.kstruct.json",
+    serializeProject(p),
+  );
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  await button("Reações").click();
+  await expect(page.getByRole("cell", { name: "30", exact: true })).toHaveCount(
+    2,
+  );
+  await button("Esforços").click();
+  await expect(page.getByRole("cell", { name: "45", exact: true })).toHaveCount(
+    1,
+  );
+  await button("Análise").click();
+  await button("Relatório PDF").click();
+  const dialog = page.getByRole("dialog", { name: "Relatório de análise" });
+  await dialog.getByRole("checkbox", { name: /Caso \[P\]/ }).check();
+  await dialog.getByRole("checkbox", { name: /Combinação \[C\]/ }).check();
+  await expect(dialog).toContainText("Pendente de análise");
+  await button("Salvar PDF").click();
+  await expect(dialog.getByRole("status")).toHaveText("Gravação cancelada.");
+  expect(writes).toHaveLength(0);
+  await page.evaluate(
+    (path) => Object.assign(window, { reportPath: path }),
+    pdfPath,
+  );
+  await button("Salvar PDF").click();
+  await expect(dialog.getByRole("status")).toHaveText("Relatório PDF salvo.", {
+    timeout: 15000,
+  });
+  expect(writes).toHaveLength(1);
+  expect((await readFile(pdfPath)).subarray(0, 5).toString()).toBe("%PDF-");
+  await testInfo.attach("relatório", {
+    path: pdfPath,
+    contentType: "application/pdf",
+  });
+  await button("Fechar relatório").click();
+  await page
+    .locator(".explorer")
+    .getByRole("button", { name: "B1", exact: true })
+    .click();
+  await page.getByLabel("qZ global").fill("-12");
+  await page.getByLabel("qZ global").press("Tab");
+  await button("Relatório PDF").click();
+  await expect(dialog).toContainText("Revisão anterior · reanálise pendente");
 });

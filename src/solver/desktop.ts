@@ -1,6 +1,6 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { parseProject, serializeProject, type Project } from "../domain/model";
 import { exportOofem } from "./oofem";
 
@@ -132,6 +132,21 @@ export async function exportFile(
   const path = await save({ title: "Exportar arquivo", defaultPath: name });
   if (!path) return false;
   await writeTextFile(path, content);
+  return true;
+}
+export async function saveAnalysisPdf(
+  projectName: string,
+  render: () => Promise<Uint8Array>,
+) {
+  const name =
+    projectName.replace(/[^\p{L}\p{N} _-]/gu, "").trim() || "projeto";
+  const path = await save({
+    title: "Salvar relatório de análise",
+    defaultPath: `${name}-analise.pdf`,
+    filters: [{ name: "Relatório PDF", extensions: ["pdf"] }],
+  });
+  if (!path) return false;
+  await writeFile(path, await render());
   return true;
 }
 export async function saveProject(p: Project): Promise<boolean> {

@@ -200,6 +200,12 @@ Para consultar um extremo nodal, selecione o envelope e abra **Reações de apoi
 
 Use `V` para selecionar, `N` para criar nó, `B` para criar barra, `L` para lançar laje, `Esc` para cancelar lançamento, `Delete` para excluir seleção, `Ctrl+Z` para desfazer, `Ctrl+Shift+Z` para refazer e `Ctrl+S` para salvar. Na elevação, scroll aproxima e afasta, botão central arrasta. A vista 3D orbita ao arrastar.
 
+### Relatório de análise em PDF
+
+No desktop, abra **Análise → Relatório PDF**. Escolha os casos ou combinações, as tabelas e as figuras. O documento registra o SHA-256 do conteúdo do modelo, as versões, a malha, as ações e fatores em SI e as execuções disponíveis na revisão. A seção de resultados identifica cada origem nas páginas da tabela. Casos pendentes, cancelados ou de revisão anterior aparecem com seu estado.
+
+Para reproduzir um relatório, guarde o projeto correspondente ao SHA-256 e reanalise os casos indicados. [Ensaio da viga de referência](docs/VALIDATION.md#ks-51--relatório-de-análise-em-pdf)
+
 ## Verificação
 
 ```sh

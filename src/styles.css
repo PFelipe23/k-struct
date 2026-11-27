@@ -2908,3 +2908,10 @@ button.primary {
 .cut-preview .cut-trace { stroke-width: 4; }
 .cut-preview text { fill: currentColor; font-size: 12px; }
 @media(max-width: 650px) { .section-cuts-dialog .cut-layout { grid-template-columns: 1fr; } }
+
+.report-dialog fieldset { margin: 0 0 10px; border: 1px solid var(--line-strong); border-radius: 5px; }
+.report-dialog legend { padding-inline: 5px; font-weight: 600; }
+.report-scopes { display: grid; gap: 6px; max-height: 210px; overflow: auto; }
+.report-scopes label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; align-items: center; }
+.report-scopes small { grid-column: 2; color: var(--muted); }
+.report-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }

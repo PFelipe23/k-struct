@@ -32,14 +32,13 @@ import {
   forceColumns,
   forceQuantity,
   getForceLabel,
-  formatResult,
-  resultFractionDigits,
+  formatResultCell,
   reportsSectionSides,
   sectionSide,
   sectionPositions,
 } from "./resultFormatting";
 
-type ResultView =
+export type ResultView =
   | { kind: "case"; definition: AnalysisCase; result: AnalysisResult | null }
   | {
       kind: "combination";
@@ -67,18 +66,24 @@ export function buildResultTable(
   forceMemberId = "",
   units: UnitPreferences = DEFAULT_UNITS,
   view?: ResultView,
+  includeIds = false,
 ) {
   const spatial = project.mode === "spatial";
   const modelMembers = new Map(project.members.map((m) => [m.id, m]));
   const nodes = new Map(project.nodes.map((node) => [node.id, node]));
   const includeMemberIds =
-    tab === "forces" && hasAmbiguousMemberNames(project.members);
+    includeIds ||
+    (tab === "forces" && hasAmbiguousMemberNames(project.members));
   const memberNames = new Map(
     project.members.map(({ id, name }) => [
       id,
       includeMemberIds ? `[${id}] ${name}` : name,
     ]),
   );
+  const nodeLabel = (id: string) => {
+    const node = nodes.get(id);
+    return node ? (includeIds ? `[${id}] ${node.name}` : node.name) : id;
+  };
   let rows: (string | number)[][] = [],
     headers: string[] = [];
   if (tab === "reactions") {
@@ -98,7 +103,7 @@ export function buildResultTable(
       headers.push(...componentHeaders("local"), "Referencial do apoio");
     rows = (result?.reactions ?? []).map((r) => {
       const row: (string | number)[] = [
-        nodes.get(r.nodeId)?.name ?? r.nodeId,
+        nodeLabel(r.nodeId),
         ...keys.map((key) => fromSI(r[key], quantity(key), units)),
       ];
       if (hasLocal) {
@@ -160,7 +165,7 @@ export function buildResultTable(
     rows = [
       ...Object.entries(result?.displacements ?? {}).map(([id, d]) => {
         const node = nodes.get(id);
-        const row: (string | number)[] = [node?.name ?? id, ...values(d)];
+        const row: (string | number)[] = [nodeLabel(id), ...values(d)];
         if (hasLocal) {
           const frame = node?.supportFrame;
           row.push(
@@ -498,13 +503,7 @@ export default function Results({
                     {r.map((v, j) => (
                       <td key={j}>
                         {typeof v === "number"
-                          ? formatResult(
-                              v,
-                              tab === "displacements" &&
-                                headers[j].startsWith("U")
-                                ? resultFractionDigits("displacement", units)
-                                : 5,
-                            )
+                          ? formatResultCell(v, tab, headers[j], units)
                           : v}
                       </td>
                     ))}

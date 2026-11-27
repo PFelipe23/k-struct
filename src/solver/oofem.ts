@@ -143,6 +143,7 @@ export interface StructuralResult {
 }
 export interface AnalysisResult extends StructuralResult {
   memberIntensities?: AnalysisInput["memberIntensities"];
+  equilibrium?: { residual: number[]; tolerance: number[]; reference: Point3 };
   caseId: string;
   solver: string;
   completedAt: string;
@@ -1041,7 +1042,7 @@ export function parseOofemOutput(
       });
     } else reactions.push(result);
   }
-  checkEquilibrium(
+  const equilibrium = checkEquilibrium(
     input.project,
     input.caseId,
     reactions,
@@ -1058,6 +1059,7 @@ export function parseOofemOutput(
     reactions,
     members,
     memberIntensities: input.memberIntensities,
+    equilibrium,
     ...(floor ? { floor, slab: floor.panels[0] } : {}),
   };
 }
@@ -1198,13 +1200,18 @@ export function checkEquilibrium(
       );
     }
   }
+  const limits = magnitudes.map((value, i) => 1e-3 * value + rounding[i]);
   if (
     sum.some(
-      (v, i) =>
-        !Number.isFinite(v) || Math.abs(v) > 1e-3 * magnitudes[i] + rounding[i],
+      (value, i) => !Number.isFinite(value) || Math.abs(value) > limits[i],
     )
   )
     throw new Error(
       "A saída não fechou o equilíbrio global de forças e momentos. Resultados rejeitados.",
     );
+  return {
+    residual: sum,
+    tolerance: limits,
+    reference: { x: reference.x, y: reference.y, z: reference.z },
+  };
 }

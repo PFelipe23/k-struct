@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Janela local do KStruct. Arquivos são autorizados pelas caixas de abrir/salvar.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "fs:allow-read-text-file", "fs:allow-write-text-file"]
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "fs:allow-read-text-file", "fs:allow-write-text-file", "fs:allow-write-file"]
 }

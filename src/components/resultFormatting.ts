@@ -107,6 +107,20 @@ export function formatResultQuantity(
   );
 }
 
+export function formatResultCell(
+  value: number,
+  table: string,
+  header: string,
+  units: UnitPreferences,
+) {
+  return formatResult(
+    value,
+    table === "displacements" && header.startsWith("U")
+      ? resultFractionDigits("displacement", units)
+      : 5,
+  );
+}
+
 export function encodeCsv(rows: (string | number)[][]): string {
   return (
     "\uFEFF" +
