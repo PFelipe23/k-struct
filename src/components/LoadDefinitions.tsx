@@ -461,6 +461,8 @@ export default function LoadDefinitions({
               {pattern.distributed?.length ?? 0} por trecho ·{" "}
               {pattern.thermal?.length ?? 0} ações térmicas ·{" "}
               {pattern.prescribed?.length ?? 0} movimentos prescritos
+              {!!pattern.tributaryLoads?.length &&
+                ` · ${pattern.tributaryLoads.length} em painéis de carga`}
               {project.slabs.length > 0 &&
                 ` · ${pattern.pressure.length} pressões em laje`}
               {project.surfacePanels?.length

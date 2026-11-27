@@ -758,3 +758,22 @@ A segunda e a terceira linhas mantêm a altura física da parede em 4 m e zeram 
 Para conferir também o deslocamento, o ensaio de faixa usa a mesma parede em flexão com ν = 0. A solução cilíndrica de balanço dá $w(H)=-p_0H^4/(30D)$, com $D=Eh^3/12$. Para $h=0,25$ m, a flecha de referência vale −8,57211 mm. O OOFEM fornece −8,70217 mm na malha 8 × 4 e −8,58025 mm na malha 32 × 16, com diferença final de 0,095%.
 
 Uma segunda referência usa casca inclinada de área real 10 m² com +8 kN/m² no canto C e zero nos demais. Com fator de caso 1,5, a força global X vale +30 kN e a linha de ação passa a 2/3 de AB e de AD, medidos a partir de A. As placas DKT e QDKT de 4 × 3 m recebem ainda uma distribuição linear de −3 a +3 kN/m². O ensaio verifica força vertical nula e momento aplicado de −24 kN·m em Y. A suíte também verifica uma abertura, a transferência de carga para uma viga comum e a persistência do projeto. Com `OOFEM_BIN` configurado, execute `npm test -- tests/surface-pressure.test.ts`.
+
+## KS-47 · distribuição de cargas de painel às vigas
+
+O pórtico de referência tem quatro pilares engastados na base e vigas de contorno de 6 × 4 m, na cota +3 m. Um painel aplica −5 kN/m² em Z no padrão G. A área é 24 m² e a força de −120 kN passa pelo centro, em (3, 2, 3) m. Em relação à origem do modelo, os momentos da força são −240 kN·m em X e +360 kN·m em Y. O OOFEM calcula +30 kN de reação vertical em cada base nos três modos. [Abrir projeto](../examples/portico-painel-de-carga.kstruct.json)
+
+| Modo | Vigas de 6 m (AB e CD), por viga | Vigas de 4 m (BC e DA), por viga |
+| --- | --- | --- |
+| Vão AB | 0 | 12 m² e −60 kN, carga constante de −15 kN/m |
+| Vão AD | 12 m² e −60 kN, carga constante de −10 kN/m | 0 |
+| Duas direções | 8 m² e −40 kN, trapézio com patamar de −10 kN/m entre 2 e 4 m | 4 m² e −20 kN, triângulo com pico de −10 kN/m no meio |
+
+Um ensaio separado engasta diretamente as quatro extremidades do perímetro. Para uma viga biengastada sob carregamento simétrico de módulo $w(s)$, o módulo do momento de engaste é $M_e=\int_0^L w(s)s(L-s)^2/L^2\,ds$. O momento positivo no meio do vão é $-M_e + RL/2 - \int_0^{L/2} w(s)(L/2-s)\,ds$, com $R$ igual à metade da carga da viga. Esses valores independem da rigidez dos pilares do exemplo.
+
+| Borda, duas direções | Cortante na extremidade (kN, módulo) | Momento de engaste (kN·m, módulo) | Momento no meio (kN·m, módulo) |
+| --- | ---: | ---: | ---: |
+| 6 m | 20 | 24,4444 | 13,8889 |
+| 4 m | 10 | 8,3333 | 5,0000 |
+
+O teste confronta esses esforços com a saída do OOFEM para 2, 8 e 16 subdivisões por barra, com tolerâncias de 1 N e 1 N·m. Confira também o caso de dois painéis vizinhos, no qual a viga comum recebe 40 kN, e a combinação de ações globais em X e Z com carga manual e fator negativo. Execute `OOFEM_BIN=/caminho/para/oofem npm test -- tests/tributary-loads.test.ts`. O teste de interface em `tests/e2e/slab.spec.ts` percorre o lançamento, a prévia por viga, o histórico, a reabertura, a exportação e a análise.

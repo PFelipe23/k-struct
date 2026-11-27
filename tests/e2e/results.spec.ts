@@ -286,7 +286,7 @@ test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lot
 
   const positions = () =>
     page.evaluate(() =>
-      JSON.parse(localStorage.getItem("kstruct.draft.v30")!).nodes.map(
+      JSON.parse(localStorage.getItem("kstruct.draft.v31")!).nodes.map(
         (n: { id: string; x: number }) => [n.id, n.x],
       ),
     );
@@ -900,19 +900,9 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
   await picker.selectOption(envelopeOption);
   await expect(plot).toHaveCount(1);
   await expect(page.getByLabel("Visualização dos resultados")).toHaveValue("m");
-  const middle = await plot
-    .locator(".envelope-max-line polyline")
-    .evaluate((element) => {
-      const line = element as SVGPolylineElement;
-      const points = Array.from(line.points);
-      const midX = (points[0].x + points.at(-1)!.x) / 2;
-      const middle = points.reduce((a, b) =>
-        Math.abs(a.x - midX) < Math.abs(b.x - midX) ? a : b,
-      );
-      const { x, y } = middle.matrixTransform(line.getScreenCTM()!);
-      return { x, y };
-    });
-  await page.mouse.click(middle.x, middle.y);
+  // Nesta viga simétrica, o centro da faixa corresponde a x/L = 0,5.
+  // O clique pelo elemento acompanha a vista quando a tabela muda de altura.
+  await plot.locator(".envelope-fill").click();
   await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
   const maximum = plot.locator(".envelope-max-line polyline");
   const minimum = plot.locator(".envelope-min-line polyline");
@@ -1294,7 +1284,7 @@ test("gera ELU/ELS, revisa exclusões e edições, salva e usa a combinação na
   await page.getByRole("checkbox", { name: "ELU · Q1", exact: true }).check();
   await button("Aplicar definições").click();
   const stored = () =>
-    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v30")!));
+    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v31")!));
   await expect
     .poll(async () => (await stored()).resultCombinations.length)
     .toBe(4);

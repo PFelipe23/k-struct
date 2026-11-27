@@ -814,11 +814,11 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem("kstruct.draft.v30") ?? "{}")
+          JSON.parse(localStorage.getItem("kstruct.draft.v31") ?? "{}")
             .schemaVersion,
       ),
     )
-    .toBe(30);
+    .toBe(31);
   expect(
     await page.evaluate(
       () =>
@@ -1115,5 +1115,111 @@ test("KS-46 · configura as quatro pressões de uma laje em planta e recupera a 
     .click();
   await expect(page.getByLabel("Pressão pZ", { exact: true })).toHaveValue(
     "-5",
+  );
+});
+
+test("KS-47 · lança o painel de carga, confere as parcelas, reabre e analisa o pórtico", async ({
+  page,
+}) => {
+  test.setTimeout(75_000);
+  if (executable) await plateBridge(page);
+  await page.goto("/");
+  const p = parseProject(
+    await readFile("examples/portico-painel-de-carga.kstruct.json", "utf8"),
+  );
+  delete p.loadPanels;
+  delete p.loadPatterns[0].tributaryLoads;
+  await openProjectInBrowser(page, "portico.kstruct.json", serializeProject(p));
+  await page.getByLabel("Pavimento ativo").selectOption("level1");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await button("Novo painel de carga").click();
+  const dialog = page.getByRole("dialog", { name: "Painel de carga" });
+  for (const corner of ["A", "B", "D"])
+    await dialog
+      .getByLabel("Nó " + corner, { exact: true })
+      .selectOption(corner);
+  const distribution = dialog.getByLabel("Distribuição às vigas");
+  await distribution.selectOption("twoWay");
+  await dialog.getByLabel("Intensidade (kN/m²)").fill("-5,0");
+  const table = dialog.getByRole("table", { name: "Parcelas por viga" });
+  const cells = (name: string) =>
+    table
+      .getByRole("row")
+      .filter({ has: page.getByRole("cell", { name, exact: true }) })
+      .getByRole("cell");
+  await expect(cells("V1").nth(2)).toHaveText("8");
+  await expect(cells("V1").nth(3)).toHaveText(/-40(?:[.,]0+)?$/);
+  await expect(cells("V2").nth(3)).toHaveText(/-20(?:[.,]0+)?$/);
+  await expect(
+    dialog.getByRole("region", { name: "Distribuição do painel" }),
+  ).toContainText(/Força em Z -120/);
+  await dialog.getByText("Cargas lineares por trecho").click();
+  await expect(
+    dialog
+      .getByRole("table", { name: "Cargas lineares nas vigas" })
+      .getByRole("row"),
+  ).toHaveCount(11);
+  const apply = dialog.getByRole("button", { name: "Aplicar painel de carga" });
+  await apply.click();
+  const edit = button("PC1 · Painel de carga");
+  await expect(edit).toBeVisible();
+  const drawing = page.getByRole("application", {
+    name: "Área de lançamento XY",
+  });
+  const region = drawing.getByRole("img", {
+    name: "Áreas de influência de PC1",
+  });
+  await expect(region.locator("polygon")).toHaveCount(4);
+  await button("Novo painel de carga").click();
+  await expect(dialog.getByRole("alert")).toContainText("se sobrepõe");
+  await expect(apply).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await edit.click();
+  await distribution.selectOption("spanAD");
+  await expect(table.getByRole("row")).toHaveCount(3);
+  await expect(cells("V1").nth(3)).toHaveText(/-60(?:[.,]0+)?$/);
+  await apply.click();
+  await expect(region.locator("polygon")).toHaveCount(2);
+  await button("Desfazer").click();
+  await expect(region.locator("polygon")).toHaveCount(4);
+  await button("Refazer").click();
+  await expect(region.locator("polygon")).toHaveCount(2);
+  const download = page.waitForEvent("download");
+  await button("Salvar projeto").click();
+  const saved = await readFile((await (await download).path())!, "utf8");
+  const model = parseProject(saved);
+  expect(model.loadPanels).toHaveLength(1);
+  expect(model.loadPanels![0].distribution).toBe("spanAD");
+  expect(model.loadPatterns[0].tributaryLoads).toEqual([
+    { panelId: model.loadPanels![0].id, axis: "Z", pressure: -5000 },
+  ]);
+  expect(model.loadPatterns[0].distributed ?? []).toEqual([]);
+  await openProjectInBrowser(page, "portico-com-painel.kstruct.json", saved);
+  await edit.click();
+  await expect(distribution).toHaveValue("spanAD");
+  await expect(dialog.getByLabel("Intensidade (kN/m²)")).toHaveValue("-5");
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await button("Análise").click();
+  const output = page.waitForEvent("download");
+  await button("Entrada OOFEM").click();
+  expect(await readFile((await (await output).path())!, "utf8")).toBe(
+    exportOofem(model, "EL").deck,
+  );
+  if (!executable) return;
+  await page.evaluate(() => sessionStorage.setItem("slab-ipc", "enabled"));
+  await page.reload();
+  await button("Analisar").click();
+  await page.waitForFunction(
+    () => !!(window as unknown as SlabTestWindow).finishSlabAnalysis,
+  );
+  await page.evaluate(() =>
+    (window as unknown as SlabTestWindow).finishSlabAnalysis!(),
+  );
+  await expect(page.getByRole("status")).toContainText(
+    "Equilíbrio global verificado",
+  );
+  await expect(page.getByLabel("Visualização dos resultados")).toHaveValue(
+    "deformed",
   );
 });

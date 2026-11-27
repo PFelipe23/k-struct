@@ -1,3 +1,5 @@
+import { LoadPanelFootprint } from "./LoadPanelFootprint";
+import { distributeLoadPanel } from "../domain/loadPanel";
 import { PressureProjection } from "./PressureProjection";
 import {
   panelPressureVertices,
@@ -111,6 +113,7 @@ interface Props {
   slabMap: SlabMap | null;
   floorMaps?: SlabMap[];
   onPanel?: (id: string) => void;
+  onLoadPanel?: (id: string) => void;
   onJoint?: () => void;
   patternId: string;
   resultPatterns: ReadonlySet<string>;
@@ -160,6 +163,7 @@ export default function WorkPlaneView({
   onPoint,
   onSelect,
   onPanel,
+  onLoadPanel,
   onJoint,
 }: Props & LayerControls) {
   const { units } = useUnits();
@@ -795,6 +799,42 @@ export default function WorkPlaneView({
             strokeDasharray="8 3"
           />
         )}
+        {layers.loads &&
+          plane.kind === "XY" &&
+          project.loadPanels?.map((panel) => {
+            const data = distributeLoadPanel(project, panel);
+            if (!onPlane(data.rect.center, plane)) return null;
+            return (
+              <g
+                key={panel.id}
+                className="load-panel-plan"
+                pointerEvents={tool === "select" ? "auto" : "none"}
+                onClick={(e) => {
+                  if (tool === "select") {
+                    e.stopPropagation();
+                    onLoadPanel?.(panel.id);
+                  }
+                }}
+              >
+                <LoadPanelFootprint
+                  name={panel.name}
+                  data={data}
+                  project={(pt) => [sx(pt.x), sy(pt.y)]}
+                  labels={labels}
+                />
+                {labels && (
+                  <text
+                    x={sx(data.rect.center.x)}
+                    y={sy(data.rect.center.y) - 5}
+                    textAnchor="middle"
+                    className="node-label"
+                  >
+                    {panel.name}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         {project.surfacePanels?.map((panel) => {
           const { corners, materialAxes } = panelGeometry(panel),
             pts = Object.values(corners);
