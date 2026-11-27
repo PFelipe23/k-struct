@@ -259,6 +259,31 @@ describe("KS-47 · transferência de carga do painel às vigas", () => {
     Object.assign(p.loadPanels![1], { a: "A", b: "B", d: "D" });
     expect(loadPanelErrors(p).join(" ")).toMatch(/se sobrepõe ao painel/);
   });
+  it("distingue a borda comum de uma sobreposição milimétrica longe da origem", () => {
+    const p = fixedPerimeter();
+    adjacentPanel(p);
+    const cos = Math.cos(0.1),
+      sin = Math.sin(0.1);
+    for (const node of p.nodes) {
+      const { x, y } = node;
+      node.x = 500_000 + x * cos - y * sin;
+      node.y = 7_000_000 + x * sin + y * cos;
+    }
+    expect(loadPanelErrors(p)).toEqual([]);
+
+    // Avança a borda de PC2 um milímetro para dentro de PC1.
+    const second = p.loadPanels![1];
+    for (const corner of ["a", "d"] as const) {
+      const n = p.nodes.find(({ id }) => id === second[corner])!;
+      second[corner] = extraNode(
+        p,
+        n.id + "2",
+        n.x - 0.001 * cos,
+        n.y - 0.001 * sin,
+      ).id;
+    }
+    expect(loadPanelErrors(p).join(" ")).toMatch(/se sobrepõe ao painel/);
+  });
   it("migra a v30, rejeita ações órfãs e mantém uma única fonte de carga no arquivo editável", () => {
     const p = frame(),
       saved = serializeProject(p);

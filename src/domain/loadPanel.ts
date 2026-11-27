@@ -77,11 +77,20 @@ type Rectangle = ReturnType<typeof loadPanelGeometry>;
 // Clip each material ring in the rectangle's local plane. Subtracting the
 // holes retains cutouts, concave contours and the zero-area shared edges.
 function overlap(rect: Rectangle, rings: XY[][]) {
+  // A shared edge can acquire a small offset when world coordinates are
+  // projected onto the panel axes. Use the same tolerance as beam matching.
+  function snapToEdge(value: number, span: number) {
+    const edge = value < span / 2 ? 0 : span;
+    return Math.abs(value - edge) <= tolerance ? edge : value;
+  }
   function clippedArea(ring: XY[]) {
     let poly = ring.map((v) => {
       const x = v.x - rect.corners[0].x,
         y = v.y - rect.corners[0].y;
-      return { x: x * rect.u.x + y * rect.u.y, y: x * rect.v.x + y * rect.v.y };
+      return {
+        x: snapToEdge(x * rect.u.x + y * rect.u.y, rect.width),
+        y: snapToEdge(x * rect.v.x + y * rect.v.y, rect.height),
+      };
     });
     for (const [axis, sign, limit] of [
       ["x", 1, 0],

@@ -900,19 +900,9 @@ test("envelope consulta os dois extremos por estação e exporta as combinaçõe
   await picker.selectOption(envelopeOption);
   await expect(plot).toHaveCount(1);
   await expect(page.getByLabel("Visualização dos resultados")).toHaveValue("m");
-  const middle = await plot
-    .locator(".envelope-max-line polyline")
-    .evaluate((element) => {
-      const line = element as SVGPolylineElement;
-      const points = Array.from(line.points);
-      const midX = (points[0].x + points.at(-1)!.x) / 2;
-      const middle = points.reduce((a, b) =>
-        Math.abs(a.x - midX) < Math.abs(b.x - midX) ? a : b,
-      );
-      const { x, y } = middle.matrixTransform(line.getScreenCTM()!);
-      return { x, y };
-    });
-  await page.mouse.click(middle.x, middle.y);
+  // Nesta viga simétrica, o centro da faixa corresponde a x/L = 0,5.
+  // O clique pelo elemento acompanha a vista quando a tabela muda de altura.
+  await plot.locator(".envelope-fill").click();
   await expect(region.getByLabel("Estação x/L")).toHaveValue("4");
   const maximum = plot.locator(".envelope-max-line polyline");
   const minimum = plot.locator(".envelope-min-line polyline");
