@@ -63,6 +63,24 @@ function polynomial(
 const at = ([a, b, c, d]: Polynomial, s: number) =>
   a + s * (b + s * (c + s * d));
 
+export function sectionForcesBetween(
+  a: Sample,
+  b: Sample,
+  load: Load,
+  span: number,
+  t: number,
+  planar: boolean,
+): MemberForces {
+  const h = (b.t - a.t) * span,
+    s = (t - a.t) / (b.t - a.t);
+  return Object.fromEntries(
+    memberForceComponents.map((key) => [
+      key,
+      at(polynomial(key, a, b, load, h, planar), s),
+    ]),
+  ) as MemberForces;
+}
+
 function interiorRoots([, linear, quadratic, cubic]: Polynomial) {
   const scale = Math.max(
     Math.abs(linear),

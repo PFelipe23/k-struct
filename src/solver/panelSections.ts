@@ -116,7 +116,7 @@ export function panelSectionRecords(mesh: PanelAssembly, base: Material[]) {
     });
     return { parts, modified };
   });
-  const sources: { triangle: number; kind: Kind }[] = [];
+  const sources: { triangle: number; kind: Kind; cyclic: boolean }[] = [];
   for (const [index, e] of mesh.elements.entries()) {
     const { parts, modified } = definitions[e.panel];
     // Each cell is ABC + ACD. The cyclic CDA ordering keeps the same
@@ -124,7 +124,11 @@ export function panelSectionRecords(mesh: PanelAssembly, base: Material[]) {
     const [a, b, c] = e.nodes;
     const ids = modified && index % 2 === 1 ? [b, c, a] : e.nodes;
     for (const { id, kind } of parts) {
-      const n = sources.push({ triangle: index, kind });
+      const n = sources.push({
+        triangle: index,
+        kind,
+        cyclic: ids !== e.nodes,
+      });
       elements.push(
         `${elementNames[kind]} ${n} nodes 3 ${ids.join(" ")} crossSect ${id} nip 4`,
       );

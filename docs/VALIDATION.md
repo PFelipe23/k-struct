@@ -777,3 +777,25 @@ Um ensaio separado engasta diretamente as quatro extremidades do perímetro. Par
 | 4 m | 10 | 8,3333 | 5,0000 |
 
 O teste confronta esses esforços com a saída do OOFEM para 2, 8 e 16 subdivisões por barra, com tolerâncias de 1 N e 1 N·m. Confira também o caso de dois painéis vizinhos, no qual a viga comum recebe 40 kN, e a combinação de ações globais em X e Z com carga manual e fator negativo. Execute `OOFEM_BIN=/caminho/para/oofem npm test -- tests/tributary-loads.test.ts`. O teste de interface em `tests/e2e/slab.spec.ts` percorre o lançamento, a prévia por viga, o histórico, a reabertura, a exportação e a análise.
+
+## KS-48 — Cortes da estrutura
+
+OOFEM 3.0, revisão `214b161`. Os ensaios em `tests/section-cuts.test.ts` usam a saída do processo nativo. Forças e momentos abaixo atuam sobre o lado negativo do plano. A referência independente soma as ações do corpo livre. As grandezas internas do aplicativo estão em N e m.
+
+| Modelo e malha | Grandeza | Corte | Corpo livre |
+| --- | --- | ---: | ---: |
+| Balanço XZ e XYZ, 3 e 8 elementos | Fz / My a 1 m | −10,000 kN / +30,000 kN·m | −10,000 / +30,000 |
+| Parede, 8 × 4 células | Fx / Fz / My | +1,19999 kN / +120,000 kN / +2,49999 kN·m | +1,200 / +120,000 / +2,508 |
+| Parede, 16 × 8 células | Fx / Fz / My | +1,20001 kN / +120,000 kN / +2,52739 kN·m | +1,200 / +120,000 / +2,508 |
+| Pavimento, 12 × 12 por laje | Fz / Mx / My | −9,47114 kN / +12,19675 kN·m / −10,18556 kN·m | −9,47108 / +12,31082 / −10,18360 |
+| Pavimento, 20 × 20 por laje | Fz / Mx / My | −9,15461 kN / +12,24300 kN·m / −8,91220 kN·m | −9,15469 / +12,29695 / −8,91167 |
+
+**Balanço.** Comprimento de 4 m, engaste em X = 0 e força de −10 kN em Z na ponta. O polo fica na interseção. O ensaio inverte o lado e a conectividade i/j, acrescenta uma força de −3 kN exatamente no plano e verifica um corte dentro de uma zona rígida carregada. Tolerâncias do balanço simples de 0,1 N e 0,4 N·m. Uma ação no plano pertence ao corpo retido em cada consulta.
+
+**Parede.** Casca vertical de 3 × 1,2 m, engastada na base, com tração na borda livre de +100 kN/m no eixo longitudinal e −1 kN/m na normal local. Corte a 0,91 m da base e O no meio da largura. O braço livre mede 2,09 m. Tolerâncias de 0,12 N para as forças e 2,5% do momento de referência. A integração discreta do momento de casca varia com a malha.
+
+**Pavimento.** Exemplo `duas-lajes-viga-comum.kstruct.json`, ligação elástica de 10⁶ N·m/(rad·m), plano Y = 0,81 m e O = (4, 0,81, 3) m. Na malha 12 × 12, as parcelas de Fz em kN são −4,39220 na viga, −5,08593 em L1 e +0,00699 em L2. O corpo livre independente inclui as reações exteriores, o apoio da viga e a pressão de −5 kN/m² sobre a faixa retida de L1. As ações da interface se cancelam nessa referência. Tolerâncias de 1 N em Fz, 5 N·m em My e 2,5% em Mx. O ensaio verifica também a inversão do lado. Em ambas as malhas da parede e do pavimento, a mudança do polo satisfaz M(O′) = M(O) + (O − O′) × F dentro de 10⁻⁷ N·m.
+
+A consulta bloqueia o total em coincidências físicas, em decomposições indeterminadas ou com parcela elementar ausente. Os testes cobrem a reabertura do corte salvo, reavaliação da geometria, tolerância em arestas internas, ponto tangente e corte vazio. O teste de interface usa uma saída de viga capturada do OOFEM.
+
+A recuperação de cortante por equilíbrio do tensor fletor também pode ser consultada no [código do DKT do OOFEM 3.0](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/dkt.C).
