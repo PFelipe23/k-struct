@@ -814,7 +814,7 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem("kstruct.draft.v32") ?? "{}")
+          JSON.parse(localStorage.getItem("kstruct.draft.v33") ?? "{}")
             .schemaVersion,
       ),
     )
