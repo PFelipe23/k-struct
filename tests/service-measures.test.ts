@@ -5,7 +5,6 @@ import {
   free,
   parseProject,
   serializeProject,
-  type Project,
   type ServiceMeasure,
 } from "../src/domain/model";
 import { reverseMember } from "../src/domain/editing";
