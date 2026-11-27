@@ -818,7 +818,7 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
             .schemaVersion,
       ),
     )
-    .toBe(32);
+    .toBe(createProject().schemaVersion);
   expect(
     await page.evaluate(
       () =>
