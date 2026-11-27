@@ -2874,3 +2874,19 @@ button.primary {
 .pressure-projection { pointer-events: none; color: var(--geometry-load); }
 .pressure-projection :is(path, circle) { stroke: currentColor; stroke-width: 1.6px; }
 .pressure-projection path, .pressure-projection circle:not([fill]) { fill: none; }
+
+.load-panel-dialog { width: min(43rem, 94vw); max-height: 90vh; overflow: auto; }
+.load-panel-dialog form, .load-panel-dialog fieldset { display: grid; gap: .55rem; }
+.load-panel-dialog fieldset { border: 1px solid var(--line); min-width: 0; }
+.load-panel-dialog p { margin: .25rem 0; }
+.load-panel-dialog table { font-variant-numeric: tabular-nums; border-collapse: collapse; width: 100%; }
+.load-panel-dialog :is(th,td) { text-align: right; padding: .25rem .4rem; border-bottom: 1px solid var(--line); }
+.load-panel-dialog :is(th,td):first-child { text-align: left; }
+.load-panel-dialog [role="alert"] { color: var(--danger); }
+.load-panel-dialog section { overflow-x: auto; }
+.load-panel-preview { display: block; width: 100%; height: 142px; }
+.load-panel-preview text, .load-panel-footprint text { font: 11px sans-serif; fill: var(--text); }
+.load-panel-footprint polygon { fill: var(--geometry-load); fill-opacity: .12; stroke: var(--geometry-load); stroke-width: 1; stroke-dasharray: 4 3; }
+.load-panel-footprint :is([data-receiver="BC"],[data-receiver="DA"]) polygon { fill-opacity: .23; }
+.load-panel-footprint text { text-anchor: middle; pointer-events: none; }
+.load-panel-plan { cursor: pointer; }

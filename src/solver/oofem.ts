@@ -1,4 +1,9 @@
 import {
+  loadPanelGeometry,
+  tributaryForce,
+  tributaryProfiles,
+} from "../domain/loadPanel";
+import {
   exportPanels,
   readPanels,
   type PanelInput,
@@ -205,7 +210,8 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
   const nodeNumber = (id: string) => modelNodes.get(id)!.number;
   const axes = new Map<string, ReturnType<typeof beamAxes>>();
   const memberElements = new Map<string, number[]>();
-  const { stations: layout, rigidLinks } = beamMeshLayout(p);
+  const transferred = tributaryProfiles(p);
+  const { stations: layout, rigidLinks } = beamMeshLayout(p, transferred);
   const lines = new Map<string, ReturnType<typeof memberAxis>>();
   const explicitDofs = new Set<number>();
   const pointTargets = new Map<MemberPointLoad, number>();
@@ -459,7 +465,10 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
         ),
       );
     }
-    for (const load of pat.distributed ?? []) {
+    for (const load of [
+      ...(pat.distributed ?? []),
+      ...(transferred.get(pat.id) ?? []),
+    ]) {
       if (!factor.factor) continue;
       const m = membersById.get(load.memberId)!,
         line = lines.get(m.id)!,
@@ -1149,6 +1158,15 @@ export function checkEquilibrium(
           line.end,
           pointFraction(load.position, line.span),
         ),
+      );
+    }
+    for (const load of pat.tributaryLoads ?? []) {
+      const panel = p.loadPanels!.find((v) => v.id === load.panelId)!;
+      const rect = loadPanelGeometry(p, panel);
+      accumulate(
+        tributaryForce(load.axis, load.pressure * rect.area * f.factor),
+        origin,
+        rect.center,
       );
     }
     for (const load of pat.distributed ?? []) {

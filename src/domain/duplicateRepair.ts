@@ -565,6 +565,9 @@ export function planRepair(
       strip.topId = changedNode.get(strip.topId) ?? strip.topId;
     }
   remapDiaphragmNodes(p, nodeRefs);
+  for (const panel of p.loadPanels ?? [])
+    for (const k of ["a", "b", "d"] as const)
+      panel[k] = nodeRefs.get(panel[k])?.[0] ?? panel[k];
   remapGroups(p, "node", nodeRefs);
   remapGroups(p, "member", memberRefs);
   const changes = changedNode.size + changedMember.size + removed.size;

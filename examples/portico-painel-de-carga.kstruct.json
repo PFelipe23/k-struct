@@ -1,0 +1,315 @@
+{
+  "format": "kstruct",
+  "schemaVersion": 31,
+  "id": "ks47-portico-6x4",
+  "name": "Pórtico com painel de carga de 6 × 4 m",
+  "units": "N-m-kg-s",
+  "nodes": [
+    {
+      "id": "A0",
+      "name": "A0",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "restraints": {
+        "ux": true,
+        "uy": true,
+        "uz": true,
+        "rx": true,
+        "ry": true,
+        "rz": true
+      }
+    },
+    {
+      "id": "B0",
+      "name": "B0",
+      "x": 6,
+      "y": 0,
+      "z": 0,
+      "restraints": {
+        "ux": true,
+        "uy": true,
+        "uz": true,
+        "rx": true,
+        "ry": true,
+        "rz": true
+      }
+    },
+    {
+      "id": "C0",
+      "name": "C0",
+      "x": 6,
+      "y": 4,
+      "z": 0,
+      "restraints": {
+        "ux": true,
+        "uy": true,
+        "uz": true,
+        "rx": true,
+        "ry": true,
+        "rz": true
+      }
+    },
+    {
+      "id": "D0",
+      "name": "D0",
+      "x": 0,
+      "y": 4,
+      "z": 0,
+      "restraints": {
+        "ux": true,
+        "uy": true,
+        "uz": true,
+        "rx": true,
+        "ry": true,
+        "rz": true
+      }
+    },
+    {
+      "id": "A",
+      "name": "A",
+      "x": 0,
+      "y": 0,
+      "z": 3,
+      "restraints": {
+        "ux": false,
+        "uy": false,
+        "uz": false,
+        "rx": false,
+        "ry": false,
+        "rz": false
+      }
+    },
+    {
+      "id": "B",
+      "name": "B",
+      "x": 6,
+      "y": 0,
+      "z": 3,
+      "restraints": {
+        "ux": false,
+        "uy": false,
+        "uz": false,
+        "rx": false,
+        "ry": false,
+        "rz": false
+      }
+    },
+    {
+      "id": "C",
+      "name": "C",
+      "x": 6,
+      "y": 4,
+      "z": 3,
+      "restraints": {
+        "ux": false,
+        "uy": false,
+        "uz": false,
+        "rx": false,
+        "ry": false,
+        "rz": false
+      }
+    },
+    {
+      "id": "D",
+      "name": "D",
+      "x": 0,
+      "y": 4,
+      "z": 3,
+      "restraints": {
+        "ux": false,
+        "uy": false,
+        "uz": false,
+        "rx": false,
+        "ry": false,
+        "rz": false
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": "V1",
+      "name": "V1",
+      "start": "A",
+      "end": "B",
+      "sectionId": "viga",
+      "roll": 0
+    },
+    {
+      "id": "V2",
+      "name": "V2",
+      "start": "B",
+      "end": "C",
+      "sectionId": "viga",
+      "roll": 0
+    },
+    {
+      "id": "V3",
+      "name": "V3",
+      "start": "C",
+      "end": "D",
+      "sectionId": "viga",
+      "roll": 0
+    },
+    {
+      "id": "V4",
+      "name": "V4",
+      "start": "D",
+      "end": "A",
+      "sectionId": "viga",
+      "roll": 0
+    },
+    {
+      "id": "P1",
+      "name": "P1",
+      "start": "A0",
+      "end": "A",
+      "sectionId": "pilar",
+      "roll": 0
+    },
+    {
+      "id": "P2",
+      "name": "P2",
+      "start": "B0",
+      "end": "B",
+      "sectionId": "pilar",
+      "roll": 0
+    },
+    {
+      "id": "P3",
+      "name": "P3",
+      "start": "C0",
+      "end": "C",
+      "sectionId": "pilar",
+      "roll": 0
+    },
+    {
+      "id": "P4",
+      "name": "P4",
+      "start": "D0",
+      "end": "D",
+      "sectionId": "pilar",
+      "roll": 0
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat",
+      "name": "Material de referência",
+      "E": 30000000000,
+      "nu": 0.2,
+      "density": 2500,
+      "alpha": 0
+    }
+  ],
+  "sections": [
+    {
+      "shape": "rectangle",
+      "width": 0.2,
+      "height": 0.4,
+      "id": "viga",
+      "name": "Viga 20 × 40",
+      "materialId": "mat"
+    },
+    {
+      "shape": "rectangle",
+      "width": 0.3,
+      "height": 0.3,
+      "id": "pilar",
+      "name": "Pilar 30 × 30",
+      "materialId": "mat"
+    }
+  ],
+  "loadPatterns": [
+    {
+      "id": "G",
+      "name": "Área · carga vertical",
+      "nodal": [],
+      "uniform": [],
+      "pressure": [],
+      "selfWeight": {
+        "enabled": false,
+        "direction": "-Z",
+        "gravity": 9.80665,
+        "multiplier": 1
+      },
+      "tributaryLoads": [
+        {
+          "panelId": "PC1",
+          "axis": "Z",
+          "pressure": -5000
+        }
+      ]
+    }
+  ],
+  "analysisCases": [
+    {
+      "id": "EL",
+      "name": "EL · Estática linear",
+      "type": "linear-static",
+      "factors": [
+        {
+          "patternId": "G",
+          "factor": 1
+        }
+      ]
+    }
+  ],
+  "mesh": {
+    "segmentsPerMember": 8
+  },
+  "mode": "spatial",
+  "guides": {
+    "x": [
+      {
+        "id": "X1",
+        "name": "1",
+        "position": 0
+      },
+      {
+        "id": "X2",
+        "name": "2",
+        "position": 6
+      }
+    ],
+    "y": [
+      {
+        "id": "YA",
+        "name": "A",
+        "position": 0
+      },
+      {
+        "id": "YB",
+        "name": "B",
+        "position": 4
+      }
+    ],
+    "z": [
+      {
+        "id": "base",
+        "name": "Base",
+        "position": 0
+      },
+      {
+        "id": "level1",
+        "name": "Pav. 1",
+        "position": 3
+      }
+    ]
+  },
+  "resultCombinations": [],
+  "resultEnvelopes": [],
+  "slabs": [],
+  "selectionGroups": [],
+  "meshConnections": [],
+  "loadPanels": [
+    {
+      "id": "PC1",
+      "name": "PC1",
+      "a": "A",
+      "b": "B",
+      "d": "D",
+      "distribution": "twoWay"
+    }
+  ]
+}

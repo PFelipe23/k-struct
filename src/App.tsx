@@ -1,3 +1,4 @@
+import { LoadPanelDialog, newLoadPanel } from "./components/LoadPanelDialog";
 import {
   SurfacePanelDialog,
   newSurfacePanel,
@@ -63,6 +64,7 @@ import {
   serializeProject,
   uid,
   type Project,
+  type LoadPanel,
   type ResultEnvelope,
   type SelectedObject,
   type Selection,
@@ -181,6 +183,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v31") ??
       localStorage.getItem("kstruct.draft.v30") ??
       localStorage.getItem("kstruct.draft.v29") ??
       localStorage.getItem("kstruct.draft.v28") ??
@@ -233,6 +236,9 @@ export default function App() {
     p.slabs.find(
       (s) => s.id === selection.find((o) => o.kind === "slab")?.id,
     ) ?? p.slabs[0];
+  const [loadPanelDraft, setLoadPanelDraft] = useState<LoadPanel | null>(null);
+  const openLoadPanel = (id: string) =>
+    setLoadPanelDraft(p.loadPanels?.find((v) => v.id === id) ?? null);
   const [panelDraft, setPanelDraft] = useState<SurfacePanel | null>(null);
   const hasPanels = !!p.surfacePanels?.length;
   const openPanel = (id: string) =>
@@ -589,7 +595,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v30", serialized);
+      localStorage.setItem("kstruct.draft.v31", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1423,6 +1429,22 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                 {spatial && (
                   <button
                     className="tool-button"
+                    aria-label="Novo painel de carga"
+                    title="Distribuir carga às vigas de um retângulo em planta"
+                    disabled={p.nodes.length < 3 || !p.members.length}
+                    onClick={() =>
+                      setLoadPanelDraft(
+                        newLoadPanel(p, plane.kind === "XY" ? plane.offset : 0),
+                      )
+                    }
+                  >
+                    <Square size={21} />
+                    <span>Painel de carga</span>
+                  </button>
+                )}
+                {spatial && (
+                  <button
+                    className="tool-button"
                     aria-label="Novo painel espacial"
                     title="Lançar uma membrana, placa ou casca por três pontos no espaço"
                     disabled={
@@ -2043,6 +2065,19 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                   ))}
                 </details>
               )}
+              {!!p.loadPanels?.length && (
+                <details open>
+                  <summary>
+                    Painéis de carga <span>{p.loadPanels.length}</span>
+                  </summary>
+                  {p.loadPanels.map((v) => (
+                    <button key={v.id} onClick={() => openLoadPanel(v.id)}>
+                      <Square size={13} />
+                      {v.name} · Painel de carga
+                    </button>
+                  ))}
+                </details>
+              )}
               {hasPanels && (
                 <details open>
                   <summary>
@@ -2120,6 +2155,8 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                 {p.nodes.length} nós · {p.members.length} barras
                 {hasPanels &&
                   ` · ${p.surfacePanels!.length} ${p.surfacePanels!.length === 1 ? "painel espacial" : "painéis espaciais"}`}
+                {!!p.loadPanels?.length &&
+                  ` · ${p.loadPanels.length} ${p.loadPanels.length === 1 ? "painel de carga" : "painéis de carga"}`}
                 {p.slabs.length > 0 &&
                   ` · ${p.slabs.length} ${p.slabs.length === 1 ? "laje" : "lajes"}`}
               </span>
@@ -2309,6 +2346,7 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                   onPoint={onPoint}
                   onSelect={selectObject}
                   onPanel={openPanel}
+                  onLoadPanel={openLoadPanel}
                   onJoint={() => setJointOpen(true)}
                 />
               );
@@ -2316,6 +2354,7 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
             {perspective && (
               <SpatialView
                 onPanel={openPanel}
+                onLoadPanel={openLoadPanel}
                 onPickLoad={choosingMemberLoad ? pickMemberLoad : undefined}
                 layers={perspectiveLayers}
                 setLayers={setPerspectiveLayers}
@@ -2497,6 +2536,16 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
             />
           )}
         </main>
+        {loadPanelDraft && (
+          <LoadPanelDialog
+            key={loadPanelDraft.id}
+            project={p}
+            initial={loadPanelDraft}
+            activePattern={patternId}
+            edit={edit}
+            close={() => setLoadPanelDraft(null)}
+          />
+        )}
         {panelDraft && (
           <SurfacePanelDialog
             key={panelDraft.id}

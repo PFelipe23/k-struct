@@ -173,6 +173,10 @@ function protectJoint(p: Project, n: StructuralNode, allowed: Set<string>) {
     );
 }
 function discardNodes(p: Project, removed: Set<string>, replacement?: string) {
+  if (replacement)
+    for (const panel of p.loadPanels ?? [])
+      for (const corner of ["a", "b", "d"] as const)
+        if (removed.has(panel[corner])) panel[corner] = replacement;
   p.nodes = p.nodes.filter((n) => !removed.has(n.id));
   for (const pat of p.loadPatterns)
     pat.nodal = pat.nodal.filter((l) => !removed.has(l.nodeId));
@@ -274,7 +278,8 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   const connectionI = endpointConnection(stations[0].id);
   const connectionJ = endpointConnection(stations.at(-1)!.id);
   const hasNonRigidEnd = (connection: Member["connectionI"]) =>
-    connection && Object.values(connection).some(({ kind }) => kind !== "rigid");
+    connection &&
+    Object.values(connection).some(({ kind }) => kind !== "rigid");
   for (const m of bars) {
     if (
       (interior.has(m.start) && hasNonRigidEnd(m.connectionI)) ||
@@ -381,6 +386,15 @@ function join(p: Project, ids: string[], nodes: NodeIndex): Change {
   );
   for (const link of p.meshConnections)
     if (selected.has(link.memberId)) link.memberId = survivor.id;
+  const corners = new Set(
+    p.loadPanels?.flatMap((panel) => [panel.a, panel.b, panel.d]),
+  );
+  for (const nodeId of interior) {
+    if (corners.has(nodeId)) {
+      p.meshConnections.push({ memberId: survivor.id, nodeId });
+      interior.delete(nodeId);
+    }
+  }
   discardNodes(p, interior);
   remapGroups(p, "member", new Map(bars.map((m) => [m.id, [survivor.id]])));
   return {

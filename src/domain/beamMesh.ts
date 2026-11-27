@@ -1,3 +1,4 @@
+import { tributaryProfiles } from "./loadPanel";
 import { distance, interiorParameter, tolerance } from "./geometry";
 import { distanceFromI, type MemberPointLoad } from "./memberPointLoads";
 import {
@@ -55,7 +56,7 @@ export function connectionStations(p: Project) {
 }
 
 // Editable nodes take precedence over a regular station within the geometric tolerance.
-export function beamMeshLayout(p: Project) {
+export function beamMeshLayout(p: Project, transferred = tributaryProfiles(p)) {
   const rigidLinks: { memberId: string; masterId: string; nodeId: string }[] =
     [];
   const links = connectionStations(p);
@@ -72,7 +73,10 @@ export function beamMeshLayout(p: Project) {
     }
   const intervalsByMember = new Map<string, DistributedLoad[]>();
   for (const pattern of p.loadPatterns)
-    for (const load of pattern.distributed ?? []) {
+    for (const load of [
+      ...(pattern.distributed ?? []),
+      ...(transferred.get(pattern.id) ?? []),
+    ]) {
       const list = intervalsByMember.get(load.memberId);
       if (list) list.push(load);
       else intervalsByMember.set(load.memberId, [load]);

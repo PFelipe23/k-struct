@@ -1,3 +1,4 @@
+import { loadPanelErrors } from "./loadPanel";
 import { panelModelErrors, panelAssembly } from "./surfacePanel";
 import { slabRings } from "./slabPolygon";
 import {
@@ -781,7 +782,7 @@ const areaAttributes = {
   distribution: distribution.optional(),
 };
 const spatialAction = panelAction.extend(areaAttributes);
-export const projectSchema = projectV29.extend({
+const projectV30 = projectV29.extend({
   schemaVersion: z.literal(30),
   loadPatterns: z
     .array(
@@ -793,6 +794,33 @@ export const projectSchema = projectV29.extend({
     .min(1)
     .max(100),
 });
+const loadPanelSchema = z.strictObject({
+  id,
+  name: text,
+  a: id,
+  b: id,
+  d: id,
+  distribution: z.enum(["spanAB", "spanAD", "twoWay"]),
+});
+const tributaryLoadSchema = z.strictObject({
+  panelId: id,
+  axis: z.enum(["X", "Y", "Z"]),
+  pressure: finite,
+});
+export const projectSchema = projectV30.extend({
+  schemaVersion: z.literal(31),
+  loadPanels: z.array(loadPanelSchema).max(100).optional(),
+  loadPatterns: z
+    .array(
+      projectV30.shape.loadPatterns.element.extend({
+        tributaryLoads: z.array(tributaryLoadSchema).max(100).optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type LoadPanel = z.infer<typeof loadPanelSchema>;
+export type TributaryLoad = z.infer<typeof tributaryLoadSchema>;
 export type PressureDistribution = z.infer<typeof distribution>;
 export type PressureDirection = NonNullable<
   z.infer<typeof areaAttributes.direction>
@@ -888,7 +916,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 30,
+    schemaVersion: 31,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1379,6 +1407,15 @@ export function parseProject(source: string): Project {
     const old = projectV29.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 30 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 30
+  ) {
+    const old = projectV30.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 31 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const panelFactorIssue = parsed.error.issues.find(
@@ -1429,7 +1466,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 30, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 31, com valores numéricos finitos.",
     );
   }
   normalizeSlabPressureVertices(parsed.data);
@@ -1451,8 +1488,9 @@ function projectObjectIds(p: Pick<Project, "nodes" | "members" | "slabs">) {
 
 export function referenceErrors(p: Project): string[] {
   const errors: string[] = [];
-  errors.push(...panelModelErrors(p));
+  errors.push(...panelModelErrors(p), ...loadPanelErrors(p));
   for (const list of [
+    p.loadPanels ?? [],
     p.surfacePanels ?? [],
     p.nodes,
     p.members,

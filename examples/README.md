@@ -27,3 +27,7 @@ Abra a cobertura no KStruct desktop e clique em **Analisar**. O fator de flexão
 ## Parede com pressão hidrostática
 
 Abra o modelo e clique em **Analisar**. Em **Resultados dos painéis espaciais**, confira a força aplicada em X de −235,44 kN e o momento aplicado em Y de −313,92 kN·m. Para baixar o nível da água para 2,30 m, abra **Parede do reservatório · Casca → Carga superficial**, informe 2,30 m na cota superior e 22,563 kN/m² na pressão inferior. Mantenha zero na pressão superior e analise novamente. [Projeto](parede-pressao-hidrostatica.kstruct.json) · [Referência analítica](../docs/VALIDATION.md#ks-46--pressão-hidrostática-e-carga-superficial-variável)
+
+## Pórtico com painel de carga
+
+Abra o exemplo e clique em **PC1 · Painel de carga**. O painel mede 6 × 4 m e aplica −5 kN/m² em Z. Em **Duas direções**, V1 e V3 recebem −40 kN cada, e V2 e V4 recebem −20 kN cada. Expanda **Cargas lineares por trecho** para consultar os valores ao longo das vigas. Em **Uma direção · vão AD**, V1 e V3 passam a receber −60 kN cada. Aplique e clique em **Analisar** para conferir os +30 kN em cada um dos quatro apoios. [Projeto](portico-painel-de-carga.kstruct.json) · [Referência analítica](../docs/VALIDATION.md#ks-47--distribuição-de-cargas-de-painel-às-vigas)

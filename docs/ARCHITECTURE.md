@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v30, migração v1 a v29, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v31, migração v1 a v30, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos por estação ou nó, combinação e componentes simultâneas    | `src/solver/envelopes.ts`    |
@@ -252,3 +252,19 @@ A v30 admite uma direção e uma distribuição por painel e por padrão. Arquiv
 Nos triângulos, o adaptador integra as funções de forma lineares contra a pressão. Para uma carga no plano, integra também o termo quadrático das rotações de furação do Allman. Os elementos que atravessam uma cota de mudança de inclinação são divididos para a integração, conservando os nós do modelo. A quadratura triangular de grau quatro cobre o produto da pressão bilinear pela função quadrática. Nos quadriláteros QDKT, as pressões variáveis usam as funções bilineares do elemento e a quadratura 2 × 2. A pressão uniforme do QDKT continua pela carga de superfície nativa.
 
 Os casos somam os padrões com seus fatores e acrescentam o peso próprio e as cargas de borda. A verificação usa a força e o primeiro momento da distribuição. Cargas com sinais contrários podem gerar um binário mesmo com resultante nula. O ponto A do primeiro painel espacial é a origem dos momentos exibidos. [Verificações numéricas](VALIDATION.md#ks-46--pressão-hidrostática-e-carga-superficial-variável)
+
+## Painéis de carga sobre vigas
+
+Um painel descreve um retângulo horizontal, definido pelos nós editáveis A, B e D do pórtico espacial. Os lados AB e AD são perpendiculares e o quarto canto é C = B + D − A. A orientação em planta é livre. O arquivo v31 guarda a geometria e o modo de distribuição em `loadPanels`. Cada padrão pode guardar em `tributaryLoads` uma intensidade uniforme com sinal (Pa por área em planta) e um eixo global X, Y ou Z. A geometria tem massa e rigidez nulas. Projetos anteriores abrem com as cargas de barra e de superfície que já possuíam.
+
+| Transferência | Bordas receptoras | Largura de influência |
+| --- | --- | --- |
+| Uma direção, vão AB | BC e DA | Metade do comprimento AB |
+| Uma direção, vão AD | AB e CD | Metade do comprimento AD |
+| Duas direções | AB, BC, CD e DA | Bissetrizes a 45° entre bordas adjacentes |
+
+Na distribuição em duas direções, para uma borda de comprimento $L$ separada da oposta por $H$, a largura a uma distância $s$ da extremidade é $b(s)=\min(s,L-s,H/2)$. A intensidade na viga é $q(s)=p\,b(s)$. Essa hipótese geométrica produz triângulos nas bordas curtas e trapézios nas longas, independentemente da rigidez das vigas. Para calcular esforços internos e flechas da própria laje, use os elementos resistentes de placa ou casca.
+
+A atribuição compara cada borda receptora com o eixo de inserção das barras físicas, na mesma cota. Barras contínuas podem ultrapassar os cantos, e várias barras colineares podem completar uma borda. Cada parcela é recortada no intervalo da respectiva barra e orientada a partir de i. Lacunas e duas barras cobrindo o mesmo trecho impedem a aplicação. Painéis adjacentes somam suas cargas numa viga comum. Há bloqueio quando as áreas de material de dois painéis, ou de um painel e uma laje resistente, se sobrepõem na mesma cota. Aberturas, bordas compartilhadas e outros pavimentos são considerados na verificação.
+
+Os perfis lineares são gerados na exportação e compartilham a rotina de cargas por trecho com as ações manuais. As mudanças de inclinação entram na malha de todos os casos. As ações mantêm o padrão, o fator e o sinal ao passar para cada elemento e para os trechos rígidos. O balanço global usa separadamente a força $pA$ aplicada no centro do retângulo para verificar forças e momentos de reação. [Exemplo e verificações](VALIDATION.md#ks-47--distribuição-de-cargas-de-painel-às-vigas)

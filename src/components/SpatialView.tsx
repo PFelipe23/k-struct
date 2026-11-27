@@ -1,3 +1,4 @@
+import { distributeLoadPanel } from "../domain/loadPanel";
 import { slabProperties } from "../domain/slabPolygon";
 import {
   panelPressureVertices,
@@ -281,6 +282,7 @@ export default function SpatialView({
   onSelect,
   onPickLoad,
   onPanel,
+  onLoadPanel,
 }: LayerControls & {
   active: boolean;
   onActivate: () => void;
@@ -294,11 +296,14 @@ export default function SpatialView({
   result: StructuralResult | null;
   onSelect: (s: Selection, additive: boolean) => void;
   onPanel: (id: string) => void;
+  onLoadPanel: (id: string) => void;
   onPickLoad?: (id: string, point: Point3) => void;
 }) {
   const { units } = useUnits();
   const container = useRef<HTMLDivElement>(null),
     state = useRef<SceneState | null>(null);
+  const loadPanelPick = useRef(onLoadPanel);
+  loadPanelPick.current = onLoadPanel;
   const panelPick = useRef(onPanel);
   panelPick.current = onPanel;
   const select = useRef(onSelect);
@@ -457,7 +462,9 @@ export default function SpatialView({
         .find((h) =>
           pickLoad.current
             ? h.object.userData.selection?.kind === "member"
-            : h.object.userData.selection || h.object.userData.panelId,
+            : h.object.userData.selection ||
+              h.object.userData.panelId ||
+              h.object.userData.loadPanelId,
         );
       if (pickLoad.current) {
         if (hit)
@@ -466,6 +473,10 @@ export default function SpatialView({
             y: -hit.point.z,
             z: hit.point.y,
           });
+        return;
+      }
+      if (hit?.object.userData.loadPanelId) {
+        loadPanelPick.current(hit.object.userData.loadPanelId);
         return;
       }
       if (hit?.object.userData.panelId) {
@@ -557,6 +568,34 @@ export default function SpatialView({
             "force",
           );
     }
+    if (layers.loads)
+      for (const panel of project.loadPanels ?? []) {
+        const data = distributeLoadPanel(project, panel);
+        for (const region of data.regions) {
+          const line = new THREE.LineLoop(
+            new THREE.BufferGeometry().setFromPoints(
+              region.points.map(scenePoint),
+            ),
+            s.materials.load,
+          );
+          line.userData.loadPanelId = panel.id;
+          s.model.add(line);
+        }
+        const load = pattern?.tributaryLoads?.find(
+          (v) => v.panelId === panel.id,
+        );
+        if (layers.labels)
+          annotate(s.model, scenePoint(data.rect.center), [
+            panel.name +
+              (load
+                ? " · " +
+                  load.axis +
+                  " " +
+                  formatResult(load.pressure / 1000) +
+                  " kN/m²"
+                : ""),
+          ]);
+      }
     for (const panel of project.surfacePanels ?? []) {
       const { corners, axes, materialAxes } = panelGeometry(panel);
       const pts = Object.values(corners).map(scenePoint);
