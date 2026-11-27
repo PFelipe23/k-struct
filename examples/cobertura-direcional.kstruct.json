@@ -1,0 +1,166 @@
+{
+  "format": "kstruct",
+  "schemaVersion": 29,
+  "id": "ks45-cobertura",
+  "name": "Cobertura com rigidez direcional",
+  "units": "N-m-kg-s",
+  "nodes": [],
+  "members": [],
+  "materials": [
+    {
+      "id": "mat",
+      "name": "Material de referência",
+      "E": 30000000000,
+      "nu": 0.2,
+      "density": 2500,
+      "alpha": 0
+    }
+  ],
+  "sections": [
+    {
+      "shape": "rectangle",
+      "width": 0.15,
+      "height": 0.2,
+      "id": "rect",
+      "name": "Retangular R1",
+      "materialId": "mat"
+    }
+  ],
+  "loadPatterns": [
+    {
+      "id": "G",
+      "name": "Carga permanente",
+      "nodal": [],
+      "uniform": [],
+      "pressure": [],
+      "selfWeight": {
+        "enabled": false,
+        "direction": "-Z",
+        "gravity": 9.80665,
+        "multiplier": 1
+      },
+      "panelActions": [
+        {
+          "panelId": "P1",
+          "edge": "BC",
+          "traction": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "pressure": -5000
+        }
+      ]
+    }
+  ],
+  "analysisCases": [
+    {
+      "id": "EL",
+      "name": "EL · Estática linear",
+      "type": "linear-static",
+      "factors": [
+        {
+          "patternId": "G",
+          "factor": 1
+        }
+      ]
+    }
+  ],
+  "mesh": {
+    "segmentsPerMember": 8
+  },
+  "mode": "spatial",
+  "guides": {
+    "x": [
+      {
+        "id": "X1",
+        "name": "1",
+        "position": 0
+      },
+      {
+        "id": "X2",
+        "name": "2",
+        "position": 4
+      },
+      {
+        "id": "X3",
+        "name": "3",
+        "position": 8
+      }
+    ],
+    "y": [
+      {
+        "id": "YA",
+        "name": "A",
+        "position": 0
+      },
+      {
+        "id": "YB",
+        "name": "B",
+        "position": 4
+      },
+      {
+        "id": "YC",
+        "name": "C",
+        "position": 8
+      }
+    ],
+    "z": [
+      {
+        "id": "base",
+        "name": "Base",
+        "position": 0
+      },
+      {
+        "id": "level1",
+        "name": "Pav. 1",
+        "position": 3
+      },
+      {
+        "id": "level2",
+        "name": "Pav. 2",
+        "position": 6
+      }
+    ]
+  },
+  "resultCombinations": [],
+  "resultEnvelopes": [],
+  "slabs": [],
+  "selectionGroups": [],
+  "meshConnections": [],
+  "surfacePanels": [
+    {
+      "id": "P1",
+      "name": "Cobertura",
+      "kind": "shell",
+      "materialId": "mat",
+      "a": {
+        "x": 0,
+        "y": 0,
+        "z": 3
+      },
+      "b": {
+        "x": 6,
+        "y": 0,
+        "z": 3
+      },
+      "d": {
+        "x": 0,
+        "y": 3,
+        "z": 3
+      },
+      "thickness": 0.12,
+      "nu": 32,
+      "nv": 16,
+      "fixed": [
+        "AB",
+        "BC",
+        "CD",
+        "DA"
+      ],
+      "stiffness": {
+        "m11": 4
+      }
+    }
+  ]
+}

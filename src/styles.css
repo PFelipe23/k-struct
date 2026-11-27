@@ -67,6 +67,8 @@
   --scene-grid-center: #596e8a;
   --scene-node: #cadbed;
   --scene-light-ground: #38404f;
+  --panel-face-plus: #74bcb1;
+  --panel-face-minus: #ca9a6e;
   --axis-x: #e3878a;
   --axis-y: #77c4a1;
   --axis-z: #7da4e0;
@@ -134,6 +136,8 @@
   --scene-grid-center: #6b829f;
   --scene-node: #203b60;
   --scene-light-ground: #728399;
+  --panel-face-plus: #378675;
+  --panel-face-minus: #9c643c;
   --axis-x: #9d3c44;
   --axis-y: #23674b;
   --axis-z: #28598e;
@@ -2831,3 +2835,38 @@ button.primary {
 .spatial-panel-trace :is(polygon,polyline) { stroke: var(--geometry-member); stroke-width: 3; fill: none; }
 .spatial-panel-trace polygon { fill: var(--geometry-member); fill-opacity: .14; }
 .spatial-panel-trace text { fill: var(--geometry-member); font-size: 12px; }
+
+.scene-label.panel-face-plus,
+.scene-label.panel-face-minus {
+  border-left: 3px solid var(--panel-face-plus);
+  padding-left: 4px;
+}
+.scene-label.panel-face-minus {
+  border-color: var(--panel-face-minus);
+}
+.spatial-panel-trace polygon[data-face="+3"] {
+  fill: var(--panel-face-plus);
+}
+.spatial-panel-trace polygon[data-face="−3"] {
+  fill: var(--panel-face-minus);
+}
+.panel-plan-axes {
+  pointer-events: none;
+}
+.panel-plan-axes path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.panel-plan-axes .panel-axis-1 {
+  color: var(--axis-x);
+}
+.panel-plan-axes .panel-axis-2 {
+  color: var(--axis-y);
+}
+.panel-plan-axes .panel-axis-3 {
+  color: var(--axis-z);
+}
+.panel-plan-axes g text {
+  fill: currentColor;
+}

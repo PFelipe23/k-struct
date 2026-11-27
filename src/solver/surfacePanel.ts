@@ -19,13 +19,7 @@ import {
   type Basis,
 } from "../domain/surfacePanel";
 import { weightAcceleration } from "../domain/selfWeight";
-import { elasticMaterialRecord } from "./elasticMaterial";
-
-const elements = {
-  membrane: "trplanestressrotallman3d",
-  plate: "dktplate3d",
-  shell: "tr_shell02",
-};
+import { panelSectionRecords } from "./panelSections";
 const values = (p: Point3) => [p.x, p.y, p.z];
 const components = (v: Point3) => values(v).join(" ");
 function checkDirection(
@@ -62,17 +56,10 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
     bcs: string[] = [];
   const nodeSet = (ids: number[]) =>
     sets.push(`Set ${sets.length + 1} nodes ${ids.length} ${ids.join(" ")}`);
-  const sections: string[] = [],
-    materials = p.materials.filter((m) =>
-      mesh.panels.some((g) => g.panel.materialId === m.id),
-    );
-  for (const [i, g] of mesh.panels.entries()) {
+  const records = panelSectionRecords(mesh, p.materials);
+  for (const g of mesh.panels) {
     const panel = g.panel,
-      mi = materials.findIndex((m) => m.id === panel.materialId),
-      mat = materials[mi];
-    sections.push(
-      `SimpleCS ${i + 1} thick ${panel.thickness} material ${mi + 1}`,
-    );
+      mat = p.materials.find((m) => m.id === panel.materialId)!;
     // Allman interpolates the in-plane normal displacement on an edge with
     // a quadratic bubble times the difference of the two drilling rotations.
     const drill = (a: number, b: number, q: Point3, integral: number) => {
@@ -158,17 +145,14 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
     "StaticStructural nsteps 1 deltat 1",
     "domain 3dshell",
     "OutputManager tstep_all dofman_all element_all",
-    `ndofman ${mesh.nodes.length} nelem ${mesh.elements.length} ncrosssect ${sections.length} nmat ${materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
+    `ndofman ${mesh.nodes.length} nelem ${records.elements.length} ncrosssect ${records.sections.length} nmat ${records.materials.length} nbc ${bcs.length} nic 0 nltf 1 nset ${sets.length}`,
     ...mesh.nodes.map(
       (n) =>
         `Node ${n.number} coords 3 ${components(subtract(n, datum))}${n.axes === globalBasis ? "" : ` lcs 6 ${components(n.axes[0])} ${components(n.axes[1])}`}`,
     ),
-    ...mesh.elements.map(
-      (e, i) =>
-        `${elements[mesh.panels[e.panel].panel.kind]} ${i + 1} nodes 3 ${e.nodes.join(" ")} crossSect ${e.panel + 1} nip 4`,
-    ),
-    ...sections,
-    ...materials.map((m, i) => elasticMaterialRecord(m, i + 1)),
+    ...records.elements,
+    ...records.sections,
+    ...records.materials,
     ...bcs,
     "ConstantFunction 1 f(t) 1",
     ...sets,
@@ -181,7 +165,10 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
     throw new Error(
       "A entrada dos painéis excede o intervalo numérico ou o tamanho aceito pelo motor.",
     );
-  return { deck, data: { mesh, datum, force, moment } };
+  return {
+    deck,
+    data: { mesh, datum, force, moment, sources: records.sources },
+  };
 }
 
 export type PanelInput = ReturnType<typeof exportPanels>["data"];
@@ -220,9 +207,16 @@ export function readPanels(
     panelId: g.panel.id,
     name: g.panel.name,
     kind: g.panel.kind,
-    axes: g.axes,
+    axes: g.materialAxes,
+    geometryAxes: g.axes,
+    angleDeg: g.panel.angleDeg ?? 0,
     nodes: [] as { id: number; point: Point3; local: Point3; global: Point3 }[],
-    samples: [] as { element: number; gp: number; fields: LocalSample }[],
+    samples: [] as {
+      element: number;
+      gp: number;
+      fields: LocalSample;
+      geometricFields: LocalSample;
+    }[],
   }));
   let force = { ...origin },
     moment = { ...origin },
@@ -270,14 +264,31 @@ export function readPanels(
       id,
       point: g.points[i],
       global: displacements[id - 1],
-      local: inLocal(displacements[id - 1], g.axes),
+      local: inLocal(displacements[id - 1], g.materialAxes),
     }));
+  const byTriangle = mesh.elements.map((e, index) => {
+    const panel = panels[e.panel];
+    return Array.from({ length: 4 }, (_, gp) => {
+      const fields: LocalSample = {},
+        geometricFields: LocalSample =
+          panel.axes === panel.geometryAxes ? fields : {};
+      const sample = {
+        element: index + 1,
+        gp: gp + 1,
+        fields,
+        geometricFields,
+      };
+      panel.samples.push(sample);
+      return sample;
+    });
+  });
   const seen = new Set<number>();
   for (const match of raw.matchAll(
     /^element\s+(\d+)\s+\(\s*\d+\)\s*:\s*([\s\S]*?)(?=^element\s+\d+\s+\(|^={3,}|^\s*R E A C T I O N|^Finishing analysis on:|(?![\s\S]))/gim,
   )) {
     const id = Number(match[1]),
-      element = mesh.elements[id - 1];
+      source = input.sources[id - 1],
+      element = source && mesh.elements[source.triangle];
     if (!element || seen.has(id))
       throw new Error("Elemento de painel duplicado ou inesperado na saída.");
     seen.add(id);
@@ -287,30 +298,35 @@ export function readPanels(
     for (const point of match[2].matchAll(
       /^[ \t]*GP\s+1\.(\d+)\s*:[^\n]*\n[^\n]*\n\s*stresses[ \t]*([^\n]*)\n\s*moments[ \t]*([^\n]*)/gm,
     )) {
-      const gp = Number(point[1]),
-        fields: LocalSample = {};
+      const gp = Number(point[1]);
       if (gp < 1 || gp > 4 || gps.has(gp))
         throw new Error(
           "Ponto de integração de painel duplicado ou inesperado.",
         );
       gps.add(gp);
-      if (panel.kind !== "plate") {
-        // OOFEM 3.0 prints Allman's in-plane Cauchy stress in Pa, including in TR_SHELL02.
-        const [xx, yy, xy] = projection(tensor(point[2]), panel.axes);
-        Object.assign(fields, { nxx: xx * h, nyy: yy * h, nxy: xy * h });
-      }
-      if (panel.kind !== "membrane") {
-        const [mxx, myy, mxy] = projection(tensor(point[3]), panel.axes);
-        Object.assign(fields, { mxx, myy, mxy });
-      }
-      panel.samples.push({ element: id, gp, fields });
+      const sample = byTriangle[source.triangle][gp - 1];
+      const stress = source.kind === "plate" ? undefined : tensor(point[2]);
+      const moments = source.kind === "membrane" ? undefined : tensor(point[3]);
+      const read = (fields: LocalSample, axes: Basis) => {
+        if (stress) {
+          const [xx, yy, xy] = projection(stress, axes);
+          Object.assign(fields, { nxx: xx * h, nyy: yy * h, nxy: xy * h });
+        }
+        if (moments) {
+          const [mxx, myy, mxy] = projection(moments, axes);
+          Object.assign(fields, { mxx, myy, mxy });
+        }
+      };
+      read(sample.fields, panel.axes);
+      if (sample.geometricFields !== sample.fields)
+        read(sample.geometricFields, panel.geometryAxes);
     }
     if (gps.size !== 4)
       throw new Error(
         `Resultados de integração incompletos no elemento de painel ${id} (${gps.size}/4).`,
       );
   }
-  if (seen.size !== mesh.elements.length)
+  if (seen.size !== input.sources.length)
     throw new Error("A saída não contém todos os elementos dos painéis.");
   return {
     panels,

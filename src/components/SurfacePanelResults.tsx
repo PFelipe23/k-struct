@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { coordinates, type Point3 } from "../domain/geometry";
-import { panelKinds } from "../domain/surfacePanel";
+import { inLocal, panelKinds } from "../domain/surfacePanel";
 import { panelFields, type PanelResult } from "../solver/surfacePanel";
 import { formatQuantity, type UnitQuantity } from "../units";
 import { useUnits } from "./Units";
@@ -17,9 +17,12 @@ export function SurfacePanelResults({
   const { units } = useUnits(),
     [choice, setChoice] = useState(""),
     [nodeIndex, setNodeIndex] = useState(0),
-    [elementIndex, setElementIndex] = useState(0);
+    [elementIndex, setElementIndex] = useState(0),
+    [frame, setFrame] = useState<"resistant" | "geometric">("resistant");
   const panel =
     result?.panels.find((p) => p.panelId === choice) ?? result?.panels[0];
+  const axes = frame === "resistant" ? panel?.axes : panel?.geometryAxes;
+  const fieldKey = frame === "resistant" ? "fields" : "geometricFields";
   const fmt = (v: number, q: UnitQuantity) => formatQuantity(v, q, units);
   const vec = (v: Point3, q: UnitQuantity) =>
     coordinates.map((k) => fmt(v[k], q)).join(" / ");
@@ -62,6 +65,20 @@ export function SurfacePanelResults({
                 ))}
               </select>
             </label>
+            <label>
+              Referencial do painel{" "}
+              <select
+                value={frame}
+                onChange={(e) => setFrame(e.target.value as typeof frame)}
+              >
+                <option value="resistant">
+                  Eixos resistentes 1–2 ({panel.angleDeg}°)
+                </option>
+                <option value="geometric">
+                  Eixos geométricos (1 ao longo de AB)
+                </option>
+              </select>
+            </label>
             <p>
               Resultante dos apoios em XYZ ({units.force}) ·{" "}
               {vec(result.force, "force")}
@@ -81,7 +98,7 @@ export function SurfacePanelResults({
               </thead>
               <tbody>
                 {coordinates.map((k, i) => {
-                  const v = panel.nodes.map((n) => n.local[k]);
+                  const v = panel.nodes.map((n) => inLocal(n.global, axes!)[k]);
                   return (
                     <tr key={k}>
                       <td>U{i + 1}</td>
@@ -92,7 +109,7 @@ export function SurfacePanelResults({
                   );
                 })}
                 {fields.map((k) => {
-                  const v = panel.samples.map((s) => s.fields[k]!);
+                  const v = panel.samples.map((s) => s[fieldKey][k]!);
                   const q = k.startsWith("n") ? "distributedLoad" : "moment";
                   return (
                     <tr key={k}>
@@ -111,7 +128,7 @@ export function SurfacePanelResults({
             </table>
             <details>
               <summary>Eixos locais em coordenadas globais</summary>
-              {panel.axes.map((a, i) => (
+              {axes!.map((a, i) => (
                 <p key={i}>
                   Eixo {i + 1} ·{" "}
                   {coordinates.map((k) => Number(a[k].toFixed(6))).join(" / ")}
@@ -145,7 +162,7 @@ export function SurfacePanelResults({
                     XYZ ({units.length}) · {vec(selectedNode.point, "length")}
                     <br />
                     U1 / U2 / U3 ({units.displacement}) ·{" "}
-                    {vec(selectedNode.local, "displacement")}
+                    {vec(inLocal(selectedNode.global, axes!), "displacement")}
                     <br />
                     UX / UY / UZ ({units.displacement}) ·{" "}
                     {vec(selectedNode.global, "displacement")}
@@ -189,7 +206,7 @@ export function SurfacePanelResults({
                         {fields.map((k) => (
                           <td key={k}>
                             {fmt(
-                              s.fields[k]!,
+                              s[fieldKey][k]!,
                               k.startsWith("n") ? "distributedLoad" : "moment",
                             )}
                           </td>

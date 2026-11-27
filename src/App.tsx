@@ -181,6 +181,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v29") ??
       localStorage.getItem("kstruct.draft.v28") ??
       localStorage.getItem("kstruct.draft.v27") ??
       localStorage.getItem("kstruct.draft.v26") ??
@@ -237,6 +238,7 @@ export default function App() {
     setPanelDraft(p.surfacePanels?.find((v) => v.id === id) ?? null);
   const [jointOpen, setJointOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>("dual");
+  const [showPanelAxes, setShowPanelAxes] = useState(true);
   const [showMemberAxes, setShowMemberAxes] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("primary");
   const [planes, setPlanes] = useState(() => initialPlanes(slab?.levelId));
@@ -586,7 +588,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v28", serialized);
+      localStorage.setItem("kstruct.draft.v29", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -1838,6 +1840,15 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
               >
                 Eixos locais
               </button>
+              {hasPanels && (
+                <button
+                  className="member-axes-toggle"
+                  aria-pressed={showPanelAxes}
+                  onClick={() => setShowPanelAxes((v) => !v)}
+                >
+                  Eixos e faces dos painéis
+                </button>
+              )}
             </div>
           </>
         )}
@@ -2257,6 +2268,7 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                   active={active}
                   onActivate={() => activatePanel(panel)}
                   project={p}
+                  showPanelAxes={showPanelAxes}
                   showMemberAxes={showMemberAxes}
                   plane={view.plane}
                   orthogonal={orthogonal}
@@ -2312,6 +2324,7 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                 patternId={patternId}
                 theme={theme}
                 project={p}
+                showPanelAxes={showPanelAxes}
                 showMemberAxes={showMemberAxes}
                 selection={shownSelection}
                 result={visibleDisplay === "deformed" ? result : null}

@@ -712,7 +712,7 @@ const projectV27 = projectV26.extend({
 });
 const panelPoint = z.strictObject({ x: finite, y: finite, z: finite });
 const panelEdge = z.enum(["AB", "BC", "CD", "DA"]);
-const surfacePanel = z.strictObject({
+const panelV28 = z.strictObject({
   id,
   name: text,
   kind: z.enum(["membrane", "plate", "shell"]),
@@ -731,9 +731,9 @@ const panelAction = z.strictObject({
   traction: panelPoint,
   pressure: finite,
 });
-export const projectSchema = projectV27.extend({
+const projectV28 = projectV27.extend({
   schemaVersion: z.literal(28),
-  surfacePanels: z.array(surfacePanel).max(2).optional(),
+  surfacePanels: z.array(panelV28).max(2).optional(),
   loadPatterns: z
     .array(
       projectV27.shape.loadPatterns.element.extend({
@@ -743,6 +743,23 @@ export const projectSchema = projectV27.extend({
     .min(1)
     .max(100),
 });
+const panelFactors = z.strictObject({
+  n11: finite.positive().optional(),
+  n22: finite.positive().optional(),
+  n12: finite.positive().optional(),
+  m11: finite.positive().optional(),
+  m22: finite.positive().optional(),
+  m12: finite.positive().optional(),
+});
+const surfacePanel = panelV28.extend({
+  angleDeg: finite.optional(),
+  stiffness: panelFactors.optional(),
+});
+export const projectSchema = projectV28.extend({
+  schemaVersion: z.literal(29),
+  surfacePanels: z.array(surfacePanel).max(2).optional(),
+});
+export type PanelFactors = z.infer<typeof panelFactors>;
 export type SurfacePanel = z.infer<typeof surfacePanel>;
 export type PanelAction = z.infer<typeof panelAction>;
 export type PanelEdge = z.infer<typeof panelEdge>;
@@ -833,7 +850,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 28,
+    schemaVersion: 29,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1281,8 +1298,24 @@ export function parseProject(source: string): Project {
     const old = projectV27.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 28 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 28
+  ) {
+    const old = projectV28.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 29 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
+    const panelFactorIssue = parsed.error.issues.find(
+      (v) => v.path[0] === "surfacePanels" && v.path[2] === "stiffness",
+    );
+    if (panelFactorIssue)
+      throw new Error(
+        `Painel ${Number(panelFactorIssue.path[1]) + 1} · ${String(panelFactorIssue.path[3] ?? "rigidez").toUpperCase()} exige um fator finito, maior que zero.`,
+      );
     const factorIssue = parsed.error.issues.find(
       ({ path }) =>
         path[0] === "members" && path[2] === "stiffness" && path.length === 4,
@@ -1324,7 +1357,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 28, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 29, com valores numéricos finitos.",
     );
   }
   for (const slab of parsed.data.slabs)

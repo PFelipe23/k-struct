@@ -81,6 +81,8 @@ function createModelMaterials() {
   return {
     slab: new THREE.MeshStandardMaterial(),
     selectedSlab: new THREE.MeshStandardMaterial(),
+    panelFront: new THREE.MeshStandardMaterial(),
+    panelBack: new THREE.MeshStandardMaterial(),
     member: new THREE.LineBasicMaterial(),
     selectedMember: new THREE.LineBasicMaterial(),
     rigidArm: new THREE.LineBasicMaterial(),
@@ -264,6 +266,7 @@ export default function SpatialView({
   patternId,
   theme,
   project,
+  showPanelAxes,
   showMemberAxes,
   selection,
   result,
@@ -277,6 +280,7 @@ export default function SpatialView({
   patternId: string;
   theme: Theme;
   project: Project;
+  showPanelAxes: boolean;
   showMemberAxes: boolean;
   selection: SelectedObject[];
   result: StructuralResult | null;
@@ -359,6 +363,8 @@ export default function SpatialView({
       materials.axisY.color.set(color("--axis-y"));
       materials.axisZ.color.set(color("--axis-z"));
       materials.slab.color.set(color("--geometry-member"));
+      materials.panelFront.color.set(color("--panel-face-plus"));
+      materials.panelBack.color.set(color("--panel-face-minus"));
       materials.selectedSlab.color.set(color("--geometry-selected"));
       materials.rigidArm.color.set(color("--geometry-support"));
       materials.launchAxis.color.set(color("--geometry-member"));
@@ -544,7 +550,7 @@ export default function SpatialView({
           );
     }
     for (const panel of project.surfacePanels ?? []) {
-      const { corners, axes } = panelGeometry(panel);
+      const { corners, axes, materialAxes } = panelGeometry(panel);
       const pts = Object.values(corners).map(scenePoint);
       const geometry = new THREE.BufferGeometry().setFromPoints(pts);
       geometry.setIndex([0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0]);
@@ -552,7 +558,14 @@ export default function SpatialView({
       const faces = geometry.toNonIndexed();
       geometry.dispose();
       faces.computeVertexNormals();
-      const surface = new THREE.Mesh(faces, s.materials.slab);
+      faces.addGroup(0, 6, 0);
+      faces.addGroup(6, 6, 1);
+      const surface = new THREE.Mesh(
+        faces,
+        showPanelAxes
+          ? [s.materials.panelFront, s.materials.panelBack]
+          : s.materials.slab,
+      );
       surface.userData.panelId = panel.id;
       s.model.add(surface);
       s.model.add(
@@ -626,7 +639,21 @@ export default function SpatialView({
         annotate(s.model, center, [
           panel.name + " · " + panelKinds[panel.kind],
         ]);
-      for (const [i, axis] of axes.entries()) {
+      if (!showPanelAxes) continue;
+      const normal = scenePoint(axes[2]);
+      for (const side of [-1, 1]) {
+        const label = side === 1 ? "Face +3" : "Face −3";
+        const at = center
+          .clone()
+          .lerp(side === 1 ? pts[2] : pts[0], 0.27)
+          .addScaledVector(normal, side * span * 0.1);
+        const mark = annotate(s.model, at, [label])!;
+        mark.element.classList.add(
+          side === 1 ? "panel-face-plus" : "panel-face-minus",
+        );
+        mark.element.setAttribute("aria-label", panel.name + " · " + label);
+      }
+      for (const [i, axis] of materialAxes.entries()) {
         const end = center
           .clone()
           .addScaledVector(scenePoint(axis), span * 0.25);
@@ -636,7 +663,11 @@ export default function SpatialView({
             [s.materials.axisX, s.materials.axisY, s.materials.axisZ][i],
           ),
         );
-        if (layers.labels) annotate(s.model, end, [String(i + 1)]);
+        const label = annotate(s.model, end, [String(i + 1)])!;
+        label.element.setAttribute(
+          "aria-label",
+          `${panel.name} · eixo resistente ${i + 1}`,
+        );
       }
     }
     for (const slab of project.slabs) {
@@ -966,6 +997,7 @@ export default function SpatialView({
     layers.loads,
     units,
     layers.mesh,
+    showPanelAxes,
   ]);
   useEffect(() => {
     const s = state.current;

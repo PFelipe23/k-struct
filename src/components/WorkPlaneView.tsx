@@ -79,6 +79,7 @@ export type Tool =
 export type Display = "model" | "deformed" | MemberForceComponent;
 interface Props {
   project: Project;
+  showPanelAxes: boolean;
   showMemberAxes: boolean;
   plane: WorkPlane;
   orthogonal: boolean;
@@ -127,6 +128,7 @@ export default function WorkPlaneView({
   layers,
   setLayers,
   project,
+  showPanelAxes,
   showMemberAxes,
   plane,
   orthogonal,
@@ -786,7 +788,12 @@ export default function WorkPlaneView({
           />
         )}
         {project.surfacePanels?.map((panel) => {
-          const pts = Object.values(panelGeometry(panel).corners);
+          const { corners, materialAxes } = panelGeometry(panel),
+            pts = Object.values(corners);
+          const visibleSide =
+            materialAxes[2][normal] * (plane.kind === "XZ" ? -1 : 1) >= 0
+              ? "+3"
+              : "−3";
           const face = pts.every((p) => onPlane(p, plane)),
             trace: Point3[] = [];
           for (const [i, a] of pts.entries()) {
@@ -798,6 +805,8 @@ export default function WorkPlaneView({
               trace.push(interpolate(a, b, da / (da - db)));
           }
           if (trace.length < 2) return null;
+          const cu = trace.reduce((v, p) => v + sx(p[axisU]), 0) / trace.length,
+            cv = trace.reduce((v, p) => v + sy(p[axisV]), 0) / trace.length;
           const points = trace
             .map((p) => `${sx(p[axisU])},${sy(p[axisV])}`)
             .join(" ");
@@ -814,9 +823,44 @@ export default function WorkPlaneView({
               }}
             >
               {face ? (
-                <polygon points={points} />
+                <polygon
+                  points={points}
+                  data-face={showPanelAxes ? visibleSide : undefined}
+                />
               ) : (
                 <polyline points={points} />
+              )}
+              {showPanelAxes && (
+                <g
+                  className="panel-plan-axes"
+                  aria-label={panel.name + " · orientação"}
+                >
+                  {materialAxes.map((a, i) => {
+                    const dx = 24 * a[axisU],
+                      dy = -24 * a[axisV];
+                    if (Math.hypot(dx, dy) < 4) return null;
+                    return (
+                      <g key={i} className={"panel-axis-" + (i + 1)}>
+                        <path d={`M ${cu} ${cv} l ${dx} ${dy}`} />
+                        <text x={cu + 1.12 * dx} y={cv + 1.12 * dy}>
+                          {i === 2 ? "+3" : i + 1}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {face ? (
+                    <text x={cu + 6} y={cv + 15}>
+                      Face {visibleSide}
+                    </text>
+                  ) : (
+                    <text
+                      x={cu - 28 * materialAxes[2][axisU]}
+                      y={cv + 28 * materialAxes[2][axisV]}
+                    >
+                      −3
+                    </text>
+                  )}
+                </g>
               )}
               {labels && (
                 <text x={sx(trace[0][axisU]) + 4} y={sy(trace[0][axisV]) - 4}>
