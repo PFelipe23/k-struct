@@ -683,7 +683,7 @@ export async function buildAnalysisReport(
               : result?.solver,
             run.summary?.runId && `ID ${run.summary.runId}`,
             run.mesh &&
-              `${run.mesh.nodes} nós de análise, ${run.mesh.beams} elementos de barra e ${run.mesh.areas} elementos de área`,
+              `${run.mesh.nodes} nós e ${run.mesh.elements} elementos no OOFEM · ${run.mesh.beams} elementos de barra e ${run.mesh.areas} células de área`,
             run.revision !== revision &&
               `Dados da última execução na revisão ${run.revision}`,
             !result && run.detail,

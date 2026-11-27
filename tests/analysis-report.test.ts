@@ -10,7 +10,8 @@ import { beamExample } from "../src/domain/model";
 import { buildResultCsv } from "../src/components/Results";
 import { exportOofem, parseOofemOutput } from "../src/solver/oofem";
 import { DEFAULT_UNITS } from "../src/units";
-import { reportCaseStatus } from "../src/solver/reportRuns";
+import { reportCaseStatus, reportMesh } from "../src/solver/reportRuns";
+import { cantileverPanel } from "./fixtures/spatial-panels";
 import { runDeck } from "./fixtures/solve-oofem";
 
 function example(): ReportSnapshot {
@@ -70,6 +71,24 @@ it("identifica o conteúdo em SHA-256 e registra casos cancelados e obsoletos", 
     "Pendente de análise",
   );
   expect(await modelFingerprint(p)).not.toBe(fingerprint);
+});
+
+it("distingue a malha física dos registros executados pelo OOFEM", () => {
+  const input = exportOofem(cantileverPanel("shell"), "EL");
+  expect(reportMesh(input)).toEqual({
+    nodes: 45,
+    elements: 64,
+    beams: 0,
+    areas: 64,
+  });
+  const beam = beamExample();
+  beam.nodes[1].springs = { ux: 8000 };
+  expect(reportMesh(exportOofem(beam, "EL"))).toEqual({
+    nodes: 10,
+    elements: 9,
+    beams: 8,
+    areas: 0,
+  });
 });
 
 const executable = process.env.OOFEM_BIN;

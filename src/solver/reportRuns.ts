@@ -8,12 +8,15 @@ export type ReportRun = {
   detail: string;
   summary?: RunSummary;
   warnings: string[];
-  mesh?: { nodes: number; beams: number; areas: number };
+  mesh?: { nodes: number; elements: number; beams: number; areas: number };
 };
 
 export function reportMesh(input: AnalysisInput) {
+  const counts = /^ndofman (\d+) nelem (\d+)/m.exec(input.deck);
+  if (!counts) return undefined;
   return {
-    nodes: input.nodes.length,
+    nodes: Number(counts[1]),
+    elements: Number(counts[2]),
     beams: input.elements.length,
     areas:
       input.panels?.mesh.elements.length ??
