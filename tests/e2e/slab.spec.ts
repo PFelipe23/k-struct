@@ -814,11 +814,11 @@ test("lança painéis espaciais, salva, reabre e verifica a parede sob a laje em
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem("kstruct.draft.v31") ?? "{}")
+          JSON.parse(localStorage.getItem("kstruct.draft.v32") ?? "{}")
             .schemaVersion,
       ),
     )
-    .toBe(31);
+    .toBe(32);
   expect(
     await page.evaluate(
       () =>

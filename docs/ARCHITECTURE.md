@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v31, migração v1 a v30, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v32, migração v1 a v31, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos por estação ou nó, combinação e componentes simultâneas    | `src/solver/envelopes.ts`    |
@@ -268,3 +268,11 @@ Na distribuição em duas direções, para uma borda de comprimento $L$ separada
 A atribuição compara cada borda receptora com o eixo de inserção das barras físicas, na mesma cota. Barras contínuas podem ultrapassar os cantos, e várias barras colineares podem completar uma borda. Cada parcela é recortada no intervalo da respectiva barra e orientada a partir de i. Lacunas e duas barras cobrindo o mesmo trecho impedem a aplicação. Painéis adjacentes somam suas cargas numa viga comum. Há bloqueio quando as áreas de material de dois painéis, ou de um painel e uma laje resistente, se sobrepõem na mesma cota. Aberturas, bordas compartilhadas e outros pavimentos são considerados na verificação.
 
 Os perfis lineares são gerados na exportação e compartilham a rotina de cargas por trecho com as ações manuais. As mudanças de inclinação entram na malha de todos os casos. As ações mantêm o padrão, o fator e o sinal ao passar para cada elemento e para os trechos rígidos. O balanço global usa separadamente a força $pA$ aplicada no centro do retângulo para verificar forças e momentos de reação. [Exemplo e verificações](VALIDATION.md#ks-47--distribuição-de-cargas-de-painel-às-vigas)
+
+## Cortes da estrutura
+
+O esquema v32 persiste em `sectionCuts` o ponto do plano, a normal, o semiespaço retido e o polo de redução, em coordenadas do projeto. A representação física independe dos números de elementos. A edição exclusiva dos cortes preserva a revisão dos resultados. Barras e superfícies são intersectadas novamente para cada geometria.
+
+A consulta usa as estações do caso efetivamente resolvido e integra os tensores de membrana e flexão de cada elemento na sua própria base. A regra de Gauss de dois pontos integra ao longo de cada trecho, inclusive o braço das forças. O cortante transversal de Kirchhoff parte da divergência do tensor de momentos. Seu integral e seu primeiro momento no traço são equilibrados com as ações externas e as reações do OOFEM. Nas duas lajes, as ações de contato da viga entram no equilíbrio individual de cada painel. Nas cascas dobradas, o sistema de equilíbrio projeta o resíduo sobre as normais dos painéis e as conormais dos traços. Uma decomposição singular impede o total. O momento fletor em torno da linha do corte continua vindo da integração do tensor elementar.
+
+O corpo retido inclui os pontos sobre o plano, dentro de 10⁻⁶ m. Em nó, salto ou aresta interna, a consulta usa a face adjacente ao lado descartado. Contato pontual é indicado como tangência. Coincidência com uma borda física, interface ou trecho de barra é indicada na prévia. Um trecho rígido com transferência nodal individual desconhecida também impede a soma. Os painéis tributários da KS-47 já contribuem pelas cargas das barras receptoras.

@@ -2890,3 +2890,21 @@ button.primary {
 .load-panel-footprint :is([data-receiver="BC"],[data-receiver="DA"]) polygon { fill-opacity: .23; }
 .load-panel-footprint text { text-anchor: middle; pointer-events: none; }
 .load-panel-plan { cursor: pointer; }
+
+.section-cuts-dialog { width: min(62rem, 96vw); }
+.section-cuts-dialog :is(footer,.cut-tools,.cut-coordinates) { display: flex; align-items: center; gap: .65rem; }
+.section-cuts-dialog > * + * { margin-top: .7rem; }
+.section-cuts-dialog .cut-layout { display: grid; grid-template-columns: minmax(15rem, 2fr) minmax(12rem, 3fr); gap: 1rem; }
+.section-cuts-dialog .cut-layout > section { display: grid; gap: .5rem; align-content: start; min-width: 0; }
+.cut-coordinates label, .cut-coordinates input { width: 100%; min-width: 0; }
+.section-cuts-dialog footer { justify-content: flex-end; }
+.section-cuts-dialog footer span { margin-right: auto; }
+.section-cuts-dialog caption { text-align: left; font-weight: 600; }
+.cut-preview { width: 100%; background: var(--surface-view); color: var(--text); }
+.cut-preview g { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.cut-preview g[data-hit="true"] { stroke: var(--accent); }
+.cut-preview g circle, .cut-plane { fill: var(--accent); }
+.cut-preview .cut-plane { fill-opacity: .11; stroke: var(--accent); stroke-dasharray: 4 3; }
+.cut-preview .cut-trace { stroke-width: 4; }
+.cut-preview text { fill: currentColor; font-size: 12px; }
+@media(max-width: 650px) { .section-cuts-dialog .cut-layout { grid-template-columns: 1fr; } }

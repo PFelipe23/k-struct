@@ -286,7 +286,7 @@ test("a tabela bloqueia o colapso da barra e aceita trocar os extremos em um lot
 
   const positions = () =>
     page.evaluate(() =>
-      JSON.parse(localStorage.getItem("kstruct.draft.v31")!).nodes.map(
+      JSON.parse(localStorage.getItem("kstruct.draft.v32")!).nodes.map(
         (n: { id: string; x: number }) => [n.id, n.x],
       ),
     );
@@ -1284,7 +1284,7 @@ test("gera ELU/ELS, revisa exclusões e edições, salva e usa a combinação na
   await page.getByRole("checkbox", { name: "ELU · Q1", exact: true }).check();
   await button("Aplicar definições").click();
   const stored = () =>
-    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v31")!));
+    page.evaluate(() => JSON.parse(localStorage.getItem("kstruct.draft.v32")!));
   await expect
     .poll(async () => (await stored()).resultCombinations.length)
     .toBe(4);
@@ -1710,4 +1710,60 @@ test("o extremo calculado do envelope recupera a combinação que governa entre 
     page.getByRole("table", { name: "Esforços na seção consultada" }),
   ).toHaveCount(0);
   await expect(page.locator(".section-cursor")).toHaveCount(0);
+});
+
+test("salva e reabre o corte físico, consulta os dois lados e invalida após edição do modelo", async ({
+  page,
+}) => {
+  await bridge(page);
+  await page.goto("/");
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await page.getByRole("button", { name: /Viga de referência/ }).click();
+  await button("Analisar").click();
+  await expect(page.getByRole("status")).toContainText("Análise concluída");
+  const open = async () => {
+    await button("Análise").click();
+    await button("Cortes da estrutura").click();
+  };
+  await open();
+  const dialog = page.getByRole("dialog", { name: "Cortes da estrutura" });
+  await dialog.getByLabel("Nome do corte").fill("S1");
+  await dialog.getByLabel("Ponto do plano X").fill("1,5");
+  await dialog.getByLabel("Ponto de redução O X").fill("1,5");
+  const total = dialog.getByRole("row", { name: /^Total/ });
+  await expect(total.getByRole("cell").nth(2)).toHaveText("-15");
+  await expect(dialog.locator('svg [data-object="V1"]')).toHaveAttribute(
+    "data-hit",
+    "true",
+  );
+  await dialog.getByLabel("Lado retido").selectOption("positive");
+  await expect(total.getByRole("cell").nth(2)).toHaveText("15");
+  await dialog.getByRole("button", { name: "Salvar corte" }).click();
+  await expect(total.getByRole("cell").nth(2)).toHaveText("15");
+  await dialog.getByRole("button", { name: "Fechar" }).click();
+  await button("Desfazer").click();
+  await button("Refazer").click();
+  await open();
+  await expect(total.getByRole("cell").nth(2)).toHaveText("15");
+  await dialog.getByRole("button", { name: "Fechar" }).click();
+  const stored = await page.evaluate(
+    () => localStorage.getItem("kstruct.draft.v32")!,
+  );
+  const project = parseProject(stored);
+  expect(project.sectionCuts![0]).toMatchObject({
+    name: "S1",
+    retained: "positive",
+    point: { x: 1.5 },
+  });
+  project.nodes[1].x = 1;
+  await openProjectInBrowser(
+    page,
+    "viga-editada.kstruct.json",
+    serializeProject(project),
+  );
+  await open();
+  await expect(dialog.getByText("Corte vazio.")).toBeVisible();
+  await expect(dialog.getByText(/Analise os casos pendentes/)).toBeVisible();
+  await expect(total).toHaveCount(0);
 });

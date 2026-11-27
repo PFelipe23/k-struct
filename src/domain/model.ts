@@ -807,7 +807,7 @@ const tributaryLoadSchema = z.strictObject({
   axis: z.enum(["X", "Y", "Z"]),
   pressure: finite,
 });
-export const projectSchema = projectV30.extend({
+const projectV31 = projectV30.extend({
   schemaVersion: z.literal(31),
   loadPanels: z.array(loadPanelSchema).max(100).optional(),
   loadPatterns: z
@@ -819,6 +819,23 @@ export const projectSchema = projectV30.extend({
     .min(1)
     .max(100),
 });
+const sectionCutSchema = z.strictObject({
+  id,
+  name: text,
+  point: panelPoint,
+  normal: panelPoint.refine((v) => {
+    const n = Math.hypot(v.x, v.y, v.z);
+    return Number.isFinite(n) && n > 0;
+  }, "A normal do corte deve ser não nula."),
+  retained: z.enum(["negative", "positive"]),
+  datum: panelPoint,
+});
+export const projectSchema = z.strictObject({
+  ...projectV31.shape,
+  schemaVersion: z.literal(32),
+  sectionCuts: z.array(sectionCutSchema).max(100).optional(),
+});
+export type SectionCut = z.infer<typeof sectionCutSchema>;
 export type LoadPanel = z.infer<typeof loadPanelSchema>;
 export type TributaryLoad = z.infer<typeof tributaryLoadSchema>;
 export type PressureDistribution = z.infer<typeof distribution>;
@@ -916,7 +933,7 @@ function defaultGuides(): Project["guides"] {
 export function createProject(mode: Project["mode"] = "planar"): Project {
   return {
     format: "kstruct",
-    schemaVersion: 31,
+    schemaVersion: 32,
     meshConnections: [],
     selectionGroups: [],
     id: uid(),
@@ -1416,6 +1433,15 @@ export function parseProject(source: string): Project {
     const old = projectV30.safeParse(value);
     if (old.success) value = { ...old.data, schemaVersion: 31 };
   }
+  if (
+    value &&
+    typeof value === "object" &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 31
+  ) {
+    const old = projectV31.safeParse(value);
+    if (old.success) value = { ...old.data, schemaVersion: 32 };
+  }
   const parsed = projectSchema.safeParse(value);
   if (!parsed.success) {
     const panelFactorIssue = parsed.error.issues.find(
@@ -1466,7 +1492,7 @@ export function parseProject(source: string): Project {
       );
     }
     throw new Error(
-      "Formato incompatível. Use um projeto KStruct da versão 1 à 31, com valores numéricos finitos.",
+      "Formato incompatível. Use um projeto KStruct da versão 1 à 32, com valores numéricos finitos.",
     );
   }
   normalizeSlabPressureVertices(parsed.data);
@@ -1490,6 +1516,7 @@ export function referenceErrors(p: Project): string[] {
   const errors: string[] = [];
   errors.push(...panelModelErrors(p), ...loadPanelErrors(p));
   for (const list of [
+    p.sectionCuts ?? [],
     p.loadPanels ?? [],
     p.surfacePanels ?? [],
     p.nodes,

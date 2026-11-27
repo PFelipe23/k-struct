@@ -10,14 +10,12 @@ import {
 import { add, scale, subtract, type Point3 } from "../domain/geometry";
 import { integrateTriangle } from "./areaIntegration";
 
-export function slabAreaLoads(
+export function slabPressureField(
   project: Project,
   analysisCase: AnalysisCase,
   slab: Slab,
-  mesh: SlabMesh,
+  z: number,
 ) {
-  const origin = mesh.nodes[0],
-    { centroid, area } = slabProperties(slab);
   let uniform = 0;
   const variable: ((p: Point3) => number)[] = [];
   for (const { patternId, factor } of analysisCase.factors) {
@@ -43,17 +41,33 @@ export function slabAreaLoads(
     const d = action.distribution;
     if (!d) uniform += factor * action.pz;
     else if (d.mode === "elevation")
-      uniform += factor * elevationPressure(d, origin.z);
+      uniform += factor * elevationPressure(d, z);
     else {
-      const at = pressureAt(
-        0,
-        d,
-        slabPressureVertices(slab, origin.z),
-        slab.polygon,
-      );
+      const at = pressureAt(0, d, slabPressureVertices(slab, z), slab.polygon);
       variable.push((p) => factor * at(p));
     }
   }
+  return {
+    uniform,
+    variable,
+    at: (p: Point3) => variable.reduce((v, f) => v + f(p), uniform),
+  };
+}
+
+export function slabAreaLoads(
+  project: Project,
+  analysisCase: AnalysisCase,
+  slab: Slab,
+  mesh: SlabMesh,
+) {
+  const origin = mesh.nodes[0],
+    { centroid, area } = slabProperties(slab);
+  const { uniform, variable, at } = slabPressureField(
+    project,
+    analysisCase,
+    slab,
+    origin.z,
+  );
   let totalLoadZ = uniform * area;
   const appliedMoment = {
     x: totalLoadZ * (centroid.y - origin.y),
@@ -65,7 +79,6 @@ export function slabAreaLoads(
       ? null
       : mesh.nodes.map(() => 0);
   if (nodalLoads) {
-    const at = (p: Point3) => variable.reduce((v, f) => v + f(p), uniform);
     if (!variable.length) {
       for (const el of mesh.elements) {
         const [a, b, c] = el.nodes.map((id) => mesh.nodes[id - 1]);

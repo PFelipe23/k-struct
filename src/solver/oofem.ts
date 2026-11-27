@@ -933,6 +933,16 @@ export function parseOofemOutput(
     if (f.length === (spatial ? 12 : 6)) forces.set(Number(m[1]), f);
   }
   const members: Record<string, Station[]> = {};
+  const floorNodes = new Set(input.floor?.traces.map((trace) => trace.beam));
+  const hasJump = (id: number) => {
+    const node = input.nodes[id - 1];
+    return (
+      node.objectId ||
+      node.master ||
+      node.pointLoadStation ||
+      floorNodes.has(id)
+    );
+  };
   for (const e of input.elements) {
     const f = forces.get(e.number);
     if (!f)
@@ -957,20 +967,10 @@ export function parseOofemOutput(
     };
     // Internal editable joints can exchange forces with loads, supports and other bars.
     if (!stations.length) stations.push(station(false));
-    else if (
-      input.nodes[e.start - 1].objectId ||
-      input.nodes[e.start - 1].master ||
-      input.nodes[e.start - 1].pointLoadStation
-    )
+    else if (hasJump(e.start))
       stations.push({ ...station(false), side: "right" });
     const end = station(true);
-    if (
-      e.t1 < 1 &&
-      (input.nodes[e.end - 1].objectId ||
-        input.nodes[e.end - 1].master ||
-        input.nodes[e.end - 1].pointLoadStation)
-    )
-      end.side = "left";
+    if (e.t1 < 1 && hasJump(e.end)) end.side = "left";
     stations.push(end);
   }
   const reactions: Reaction[] = [];

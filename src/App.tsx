@@ -1,3 +1,4 @@
+import { SectionCutsDialog } from "./components/SectionCutsDialog";
 import { LoadPanelDialog, newLoadPanel } from "./components/LoadPanelDialog";
 import {
   SurfacePanelDialog,
@@ -183,6 +184,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v32") ??
       localStorage.getItem("kstruct.draft.v31") ??
       localStorage.getItem("kstruct.draft.v30") ??
       localStorage.getItem("kstruct.draft.v29") ??
@@ -220,8 +222,16 @@ const initial = () => {
   }
   return createProject();
 };
+function sameAnalysisModel(a: Project, b: Project) {
+  return (
+    !!(a.sectionCuts || b.sectionCuts) &&
+    JSON.stringify({ ...a, sectionCuts: undefined }) ===
+      JSON.stringify({ ...b, sectionCuts: undefined })
+  );
+}
 export default function App() {
   const { units } = useUnits();
+  const [showCuts, setShowCuts] = useState(false);
   const [showUnits, setShowUnits] = useState(false);
   const [history, dispatch] = useReducer(historyReducer, undefined, () => ({
     past: [],
@@ -595,7 +605,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v31", serialized);
+      localStorage.setItem("kstruct.draft.v32", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -633,9 +643,10 @@ export default function App() {
         const errors = referenceErrors(next);
         if (errors.length) throw new Error(errors.join("\n"));
         if (serializeProject(next) !== serializeProject(current.current)) {
+          const preserve = sameAnalysisModel(current.current, next);
           current.current = next;
           dispatch({ type: "change", project: next });
-          invalidateResults();
+          if (!preserve) invalidateResults();
         }
         return null;
       } catch (e) {
@@ -873,14 +884,14 @@ export default function App() {
       return;
     }
     if (!history.past.length) return;
-    invalidateResults();
+    if (!sameAnalysisModel(p, history.past.at(-1)!)) invalidateResults();
     dispatch({ type: "undo" });
     setSelection([]);
     clearPlacement();
   };
   const redo = () => {
     if (!history.future.length) return;
-    invalidateResults();
+    if (!sameAnalysisModel(p, history.future[0])) invalidateResults();
     dispatch({ type: "redo" });
     setSelection([]);
     clearPlacement();
@@ -888,6 +899,7 @@ export default function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
+        showCuts ||
         loadEditor ||
         memberLoadDraft ||
         launchDialog === "materials" ||
@@ -1701,6 +1713,12 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
         )}
         {tab === "Análise" && (
           <>
+            <div className="ribbon-group">
+              <button className="tool-button" onClick={() => setShowCuts(true)}>
+                <Scissors size={21} />
+                <span>Cortes da estrutura</span>
+              </button>
+            </div>
             <div className="ribbon-group">
               <button
                 className="tool-button"
@@ -2706,6 +2724,17 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
             }
             setSettings(false);
           }}
+        />
+      )}
+      {showCuts && (
+        <SectionCutsDialog
+          project={p}
+          cases={caseResults}
+          initialSource={
+            combination ? "combination:" + combination.id : "case:" + caseId
+          }
+          edit={edit}
+          close={() => setShowCuts(false)}
         />
       )}
       {showRunHistory && (

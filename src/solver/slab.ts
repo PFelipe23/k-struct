@@ -38,6 +38,8 @@ export interface SlabResult {
   mesh: SlabMesh;
   nodes: SlabDisplacement[];
   elements: SlabSample[];
+  // Unsmoothened generalized bending tensor at each element vertex, in global XY.
+  bendingCorners?: { xx: number; yy: number; xy: number }[][];
   center: SlabSample;
   samplePoint: XY & { relocated: boolean };
   reactions: SlabReaction[];
@@ -145,11 +147,14 @@ function gaussMoments(
   offset: number,
   size?: number,
 ) {
-  const elements = new Map<number, { mx: number; my: number }[]>();
+  const elements = new Map<
+    number,
+    { mx: number; my: number; twist: number }[]
+  >();
   for (const element of raw.matchAll(
     /^element[ \t]+(\d+)[ \t]+\([ \t]*\d+\)[ \t]*:([\s\S]*?)(?=^element[ \t]+\d+|(?![\s\S]))/gm,
   )) {
-    const points = new Map<number, { mx: number; my: number }>();
+    const points = new Map<number, { mx: number; my: number; twist: number }>();
     const number = Number(element[1]) - offset;
     if (size !== undefined && (number < 1 || number > size)) continue;
     for (const match of element[2].matchAll(
@@ -166,7 +171,7 @@ function gaussMoments(
       )
         throw new Error(`Momentos inválidos no elemento ${number}.`);
       // The generalized stress entries 4 and 5 use the opposite of sagging-positive.
-      points.set(point, { mx: -stress[3], my: -stress[4] });
+      points.set(point, { mx: -stress[3], my: -stress[4], twist: stress[5] });
     }
     if (elements.has(number) || points.size !== count)
       throw new Error(`Momentos ausentes ou duplicados no elemento ${number}.`);
@@ -280,12 +285,23 @@ export function parseSlabOutput(
     elementOffset ?? 0,
     elementOffset !== undefined ? mesh.elements.length : undefined,
   );
+  const bendingCorners: NonNullable<SlabResult["bendingCorners"]> = [];
   const contributions = nodes.map(() => 0);
   const elements = mesh.elements.map(({ number, nodes: indices }) => {
     const gp = moments.get(number);
     if (!gp) throw new Error(`Momentos ausentes no elemento ${number}.`);
     const mx = gp.reduce((sum, point) => sum + point.mx / gp.length, 0);
     const my = gp.reduce((sum, point) => sum + point.my / gp.length, 0);
+    bendingCorners.push(
+      indices.map((_, vertex) => {
+        const weights = quad
+          ? quadCornerWeights[vertex]
+          : gp.map((_, i) => (i === vertex ? 2 : 0) - 1 / 3);
+        const field = (key: keyof (typeof gp)[number]) =>
+          weights.reduce((v, w, i) => v + w * gp[i][key], 0);
+        return { xx: -field("mx"), yy: -field("my"), xy: field("twist") };
+      }),
+    );
     let uz = 0;
     for (const [vertex, id] of indices.entries()) {
       const node = nodes[id - 1];
@@ -329,6 +345,7 @@ export function parseSlabOutput(
     mesh,
     nodes,
     elements,
+    bendingCorners,
     center,
     centroid: input.centroid,
     samplePoint,

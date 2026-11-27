@@ -44,6 +44,60 @@ function checkDirection(
       `${name} · ${panelKinds[kind]} não representa essa direção de carga. Use a formulação de casca ou altere a carga no referencial do painel.`,
     );
 }
+export function panelLoading(
+  p: Project,
+  analysisCase: AnalysisCase,
+  g: ReturnType<typeof panelAssembly>["panels"][number],
+) {
+  const panel = g.panel,
+    mat = p.materials.find((m) => m.id === panel.materialId)!;
+  const edges: { intensity: Point3; edge: number[] }[] = [];
+  let areaLoad = { ...origin };
+  const variable: { at: (p: Point3) => number; direction: Point3 }[] = [];
+  const levels: number[] = [];
+  const vertices = panelPressureVertices(g.corners);
+  for (const { patternId, factor } of analysisCase.factors) {
+    if (!factor) continue;
+    const pat = p.loadPatterns.find((v) => v.id === patternId)!;
+    const act = pat.panelActions?.find((v) => v.panelId === panel.id);
+    const label = `${panel.name} · ${pat.name}`;
+    if (pat.selfWeight.enabled) {
+      const weight = scale(
+        weightAcceleration(pat.selfWeight),
+        mat.density * panel.thickness,
+      );
+      checkDirection(
+        panel.kind,
+        inLocal(weight, g.axes),
+        label + " · peso próprio",
+      );
+      areaLoad = add(areaLoad, scale(weight, factor));
+    }
+    if (!act) continue;
+    const direction = pressureVector(act.direction, g.axes[2]);
+    if (act.distribution || act.pressure) {
+      checkDirection(
+        panel.kind,
+        inLocal(direction, g.axes),
+        label + " · carga superficial",
+      );
+      if (act.distribution) {
+        variable.push({
+          at: pressureAt(0, act.distribution, vertices),
+          direction: scale(direction, factor),
+        });
+        if (act.distribution.mode === "elevation")
+          levels.push(act.distribution.z0, act.distribution.z1);
+      } else areaLoad = add(areaLoad, scale(direction, factor * act.pressure));
+    }
+    checkDirection(panel.kind, act.traction, label + " · carga de borda");
+    edges.push({
+      intensity: scale(inGlobal(act.traction, g.axes), factor),
+      edge: g.edges[act.edge],
+    });
+  }
+  return { areaLoad, variable, levels, edges };
+}
 export function exportPanels(p: Project, analysisCase: AnalysisCase) {
   const mesh = panelAssembly(p);
   const datum = mesh.panels[0].panel.a;
@@ -64,8 +118,7 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
     sets.push(`Set ${sets.length + 1} nodes ${ids.length} ${ids.join(" ")}`);
   const records = panelSectionRecords(mesh, p.materials);
   for (const g of mesh.panels) {
-    const panel = g.panel,
-      mat = p.materials.find((m) => m.id === panel.materialId)!;
+    const panel = g.panel;
     // Allman interpolates the in-plane normal displacement on an edge with
     // a quadratic bubble times the difference of the two drilling rotations.
     const drill = (a: number, b: number, q: Point3, integral: number) => {
@@ -75,48 +128,12 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
       couples[g.ids[a] - 1] = add(couples[g.ids[a] - 1], pair);
       couples[g.ids[b] - 1] = subtract(couples[g.ids[b] - 1], pair);
     };
-    let areaLoad = { ...origin };
-    const variable: { at: (p: Point3) => number; direction: Point3 }[] = [];
-    const levels: number[] = [];
-    const vertices = panelPressureVertices(g.corners);
-    for (const { patternId, factor } of analysisCase.factors) {
-      if (!factor) continue;
-      const pat = p.loadPatterns.find((v) => v.id === patternId)!;
-      const act = pat.panelActions?.find((v) => v.panelId === panel.id);
-      const label = `${panel.name} · ${pat.name}`;
-      if (pat.selfWeight.enabled) {
-        const weight = scale(
-          weightAcceleration(pat.selfWeight),
-          mat.density * panel.thickness,
-        );
-        checkDirection(
-          panel.kind,
-          inLocal(weight, g.axes),
-          label + " · peso próprio",
-        );
-        areaLoad = add(areaLoad, scale(weight, factor));
-      }
-      if (!act) continue;
-      const direction = pressureVector(act.direction, g.axes[2]);
-      if (act.distribution || act.pressure) {
-        checkDirection(
-          panel.kind,
-          inLocal(direction, g.axes),
-          label + " · carga superficial",
-        );
-        if (act.distribution) {
-          variable.push({
-            at: pressureAt(0, act.distribution, vertices),
-            direction: scale(direction, factor),
-          });
-          if (act.distribution.mode === "elevation")
-            levels.push(act.distribution.z0, act.distribution.z1);
-        } else
-          areaLoad = add(areaLoad, scale(direction, factor * act.pressure));
-      }
-      checkDirection(panel.kind, act.traction, label + " · carga de borda");
-      const intensity = scale(inGlobal(act.traction, g.axes), factor),
-        edge = g.edges[act.edge];
+    const { areaLoad, variable, levels, edges } = panelLoading(
+      p,
+      analysisCase,
+      g,
+    );
+    for (const { edge, intensity } of edges) {
       const first = g.points[edge[0]],
         last = g.points[edge.at(-1)!];
       record(
@@ -343,7 +360,9 @@ export function readPanels(
           "Ponto de integração de painel duplicado ou inesperado.",
         );
       gps.add(gp);
-      const sample = byTriangle[source.triangle][gp - 1];
+      // Restore the physical triangle order for the cyclic material-frame connectivity.
+      const canonical = source.cyclic ? [1, 3, 4, 2][gp - 1] : gp;
+      const sample = byTriangle[source.triangle][canonical - 1];
       const stress = source.kind === "plate" ? undefined : tensor(point[2]);
       const moments = source.kind === "membrane" ? undefined : tensor(point[3]);
       const read = (fields: LocalSample, axes: Basis) => {
