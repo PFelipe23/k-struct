@@ -6,7 +6,7 @@
 
 | Camada            | Responsabilidade                                                    | Local                        |
 | ----------------- | ------------------------------------------------------------------- | ---------------------------- |
-| Domínio           | Formato v29, migração v1 a v28, geometria, validação e histórico    | `src/domain`                 |
+| Domínio           | Formato v30, migração v1 a v29, geometria, validação e histórico    | `src/domain`                 |
 | Adaptador         | Discretização, IDs, unidades e sinais, leitura da saída             | `src/solver/oofem.ts`        |
 | Combinações       | Superposição de deslocamentos, reações e esforços estáticos         | `src/solver/combinations.ts` |
 | Envelopes         | Extremos por estação ou nó, combinação e componentes simultâneas    | `src/solver/envelopes.ts`    |
@@ -240,3 +240,15 @@ A v29 acrescenta `angleDeg` e `stiffness` opcionais a `surfacePanels`. Um painel
 Para cada família, sejam $f_1$, $f_2$ e $f_{12}$ os três fatores e $Q_0=E/(1-ν^2)$. No referencial resistente, $Q_{11}=f_1Q_0$, $Q_{22}=f_2Q_0$, $Q_{12}=νQ_0\sqrt{f_1f_2}$ e $Q_{66}=f_{12}E/[2(1+ν)]$. A média geométrica no termo de Poisson preserva a simetria e a energia positiva. A membrana usa $A=hQ$ e a placa usa $D=h^3Q/12$ com seus respectivos fatores. O modelo é linear elástico, com superfície média homogênea, acoplamento membrana–flexão nulo e sem ajuste independente de cisalhamento transversal.
 
 O adaptador conserva a formulação isotrópica original quando todos os fatores valem um. Para membrana direcional usa Allman 3D com `OrthoLE`. Para flexão direcional usa DKT 3D com `AnisoLE` e `LayeredCS` homogênea, com dois pontos de Gauss na espessura. A transformação da rigidez para os eixos de cada triângulo inclui os termos de flexão–torção que surgem fora das direções principais. Na casca modificada, Allman e DKT compartilham os mesmos nós. As cargas e o peso próprio entram uma vez por painel físico. A saída reúne membrana e momentos por triângulo físico e ponto de integração e permite projetá-los nos dois referenciais.
+
+## Cargas superficiais variáveis
+
+A v30 admite uma direção e uma distribuição por painel e por padrão. Arquivos v29 conservam a pressão uniforme com sinal, em Pa, na normal geométrica para painéis espaciais e em Z para lajes de pavimento. O editor apresenta kN/m² por **área real da superfície**. A direção normal acompanha AB × AD, com sinal positivo para a face +3. As direções globais X, Y e Z acompanham o modelo, inclusive nas superfícies inclinadas. A rotação dos eixos resistentes altera a rigidez. A direção física da carga permanece vinculada à geometria ou ao eixo global escolhido.
+
+- **Uniforme.** Uma intensidade em todo o painel. Membranas aceitam cargas no plano, placas aceitam a direção normal e cascas aceitam ambas as componentes. Na laje horizontal, a normal e o eixo Z coincidem.
+- **Por cota.** Dois pares (Z, p) definem uma variação linear. As cotas são globais. Abaixo da cota inferior vale a primeira pressão e acima da superior vale a segunda. Uma extremidade com zero permite modelar a parte seca de uma parede. Uma laje horizontal recebe a intensidade da sua cota.
+- **Por vértice.** Em um paralelogramo a pressão é bilinear nas coordenadas da superfície definidas por AB e AD. A ordem é A, B, C, D. Nas lajes poligonais cada vértice do contorno externo e de cada abertura tem uma intensidade. A interpolação é linear em cada triângulo da triangulação original. Refino e conformação da borda comum preservam essa distribuição. Um vértice inserido numa borda ou numa nova abertura recebe a intensidade interpolada naquele ponto.
+
+Nos triângulos, o adaptador integra as funções de forma lineares contra a pressão. Para uma carga no plano, integra também o termo quadrático das rotações de furação do Allman. Os elementos que atravessam uma cota de mudança de inclinação são divididos para a integração, conservando os nós do modelo. A quadratura triangular de grau quatro cobre o produto da pressão bilinear pela função quadrática. Nos quadriláteros QDKT, as pressões variáveis usam as funções bilineares do elemento e a quadratura 2 × 2. A pressão uniforme do QDKT continua pela carga de superfície nativa.
+
+Os casos somam os padrões com seus fatores e acrescentam o peso próprio e as cargas de borda. A verificação usa a força e o primeiro momento da distribuição. Cargas com sinais contrários podem gerar um binário mesmo com resultante nula. O ponto A do primeiro painel espacial é a origem dos momentos exibidos. [Verificações numéricas](VALIDATION.md#ks-46--pressão-hidrostática-e-carga-superficial-variável)

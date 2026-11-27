@@ -28,6 +28,11 @@ import {
   parseUnitNumber,
   type UnitQuantity,
 } from "../units";
+import {
+  SurfacePressureFields,
+  readPressureForm,
+} from "./SurfacePressureFields";
+import { panelPressureVertices } from "../domain/surfacePressure";
 import { useUnits } from "./Units";
 
 export function newSurfacePanel(p: Project): SurfacePanel {
@@ -72,6 +77,7 @@ export function SurfacePanelDialog({
   }, []);
   const pat = project.loadPatterns.find((p) => p.id === patternId)!;
   const old = pat.panelActions?.find((a) => a.panelId === panel.id);
+  const vertices = panelPressureVertices(panelGeometry(panel).corners);
   const [error, setError] = useState("");
   const [kind, setKind] = useState(panel.kind);
   const [factors, setFactors] = useState(() =>
@@ -176,10 +182,12 @@ export function SurfacePanelDialog({
       else delete next.stiffness;
       panelGeometry(next);
       const t = old?.traction ?? origin;
+      const area = readPressureForm(data, units, vertices);
       const action: PanelAction = {
         panelId: panel.id,
         edge: txt("edge") as PanelEdge,
-        pressure: 1000 * num("pressure"),
+        pressure: area.uniform,
+        ...area.spec,
         traction: {
           x: num("tx", "distributedLoad", t.x),
           y: num("ty", "distributedLoad", t.y),
@@ -344,12 +352,16 @@ export function SurfacePanelDialog({
               ),
             )}
           </div>
-          {field(
-            "pressure",
-            "Pressão no sentido +3 (kN/m²)",
-            (old?.pressure ?? 0) / 1000,
-          )}
         </fieldset>
+        <SurfacePressureFields
+          vertices={vertices}
+          spec={old}
+          uniform={old?.pressure ?? 0}
+        />
+        <p>
+          Membrana aceita cargas tangentes, placa aceita cargas normais e casca
+          aceita ambas.
+        </p>
         {error && (
           <p role="alert" className="solver-error">
             {error}

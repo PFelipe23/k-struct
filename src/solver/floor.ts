@@ -8,7 +8,7 @@ import {
 } from "./floorTrace";
 import type { Project } from "../domain/model";
 import type { MeshNode, MeshElement } from "./oofem";
-import { cross2, type XY } from "../domain/slabPolygon";
+import type { XY } from "../domain/slabPolygon";
 import type { SlabDof } from "../domain/slab";
 import { parseSlabOutput } from "./slab";
 
@@ -263,14 +263,8 @@ export function floorRecords(
       bcs.push(
         `ConstantSurfaceLoad ${bcs.length + 1} loadTimeFunction 1 dofs 3 3 4 5 components 3 ${input.pressure} 0 0 csType 0 set ${set(`elementboundaries ${2 * ids.length} ${ids.map((id) => id + " 1").join(" ")}`)}`,
       );
-    if (input.pressure && !quad) {
-      const loads = mapping.map(() => 0);
-      for (const el of mesh.elements) {
-        const [a, b, c] = el.nodes.map((k) => mesh.nodes[k - 1]);
-        for (const k of el.nodes)
-          loads[k - 1] += (input.pressure * cross2(a, b, c)) / 6;
-      }
-      loads.forEach((v, i) =>
+    if (input.nodalLoads) {
+      input.nodalLoads.forEach((v, i) =>
         bcs.push(
           `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs 1 3 components 1 ${v} set ${set(`nodes 1 ${mapping[i]}`)}`,
         ),

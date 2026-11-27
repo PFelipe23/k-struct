@@ -1,10 +1,10 @@
 import { inspectSlabMesh } from "../domain/slabQuality";
 import { materialSample } from "../domain/polygonMesh";
-import { cross2, slabProperties, type XY } from "../domain/slabPolygon";
+import type { XY } from "../domain/slabPolygon";
 import type { AnalysisCase, Project, Slab } from "../domain/model";
 import { elasticMaterialRecord } from "./elasticMaterial";
 import { meshSlab, type SlabDof, type SlabMesh } from "../domain/slab";
-import { selfWeightSummary } from "../domain/selfWeight";
+import { slabAreaLoads } from "./slabAreaLoads";
 
 const slabDofs = [3, 4, 5] as const;
 interface SlabInput {
@@ -12,6 +12,7 @@ interface SlabInput {
   mesh: SlabMesh;
   totalLoadZ: number;
   centroid: XY;
+  appliedMoment: XY;
 }
 
 export interface SlabSample {
@@ -45,32 +46,6 @@ export interface SlabResult {
   centroid: XY;
 }
 
-export function slabPressure(
-  project: Project,
-  analysisCase: AnalysisCase,
-  definition: Slab,
-) {
-  return analysisCase.factors.reduce((sum, { patternId, factor }) => {
-    const pattern = project.loadPatterns.find(({ id }) => id === patternId)!;
-    if (factor === 0) return sum;
-    const manualPressure =
-      pattern.pressure.find(({ slabId }) => slabId === definition.id)?.pz ?? 0;
-    if (
-      pattern.selfWeight.enabled &&
-      !pattern.selfWeight.direction.endsWith("Z")
-    )
-      throw new Error(
-        `O padrão ${pattern.name} direciona o peso próprio fora do eixo Z, que não é suportado pelo painel horizontal ${definition.name}.`,
-      );
-    const automaticPressure = pattern.selfWeight.enabled
-      ? (selfWeightSummary(project, pattern).slabs.find(
-          ({ slabId }) => slabId === definition.id,
-        )?.pz ?? 0)
-      : 0;
-    return sum + (manualPressure + automaticPressure) * factor;
-  }, 0);
-}
-
 export function exportSlab(
   project: Project,
   analysisCase: AnalysisCase,
@@ -92,14 +67,7 @@ export function exportSlab(
       `Malha inválida em ${definition.name}, ${region} (X ${invalid.at.x} m, Y ${invalid.at.y} m). ${invalid.reason}.`,
     );
   }
-  const pressureZ = slabPressure(project, analysisCase, definition);
-  const { area, centroid } = slabProperties(definition);
-  const totalLoadZ = pressureZ * area;
-  if (!Number.isFinite(totalLoadZ))
-    throw new Error(
-      `A pressão do caso ${analysisCase.name} gera uma carga total fora do intervalo numérico.`,
-    );
-
+  const loads = slabAreaLoads(project, analysisCase, definition, mesh);
   const { nodes, elements } = mesh;
   const quad = definition.formulation === "qdkt";
   const conditions: string[] = [];
@@ -118,25 +86,18 @@ export function exportSlab(
         `BoundaryCondition ${conditions.length + 1} loadTimeFunction 1 dofs 1 ${dof} values 1 0 set ${nodeSet(fixed)}`,
       );
   }
-  if (quad && pressureZ !== 0) {
+  if (loads.pressure !== 0) {
     const set = sets.length + 1;
     sets.push(
       `Set ${set} elementboundaries ${2 * elements.length} ${elements.map(({ number }) => `${number} 1`).join(" ")}`,
     );
     conditions.push(
-      `ConstantSurfaceLoad ${conditions.length + 1} loadTimeFunction 1 dofs 3 3 4 5 components 3 ${pressureZ} 0 0 csType 0 set ${set}`,
+      `ConstantSurfaceLoad ${conditions.length + 1} loadTimeFunction 1 dofs 3 3 4 5 components 3 ${loads.pressure} 0 0 csType 0 set ${set}`,
     );
-  } else if (totalLoadZ !== 0) {
-    // DKT uses the linear transverse shape functions for loads: integral(Ni * qZ) = qZ * A / 3.
-    const nodalForces = nodes.map(() => 0);
-    for (const element of elements) {
-      const [a, b, c] = element.nodes.map((i) => nodes[i - 1]);
-      const perVertex = (pressureZ * cross2(a, b, c)) / 6;
-      for (const node of element.nodes) nodalForces[node - 1] += perVertex;
-    }
+  } else if (loads.nodalLoads) {
     for (const node of nodes)
       conditions.push(
-        `NodalLoad ${conditions.length + 1} loadTimeFunction 1 dofs 1 3 Components 1 ${nodalForces[node.number - 1]} set ${nodeSet([node.number])}`,
+        `NodalLoad ${conditions.length + 1} loadTimeFunction 1 dofs 1 3 Components 1 ${loads.nodalLoads[node.number - 1]} set ${nodeSet([node.number])}`,
       );
   }
   const deck = [
@@ -174,7 +135,7 @@ export function exportSlab(
   ].join("\n");
   return {
     deck,
-    slab: { definition, mesh, totalLoadZ, centroid } satisfies SlabInput,
+    slab: { definition, mesh, ...loads } satisfies SlabInput,
   };
 }
 
@@ -223,15 +184,11 @@ function slabReactions(
   input: SlabInput,
   reactionMap: ReadonlyMap<string, number>,
 ) {
-  const { totalLoadZ, mesh, centroid } = input;
+  const { totalLoadZ, mesh, appliedMoment } = input;
   const reactions: SlabReaction[] = [];
   // Take moments about the first mesh node to avoid sensitivity to the world origin.
   const origin = mesh.nodes[0];
-  const sum = [
-    totalLoadZ,
-    totalLoadZ * (centroid.y - origin.y),
-    -totalLoadZ * (centroid.x - origin.x),
-  ];
+  const sum = [totalLoadZ, appliedMoment.x, appliedMoment.y];
   const magnitudes = sum.map((value) => 1 + Math.abs(value));
   for (const node of mesh.nodes) {
     if (!node.restraints.length) continue;

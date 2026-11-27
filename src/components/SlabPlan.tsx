@@ -1,3 +1,9 @@
+import { PressureProjection } from "./PressureProjection";
+import {
+  pressureMarkers,
+  slabPressureVertices,
+  type PressureSpec,
+} from "../domain/surfacePressure";
 import { memo, useMemo } from "react";
 import type { MouseEvent } from "react";
 import type { Slab } from "../domain/model";
@@ -32,7 +38,7 @@ export default memo(function SlabPlan({
   active: boolean;
   labels: boolean;
   map: SlabMap | null;
-  pressure: number;
+  pressure?: PressureSpec & { pz: number };
   onClick: (event: MouseEvent<SVGGElement>) => void;
 }) {
   const { units } = useUnits();
@@ -143,6 +149,23 @@ export default memo(function SlabPlan({
           <title>Ponto de consulta</title>
         </circle>
       )}
+      {pressure?.distribution && !map && (
+        <PressureProjection
+          name={slab.name}
+          samples={pressureMarkers(
+            slabPressureVertices(slab, z),
+            0,
+            pressure.distribution,
+            slab.polygon,
+          )}
+          direction={{ x: 0, y: 0, z: 1 }}
+          u="x"
+          v="y"
+          facing={1}
+          sx={sx}
+          sy={sy}
+        />
+      )}
       {labels && !map && (
         <text
           x={sx(labelPoint.x)}
@@ -152,7 +175,11 @@ export default memo(function SlabPlan({
           className="node-label"
         >
           {slab.name}
-          {pressure !== 0 && ` · pZ ${formatResult(pressure / 1000)} kN/m²`}
+          {pressure?.pz
+            ? ` · pZ ${formatResult(pressure.pz / 1000)} kN/m²`
+            : pressure?.distribution
+              ? " · pZ variável"
+              : ""}
         </text>
       )}
     </g>

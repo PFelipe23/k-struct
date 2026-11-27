@@ -1,5 +1,5 @@
 import type { AnalysisCase, Project } from "../domain/model";
-import { slabProperties, type XY } from "../domain/slabPolygon";
+import type { XY } from "../domain/slabPolygon";
 import { meshSlab, type SlabMesh } from "../domain/slab";
 import { inspectSlabMesh } from "../domain/slabQuality";
 import { checkMeshBudget } from "../domain/slabSizing";
@@ -10,7 +10,7 @@ import {
 } from "../domain/slabJoint";
 import { beamMeshLayout } from "../domain/beamMesh";
 import { tolerance } from "../domain/geometry";
-import { slabPressure } from "./slab";
+import { slabAreaLoads } from "./slabAreaLoads";
 
 // Split boundary triangles against their original opposite vertex. The mesh on
 // the other side may come from a different formulation or sizing rule.
@@ -156,15 +156,11 @@ export function prepareFloor(p: Project, c: AnalysisCase) {
       throw new Error(
         `Malha inválida em ${definition.name}, elemento ${invalid.element}. ${invalid.reason}.`,
       );
-    const { area, centroid } = slabProperties(definition),
-      pressure = slabPressure(p, c, definition);
     return {
       definition,
       mesh,
       ordered,
-      totalLoadZ: pressure * area,
-      centroid,
-      pressure,
+      ...slabAreaLoads(p, c, definition, mesh),
     };
   });
   return {

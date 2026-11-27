@@ -1,3 +1,4 @@
+import { pressureValues } from "./surfacePressure";
 import { panelGeometry } from "./surfacePanel";
 import { slabProperties } from "./slabPolygon";
 import type { Project } from "./model";
@@ -139,7 +140,10 @@ export function selfWeightSummary(
     );
   });
   const matchingSlabLoads =
-    axis === "Z" && pattern.pressure.some((load) => load.pz !== 0);
+    axis === "Z" &&
+    pattern.pressure.some((load) =>
+      pressureValues(load.pz, load.distribution).some(Boolean),
+    );
   if (matchingMemberLoads || matchingPartialLoads || matchingSlabLoads)
     warnings.push(
       "Este padrão também contém cargas manuais na direção do peso próprio. Confira se elas não representam o mesmo peso.",

@@ -2870,3 +2870,7 @@ button.primary {
 .panel-plan-axes g text {
   fill: currentColor;
 }
+
+.pressure-projection { pointer-events: none; color: var(--geometry-load); }
+.pressure-projection :is(path, circle) { stroke: currentColor; stroke-width: 1.6px; }
+.pressure-projection path, .pressure-projection circle:not([fill]) { fill: none; }

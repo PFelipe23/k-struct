@@ -19,6 +19,12 @@ import {
   type Basis,
 } from "../domain/surfacePanel";
 import { weightAcceleration } from "../domain/selfWeight";
+import {
+  panelPressureVertices,
+  pressureAt,
+  pressureVector,
+} from "../domain/surfacePressure";
+import { integrateTriangle } from "./areaIntegration";
 import { panelSectionRecords } from "./panelSections";
 const values = (p: Point3) => [p.x, p.y, p.z];
 const components = (v: Point3) => values(v).join(" ");
@@ -70,6 +76,9 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
       couples[g.ids[b] - 1] = subtract(couples[g.ids[b] - 1], pair);
     };
     let areaLoad = { ...origin };
+    const variable: { at: (p: Point3) => number; direction: Point3 }[] = [];
+    const levels: number[] = [];
+    const vertices = panelPressureVertices(g.corners);
     for (const { patternId, factor } of analysisCase.factors) {
       if (!factor) continue;
       const pat = p.loadPatterns.find((v) => v.id === patternId)!;
@@ -88,12 +97,23 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
         areaLoad = add(areaLoad, scale(weight, factor));
       }
       if (!act) continue;
-      checkDirection(
-        panel.kind,
-        { ...origin, z: act.pressure },
-        label + " · pressão",
-      );
-      areaLoad = add(areaLoad, scale(g.axes[2], factor * act.pressure));
+      const direction = pressureVector(act.direction, g.axes[2]);
+      if (act.distribution || act.pressure) {
+        checkDirection(
+          panel.kind,
+          inLocal(direction, g.axes),
+          label + " · carga superficial",
+        );
+        if (act.distribution) {
+          variable.push({
+            at: pressureAt(0, act.distribution, vertices),
+            direction: scale(direction, factor),
+          });
+          if (act.distribution.mode === "elevation")
+            levels.push(act.distribution.z0, act.distribution.z1);
+        } else
+          areaLoad = add(areaLoad, scale(direction, factor * act.pressure));
+      }
       checkDirection(panel.kind, act.traction, label + " · carga de borda");
       const intensity = scale(inGlobal(act.traction, g.axes), factor),
         edge = g.edges[act.edge];
@@ -122,6 +142,25 @@ export function exportPanels(p: Project, analysisCase: AnalysisCase) {
           tri[(k + 1) % 3],
           areaLoad,
           g.area / (24 * g.triangles.length),
+        );
+      }
+    if (variable.length)
+      for (const tri of g.triangles) {
+        integrateTriangle(
+          tri.map((i) => g.points[i]),
+          levels,
+          (shape, point, dA) => {
+            let density = { ...origin };
+            for (const load of variable)
+              density = add(density, scale(load.direction, load.at(point)));
+            const f = scale(density, dA);
+            record(f, point);
+            for (const [i, j] of tri.entries()) {
+              apply(g.ids[j], scale(f, shape[i]));
+              const next = (i + 1) % 3;
+              drill(j, tri[next], f, (shape[i] * shape[next]) / 2);
+            }
+          },
         );
       }
   }

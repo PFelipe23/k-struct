@@ -181,6 +181,7 @@ const initialPlanes = (levelId = ""): Record<PlanePanel, PlaneChoice> => ({
 const initial = () => {
   try {
     const cached =
+      localStorage.getItem("kstruct.draft.v30") ??
       localStorage.getItem("kstruct.draft.v29") ??
       localStorage.getItem("kstruct.draft.v28") ??
       localStorage.getItem("kstruct.draft.v27") ??
@@ -588,7 +589,7 @@ export default function App() {
     dirty = serialized !== saved;
   useEffect(() => {
     try {
-      localStorage.setItem("kstruct.draft.v29", serialized);
+      localStorage.setItem("kstruct.draft.v30", serialized);
     } catch {
       setMessage(
         "Não foi possível guardar o rascunho automático. Salve o projeto em arquivo.",
@@ -2533,6 +2534,7 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
                 );
                 if (
                   action.pressure ||
+                  action.distribution ||
                   Object.values(action.traction).some(Boolean)
                 )
                   actions.push(action);

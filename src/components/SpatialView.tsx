@@ -1,3 +1,11 @@
+import { slabProperties } from "../domain/slabPolygon";
+import {
+  panelPressureVertices,
+  slabPressureVertices,
+  pressureMarkers,
+  pressureVector,
+  directionNames,
+} from "../domain/surfacePressure";
 import {
   inGlobal,
   panelEdges,
@@ -612,6 +620,7 @@ export default function SpatialView({
           ),
         );
       }
+      let areaLabel = "";
       const action = pattern?.panelActions?.find((a) => a.panelId === panel.id);
       if (layers.loads && action) {
         const k = panelEdges.indexOf(action.edge),
@@ -625,19 +634,49 @@ export default function SpatialView({
             span,
             "force",
           );
-        if (action.pressure)
+        const dir = pressureVector(action.direction, axes[2]);
+        if (action.distribution) {
+          const samples = pressureMarkers(
+            panelPressureVertices(corners),
+            0,
+            action.distribution,
+          );
+          const maximum = Math.max(0, ...samples.map((v) => Math.abs(v.value)));
+          for (const { point, value } of samples)
+            if (value)
+              drawPointAction(
+                s.model,
+                s.materials.load,
+                scenePoint(point),
+                scale(dir, Math.sign(value)),
+                span,
+                "force",
+                Math.abs(value) / maximum,
+              );
+          const values = samples.map((v) => v.value / 1000);
+          areaLabel =
+            directionNames[action.direction ?? "normal"] +
+            " · " +
+            formatResult(Math.min(...values)) +
+            " a " +
+            formatResult(Math.max(...values)) +
+            " kN/m²";
+        } else if (action.pressure)
           drawPointAction(
             s.model,
             s.materials.load,
             center,
-            scale(axes[2], action.pressure),
+            scale(dir, action.pressure),
             span,
             "force",
           );
       }
-      if (layers.labels)
+      if (layers.labels || areaLabel)
         annotate(s.model, center, [
-          panel.name + " · " + panelKinds[panel.kind],
+          ...(layers.labels
+            ? [panel.name + " · " + panelKinds[panel.kind]]
+            : []),
+          ...(areaLabel ? [areaLabel] : []),
         ]);
       if (!showPanelAxes) continue;
       const normal = scenePoint(axes[2]);
@@ -682,15 +721,46 @@ export default function SpatialView({
           : s.materials.slab,
       );
       s.model.add(surface);
-      const pressure =
-        layers.loads &&
-        pattern?.pressure.find((load) => load.slabId === slab.id)?.pz;
+      const action = layers.loads
+        ? pattern?.pressure.find((load) => load.slabId === slab.id)
+        : undefined;
+      let pressureLabel = action?.pz
+        ? "PZ " + formatResult(action.pz / 1000) + " kN/m²"
+        : "";
+      if (action?.distribution) {
+        const samples = pressureMarkers(
+          slabPressureVertices(slab, z),
+          0,
+          action.distribution,
+          slab.polygon,
+        );
+        const values = samples.map((s) => s.value),
+          maximum = Math.max(0, ...values.map(Math.abs));
+        pressureLabel =
+          "PZ " +
+          formatResult(Math.min(...values) / 1000) +
+          " a " +
+          formatResult(Math.max(...values) / 1000) +
+          " kN/m²";
+        const span = Math.sqrt(slabProperties(slab).area);
+        for (const { point, value } of samples)
+          if (value)
+            drawPointAction(
+              s.model,
+              s.materials.load,
+              scenePoint(point),
+              { x: 0, y: 0, z: Math.sign(value) },
+              span,
+              "force",
+              Math.abs(value) / maximum,
+            );
+      }
       annotate(
         s.model,
         surface.position,
         [
           ...(layers.labels ? [slab.name] : []),
-          ...(pressure ? [`PZ ${formatResult(pressure / 1000)} kN/m²`] : []),
+          ...(pressureLabel ? [pressureLabel] : []),
         ],
         selectedIds.has(`slab:${slab.id}`),
       );

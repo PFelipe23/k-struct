@@ -80,6 +80,12 @@ export function SurfacePanelResults({
               </select>
             </label>
             <p>
+              Força aplicada em XYZ ({units.force}) ·{" "}
+              {vec(result.applied, "force")}
+              <br />
+              Momento aplicado em XYZ ({units.moment}) ·{" "}
+              {vec(result.appliedMoment, "moment")}
+              <br />
               Resultante dos apoios em XYZ ({units.force}) ·{" "}
               {vec(result.force, "force")}
               <br />
