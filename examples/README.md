@@ -31,3 +31,7 @@ Abra o modelo e clique em **Analisar**. Em **Resultados dos painéis espaciais**
 ## Pórtico com painel de carga
 
 Abra o exemplo e clique em **PC1 · Painel de carga**. O painel mede 6 × 4 m e aplica −5 kN/m² em Z. Em **Duas direções**, V1 e V3 recebem −40 kN cada, e V2 e V4 recebem −20 kN cada. Expanda **Cargas lineares por trecho** para consultar os valores ao longo das vigas. Em **Uma direção · vão AD**, V1 e V3 passam a receber −60 kN cada. Aplique e clique em **Analisar** para conferir os +30 kN em cada um dos quatro apoios. [Projeto](portico-painel-de-carga.kstruct.json) · [Referência analítica](../docs/VALIDATION.md#ks-47--distribuição-de-cargas-de-painel-às-vigas)
+
+## Comparação estática P–Δ
+
+Abra a [coluna articulada com mola](p-delta-coluna.kstruct.json) no KStruct desktop e selecione **Análise → Análise P–Δ**. Use **Gravidade** como pré-carga e **Incremento horizontal** para a ação lateral. Em **Comparar primeira ordem e P–Δ**, confira UX do topo de 10 mm e 12,5 mm. Para repetir o exercício em três barras, abra o [pórtico com engastes](p-delta-portico.kstruct.json). Use a mesma seleção de casos e compare malhas com 2, 8 e 16 elementos por barra. [Referências e tolerâncias](../docs/VALIDATION.md#ks-61--comparação-estática-pδ)

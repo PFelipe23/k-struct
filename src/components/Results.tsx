@@ -67,6 +67,7 @@ export function buildResultTable(
   forceMemberId = "",
   units: UnitPreferences = DEFAULT_UNITS,
   view?: ResultView,
+  includeStationSides = reportsSectionSides(project),
 ) {
   const spatial = project.mode === "spatial";
   const modelMembers = new Map(project.members.map((m) => [m.id, m]));
@@ -201,7 +202,6 @@ export function buildResultTable(
     const visible = project.members.filter(
       (m) => !forceMemberId || m.id === forceMemberId,
     );
-    const includeSide = reportsSectionSides(project);
     const positions = sectionPositions(project, visible, units);
     headers = [
       "Barra",
@@ -210,7 +210,7 @@ export function buildResultTable(
         const { symbol, unit } = getForceLabel(key, units);
         return `${symbol} (${unit})`;
       }),
-      ...(includeSide ? ["Lado da seção", "ID da barra"] : []),
+      ...(includeStationSides ? ["Lado da seção", "ID da barra"] : []),
       ...positions.headers,
     ];
     rows = Object.entries(result?.members ?? {})
@@ -220,7 +220,7 @@ export function buildResultTable(
           memberNames.get(id) ?? id,
           s.t,
           ...components.map((key) => fromSI(s[key], forceQuantity(key), units)),
-          ...(includeSide ? [sectionSide(s.side), id] : []),
+          ...(includeStationSides ? [sectionSide(s.side), id] : []),
           ...positions.values(id, s.t),
         ]),
       );

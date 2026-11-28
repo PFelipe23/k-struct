@@ -143,6 +143,7 @@ import EnvelopeResults, {
 } from "./components/EnvelopeResults";
 import SolverSettings from "./components/SolverSettings";
 import RunHistory from "./components/RunHistory";
+import { PDeltaDialog } from "./components/PDeltaDialog";
 import LoadDefinitions, {
   type LoadDefinitionsPage,
 } from "./components/LoadDefinitions";
@@ -362,6 +363,7 @@ export default function App() {
     null,
   );
   const [showRunHistory, setShowRunHistory] = useState(false);
+  const [showPDelta, setShowPDelta] = useState(false);
   const [message, setMessage] = useState(
     "Pronto para modelar. Selecione Barra (B) e marque duas extremidades no plano de trabalho.",
   );
@@ -908,7 +910,8 @@ export default function App() {
         launchDialog === "selection" ||
         settings ||
         confirmation ||
-        showRunHistory
+        showRunHistory ||
+        showPDelta
       )
         return;
       if (launchDialog) {
@@ -1756,6 +1759,14 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
             </div>
             {desktop() && (
               <div className="ribbon-group">
+                <button
+                  className="tool-button"
+                  onClick={() => setShowPDelta(true)}
+                  disabled={running || !!runLock.current}
+                >
+                  <MoveUpRight size={21} />
+                  <span>Análise P–Δ</span>
+                </button>
                 <button
                   className="tool-button"
                   aria-label="Histórico de análises"
@@ -2735,6 +2746,16 @@ Equilíbrio global verificado. ${outcome.result.panels ? "Consulte os deslocamen
           }
           edit={edit}
           close={() => setShowCuts(false)}
+        />
+      )}
+      {showPDelta && (
+        <PDeltaDialog
+          project={p}
+          executable={executable}
+          revision={modelRevision.current}
+          modelRevision={modelRevision}
+          onLog={setLastLog}
+          onClose={() => setShowPDelta(false)}
         />
       )}
       {showRunHistory && (

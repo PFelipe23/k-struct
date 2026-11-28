@@ -77,6 +77,24 @@ export async function analyze(
   onStarted: () => void,
 ) {
   const input = exportOofem(p, caseId);
+  const execution = await executeAnalysis(
+    input.deck,
+    executable,
+    {
+      runId,
+      projectName: p.name,
+      caseName: p.analysisCases.find((item) => item.id === caseId)!.name,
+    },
+    onStarted,
+  );
+  return { execution, input };
+}
+export async function executeAnalysis(
+  deck: string,
+  executable: string,
+  runContext: RunContext,
+  onStarted: () => void,
+) {
   if (!desktop())
     throw new Error(
       "Execute o KStruct desktop para usar o OOFEM instalado neste computador. No navegador, você pode editar e exportar o modelo.",
@@ -86,17 +104,13 @@ export async function analyze(
     response.onmessage = resolve;
   });
   await invoke("start_oofem", {
-    deck: input.deck,
+    deck,
     executable: executable || null,
-    runContext: {
-      runId,
-      projectName: p.name,
-      caseName: p.analysisCases.find((item) => item.id === caseId)!.name,
-    },
+    runContext,
     response,
   });
   onStarted();
-  return { execution: await completed, input };
+  return completed;
 }
 export function cancelAnalysis(runId: string) {
   return invoke<boolean>("cancel_oofem", { runId });

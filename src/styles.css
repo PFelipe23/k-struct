@@ -2079,6 +2079,52 @@ button.primary {
   width: min(920px, calc(100vw - 48px));
 }
 
+.p-delta-dialog {
+  width: min(920px, calc(100vw - 24px));
+  color: var(--text);
+}
+
+.p-delta-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+  padding: 0;
+  border: 0;
+}
+
+.p-delta-controls label {
+  display: grid;
+  gap: 4px;
+}
+
+.p-delta-table {
+  overflow: auto;
+  max-height: 20rem;
+  margin-block: 12px;
+}
+
+.p-delta-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.p-delta-table th,
+.p-delta-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.p-delta-table th {
+  background: var(--surface-results);
+}
+
+.p-delta-table td {
+  text-align: right;
+}
+
 .run-history-grid {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);

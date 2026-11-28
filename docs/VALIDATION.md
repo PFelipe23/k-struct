@@ -799,3 +799,41 @@ OOFEM 3.0, revisão `214b161`. Os ensaios em `tests/section-cuts.test.ts` usam a
 A consulta bloqueia o total em coincidências físicas, em decomposições indeterminadas ou com parcela elementar ausente. Os testes cobrem a reabertura do corte salvo, reavaliação da geometria, tolerância em arestas internas, ponto tangente e corte vazio. O teste de interface usa uma saída de viga capturada do OOFEM.
 
 A recuperação de cortante por equilíbrio do tensor fletor também pode ser consultada no [código do DKT do OOFEM 3.0](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/src/sm/Elements/Plates/dkt.C).
+
+## KS-61 — Comparação estática P–Δ
+
+O caso `pdelta01.in` do commit `214b161ed3acb471f2d0104b004c37fd73bafaa2` foi executado no OOFEM 3.0 antes da integração. Com `maxiter 1` e `rtolv 0.001`, o próprio caso imprime um deslocamento de 0,771430584 m, mas registra erro relativo 0,4939272 e encerra a análise gravando resultados. A comparação do KStruct usa a matriz geométrica concentrada de `Beam2d` e `Beam3d`, resolve a parcela elástica no OOFEM e verifica o resíduo das forças geométricas a cada passo. [Entrada original](https://github.com/oofem/oofem/blob/214b161ed3acb471f2d0104b004c37fd73bafaa2/tests/sm/pdelta01.in) · [Formulação e alcance](ARCHITECTURE.md#análise-estática-pδ-ks-61)
+
+### Coluna gravitacional com mola
+
+No [projeto de exemplo](../examples/p-delta-coluna.kstruct.json), a coluna `Beam2d` tem 3 m. A base restringe UX e UZ, com RY livre. O topo tem RY e UZ livres e UX ligado a uma mola horizontal `Spring` de 1.000 kN/m, com translação da outra extremidade fixada. Os momentos de extremidade do modelo são livres. `Gravidade` aplica −600 kN em Z no topo. `Incremento horizontal` acrescenta +10 kN em X. Dessa forma, a carga vertical é constante durante o movimento lateral e o esforço axial de partida em todos os elementos é −600 kN.
+
+| Grandeza | Primeira ordem | P–Δ | Referência P–Δ |
+| --- | ---: | ---: | ---: |
+| UX do topo (mm) | 10 | 12,5 | 10.000/(1.000.000 − 600.000/3) = 0,0125 m |
+| Amplificação de UX | 1 | 1,25 | 1/(1 − P/(kh)) |
+| RX na base (kN) | 0 | +2,5 | PΔ/h |
+| RX na mola (kN) | −10 | −12,5 | −kΔ |
+| RZ na base (kN) | +600 | +600 | P |
+| Momento geométrico em Y na base (kN·m) | 0 | +7,5 | PΔ |
+
+O corpo livre fornece `10 kN − 12,5 kN + 2,5 kN = 0` e `(10 kN − 12,5 kN) × 3 m + 600 kN × 0,0125 m = 0`. `p-delta.integration.test.ts` verifica UX até 5 nm, amplificação até 5 × 10⁻⁷, o momento geométrico até 0,005 N·m e a reação da base em X até 0,5 N. Com P = 0, deslocamentos, esforços e reações coincidem com o resultado linear. Em 3D, uma segunda mola de 2.000 kN/m e +10 kN em Y acrescentam UY = 5,55556 mm, mantendo UX = 12,5 mm. Os casos também verificam o bloqueio de padrões repetidos e de peso próprio duplicado.
+
+### Pórtico e convergência
+
+O [pórtico de exemplo](../examples/p-delta-portico.kstruct.json) tem duas colunas engastadas de 3 m, travessa de 4 m, E = 200 GPa e seções de 0,4 × 0,4 m. Cada topo recebe P = 600 kN e H = 10 kN. A [referência independente](../examples/p-delta-referencia.py) monta as matrizes elásticas de Euler–Bernoulli e a matriz geométrica consistente obtida das derivadas das funções de Hermite. Resolve o sistema somado diretamente, com 64 elementos por barra. Para reproduzir, execute `python examples/p-delta-referencia.py` com NumPy.
+
+| Elementos por barra | UX de topo P–Δ (mm) |
+| --- | ---: |
+| 2 | 0,081989099 |
+| 8 | 0,082000731 |
+| 16 | 0,082001441 |
+| Referência independente | 0,082001681 |
+
+O erro a 16 elementos é 0,000000240 mm, abaixo da tolerância de 0,0000005 mm. Com 16 elementos, um passo lateral e três passos iguais concordam dentro de 0,0000005 mm. A rigidez congelada é comum aos passos. O refinamento aproxima a variação do deslocamento transversal ao longo das barras.
+
+### Interrupção e revisão
+
+Com a coluna e P = 3.000 kN, a rigidez lateral nominal `k − P/h` é nula. Com limite de quatro iterações, a condição de equilíbrio P–Δ do passo 1 não é atingida, e o resultado preserva o passo 0 com apenas a gravidade. A interface mostra a parada e identifica o último passo convergido. A comparação não calcula uma carga crítica e a convergência do processo não detecta modos instáveis que a carga aplicada não excite.
+
+Os testes incluem cancelamento durante uma chamada ao motor. A janela do desktop cancela o processo ativo pelo ID e o adaptador descarta a resposta se a revisão mudou. O teste de interface com `OOFEM_BIN` usa a saída do executável para cada entrada recebida na fronteira IPC e percorre os resultados e a interrupção por limite de iterações.

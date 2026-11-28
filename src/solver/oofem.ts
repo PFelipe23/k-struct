@@ -37,6 +37,7 @@ import {
   defaultEndConnection,
   nodalLoad,
   projectSchema,
+  type AnalysisCase,
   type Project,
 } from "../domain/model";
 import {
@@ -108,6 +109,7 @@ export interface AnalysisInput {
   slab?: ReturnType<typeof exportSlab>["slab"];
   floor?: FloorInput;
   panels?: PanelInput;
+  equivalentForces?: ReadonlyMap<number, Point3>;
 }
 export interface Displacement {
   ux: number;
@@ -162,12 +164,20 @@ const spatialDofs = [
 ] as const;
 const planarDofs = [spatialDofs[0], spatialDofs[2], spatialDofs[4]];
 
-export function exportOofem(project: Project, caseId: string): AnalysisInput {
+export function exportOofem(
+  project: Project,
+  caseId: string,
+  options?: {
+    factors: AnalysisCase["factors"];
+    equivalentForces?: ReadonlyMap<number, Point3>;
+  },
+): AnalysisInput {
   const p = projectSchema.parse(project);
-  const errors = analysisErrors(p);
-  if (errors.length) throw new Error(errors.join("\n"));
   const analysisCase = p.analysisCases.find((c) => c.id === caseId);
   if (!analysisCase) throw new Error("Caso de análise inexistente.");
+  if (options) analysisCase.factors = options.factors;
+  const errors = analysisErrors(p);
+  if (errors.length) throw new Error(errors.join("\n"));
   if (p.surfacePanels?.length) {
     const { deck, data } = exportPanels(p, analysisCase);
     return {
@@ -400,6 +410,12 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     );
     bcs.push(
       `NodalLoad ${bcs.length + 1} loadTimeFunction 1 dofs ${dofList} Components ${values.length} ${values.join(" ")}${frames.has(nodes[number - 1].objectId ?? "") || nodes[number - 1].connection ? " cstype 0" : ""} set ${set(`nodes 1 ${number}`)}`,
+    );
+  }
+  for (const [number, force] of options?.equivalentForces ?? []) {
+    addNodalLoad(
+      number,
+      spatial ? [force.x, force.y, force.z, 0, 0, 0] : [force.x, force.z, 0],
     );
   }
   for (const [memberId, field] of temperatures) {
@@ -730,6 +746,7 @@ export function exportOofem(project: Project, caseId: string): AnalysisInput {
     project: p,
     caseId,
     memberIntensities,
+    equivalentForces: options?.equivalentForces,
     ...(floor ? { floor: floor.data } : {}),
   };
 }
@@ -746,6 +763,10 @@ function numberList(line: string) {
 export function parseOofemOutput(
   rawOutput: string,
   input: AnalysisInput,
+  captureMesh?: (
+    displacements: ReadonlyMap<number, Displacement>,
+    axial: ReadonlyMap<number, number>,
+  ) => void,
 ): AnalysisResult {
   if (
     !/^Finishing analysis on:/m.test(rawOutput) ||
@@ -933,10 +954,12 @@ export function parseOofemOutput(
     if (f.length === (spatial ? 12 : 6)) forces.set(Number(m[1]), f);
   }
   const members: Record<string, Station[]> = {};
+  const axial = captureMesh && new Map<number, number>();
   const floorNodes = new Set(input.floor?.traces.map((trace) => trace.beam));
   const hasJump = (id: number) => {
     const node = input.nodes[id - 1];
     return (
+      captureMesh ||
       node.objectId ||
       node.master ||
       node.pointLoadStation ||
@@ -947,6 +970,7 @@ export function parseOofemOutput(
     const f = forces.get(e.number);
     if (!f)
       throw new Error(`Esforços ausentes no elemento de análise ${e.number}.`);
+    axial?.set(e.number, (f[spatial ? 6 : 3] - f[0]) / 2);
     const stations = (members[e.memberId] ??= []);
     const station = (end: boolean): Station => {
       const t = end ? e.t1 : e.t0;
@@ -1047,7 +1071,12 @@ export function parseOofemOutput(
     reactions,
     printedLocalReactions,
     floor?.stations,
+    Array.from(input.equivalentForces ?? [], ([number, force]) => ({
+      point: input.nodes[number - 1],
+      force,
+    })),
   );
+  if (axial) captureMesh?.(d, axial);
   return {
     ...metadata,
     displacements: Object.fromEntries(
@@ -1076,6 +1105,7 @@ export function checkEquilibrium(
   reactions: Reaction[],
   printedLocalReactions: readonly Reaction[] = [],
   beamTransfers: readonly { point: Point3; beamForce: number }[] = [],
+  equivalentForces: readonly { point: Point3; force: Point3 }[] = [],
 ) {
   const sum = [0, 0, 0, 0, 0, 0];
   const magnitudes = [1, 1, 1, 1, 1, 1];
@@ -1132,6 +1162,8 @@ export function checkEquilibrium(
     );
   for (const station of beamTransfers)
     accumulate({ x: 0, y: 0, z: station.beamForce }, origin, station.point);
+  for (const { point, force } of equivalentForces)
+    accumulate(force, origin, point);
   for (const r of reactions) {
     accumulateNodal(r, 1);
   }
